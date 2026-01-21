@@ -305,7 +305,6 @@ impl FromStr for NextHopKey {
 mod tests {
     use super::*;
     use std::net::Ipv4Addr;
-    use sonic_types::Ipv4Address;
 
     #[test]
     fn test_nexthop_key_new() {

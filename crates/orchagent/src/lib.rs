@@ -29,6 +29,7 @@
 pub mod daemon;
 pub mod flex_counter;
 pub mod orch;
+pub mod ports;
 pub mod route;
 
 // Re-export commonly used types
@@ -52,4 +53,11 @@ pub use route::{
     NextHopFlags, NextHopGroupEntry, NextHopGroupKey, NextHopGroupTable, NextHopKey,
     RouteEntry, RouteError, RouteKey, RouteNhg, RouteOrch, RouteOrchCallbacks, RouteOrchConfig,
     RouteTables, register_route_orch, unregister_route_orch,
+};
+
+// Re-export PortsOrch and related types
+pub use ports::{
+    Port, PortAdminState, PortConfig, PortConfigError, PortFecMode, PortOperState,
+    PortRole, PortsOrch, PortsOrchCallbacks, PortsOrchConfig, PortsOrchError, PortType,
+    QueueInfo, QueueType, SchedulerInfo, register_ports_orch, unregister_ports_orch,
 };
