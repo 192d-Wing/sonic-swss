@@ -1,0 +1,47 @@
+[package]
+name = "sonic-orchagent"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+edition.workspace = true
+description = "SONiC orchagent - Switch orchestration daemon"
+
+[[bin]]
+name = "orchagent"
+path = "src/main.rs"
+
+[lib]
+name = "sonic_orchagent"
+path = "src/lib.rs"
+
+[dependencies]
+sonic-types = { path = "../sonic-types" }
+sonic-sai = { path = "../sonic-sai" }
+sonic-orch-common = { path = "../sonic-orch-common" }
+sonic-ffi-bridge = { path = "../sonic-ffi-bridge" }
+swss-common = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["full"] }
+async-trait.workspace = true
+clap.workspace = true
+log.workspace = true
+env_logger.workspace = true
+thiserror.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+tempfile.workspace = true
+
+[features]
+default = []
+# Enable when C++ orchagent code is linked
+cpp-interop = ["sonic-ffi-bridge/cpp-link"]
+# Enable when swss-common native library is available
+swss = ["swss-common", "sonic-orch-common/swss"]
+
+[lints]
+workspace = true

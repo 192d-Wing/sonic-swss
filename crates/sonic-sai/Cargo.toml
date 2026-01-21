@@ -1,0 +1,30 @@
+[package]
+name = "sonic-sai"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+edition.workspace = true
+description = "Safe Rust bindings for SAI (Switch Abstraction Interface)"
+build = "build.rs"
+
+[dependencies]
+sonic-types = { path = "../sonic-types" }
+thiserror.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+
+[build-dependencies]
+# bindgen = "0.70"  # Uncomment when SAI headers are available
+
+[features]
+default = []
+# Enable this feature when SAI headers are available for bindgen
+# generate-bindings = ["bindgen"]
+
+[lints]
+workspace = true

@@ -1,0 +1,27 @@
+[package]
+name = "sonic-ffi-bridge"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+edition.workspace = true
+description = "FFI bridge for C++/Rust interop during SONiC orchagent migration"
+
+[dependencies]
+sonic-types = { path = "../sonic-types" }
+sonic-sai = { path = "../sonic-sai" }
+log.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+
+[features]
+default = []
+# Enable when C++ libraries are available for linking
+cpp-link = []
+
+[lints]
+workspace = true
