@@ -26,6 +26,7 @@
 //! This crate is part of an ongoing migration from C++ to Rust. During the
 //! migration period, it coexists with the C++ orchagent via FFI bridges.
 
+pub mod acl;
 pub mod daemon;
 pub mod flex_counter;
 pub mod orch;
@@ -60,4 +61,13 @@ pub use ports::{
     Port, PortAdminState, PortConfig, PortConfigError, PortFecMode, PortOperState,
     PortRole, PortsOrch, PortsOrchCallbacks, PortsOrchConfig, PortsOrchError, PortType,
     QueueInfo, QueueType, SchedulerInfo, register_ports_orch, unregister_ports_orch,
+};
+
+// Re-export AclOrch and related types
+pub use acl::{
+    AclActionType, AclBindPointType, AclMatchField, AclOrch, AclOrchCallbacks,
+    AclOrchConfig, AclOrchError, AclPacketAction, AclPriority, AclRange,
+    AclRangeType, AclRule, AclRuleAction, AclRuleId, AclRuleMatch, AclRuleType,
+    AclStage, AclTable, AclTableConfig, AclTableId, AclTableType, AclTableTypeBuilder,
+    MetaDataValue, register_acl_orch, unregister_acl_orch,
 };
