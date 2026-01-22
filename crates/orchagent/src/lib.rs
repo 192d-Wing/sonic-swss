@@ -33,6 +33,7 @@ pub mod orch;
 pub mod ports;
 pub mod route;
 pub mod vrf;
+pub mod watermark;
 
 // Re-export commonly used types
 pub use sonic_orch_common::{
@@ -77,4 +78,11 @@ pub use acl::{
 pub use vrf::{
     L3VniEntry, VrfEntry, VrfId, VrfName, VrfOrch, VrfOrchCallbacks, VrfOrchConfig,
     VrfOrchError, VrfVlanId, Vni, register_vrf_orch, unregister_vrf_orch,
+};
+
+// Re-export WatermarkOrch and related types
+pub use watermark::{
+    ClearRequest, WatermarkGroup, WatermarkOrch, WatermarkOrchCallbacks,
+    WatermarkOrchConfig, WatermarkOrchError, WatermarkStatus, WatermarkTable,
+    register_watermark_orch, unregister_watermark_orch,
 };
