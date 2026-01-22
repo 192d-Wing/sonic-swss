@@ -30,6 +30,7 @@ pub mod acl;
 pub mod crm;
 pub mod daemon;
 pub mod flex_counter;
+pub mod mlag;
 pub mod orch;
 pub mod ports;
 pub mod route;
@@ -94,4 +95,11 @@ pub use crm::{
     CrmResourceCounter, CrmResourceEntry, CrmResourceStatus, CrmResourceType,
     CrmThresholdField, CrmThresholdType, ThresholdCheck, register_crm_orch,
     unregister_crm_orch,
+};
+
+// Re-export MlagOrch and related types
+pub use mlag::{
+    MlagIfUpdate, MlagIslUpdate, MlagOrch, MlagOrchCallbacks, MlagOrchConfig,
+    MlagOrchError, MlagOrchStats, MlagSubjectType, MlagUpdate, register_mlag_orch,
+    unregister_mlag_orch,
 };
