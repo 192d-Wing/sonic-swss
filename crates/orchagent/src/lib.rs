@@ -34,13 +34,17 @@ pub mod debug_counter;
 pub mod flex_counter;
 pub mod isolation_group;
 pub mod mlag;
+pub mod nhg;
 pub mod nvgre;
 pub mod orch;
+pub mod pfcwd;
 pub mod policer;
 pub mod ports;
 pub mod route;
 pub mod sflow;
 pub mod stp;
+pub mod tunnel_decap;
+pub mod twamp;
 pub mod vrf;
 pub mod watermark;
 
@@ -157,4 +161,26 @@ pub use debug_counter::{
     DebugCounterConfig, DebugCounterEntry, DebugCounterOrch, DebugCounterOrchCallbacks,
     DebugCounterOrchConfig, DebugCounterOrchError, DebugCounterOrchStats, DebugCounterType,
     DropReason, FreeCounter, register_debug_counter_orch, unregister_debug_counter_orch,
+};
+
+// Re-export TwampOrch and related types
+pub use twamp::{
+    Dscp, SessionTimeout, TimestampFormat, TwampMode, TwampRole, TwampSessionConfig,
+    TwampSessionEntry, TwampSessionStatus, TwampStats, TwampUdpPort, TxMode,
+};
+
+// Re-export PfcwdOrch and related types
+pub use pfcwd::{
+    DetectionTime, PfcWdAction, PfcWdConfig, PfcWdHwStats, PfcWdQueueEntry, RestorationTime,
+};
+
+// Re-export NhgOrch and related types
+pub use nhg::{
+    LabelStack, NextHopGroupMember, NhgEntry,
+};
+
+// Re-export TunnelDecapOrch and related types
+pub use tunnel_decap::{
+    EcnMode, NexthopTunnel, SubnetType, TunnelConfig, TunnelEntry, TunnelMode, TunnelTermEntry,
+    TunnelTermType,
 };
