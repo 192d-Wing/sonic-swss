@@ -32,6 +32,7 @@ pub mod flex_counter;
 pub mod orch;
 pub mod ports;
 pub mod route;
+pub mod vrf;
 
 // Re-export commonly used types
 pub use sonic_orch_common::{
@@ -70,4 +71,10 @@ pub use acl::{
     AclRangeType, AclRule, AclRuleAction, AclRuleId, AclRuleMatch, AclRuleType,
     AclStage, AclTable, AclTableConfig, AclTableId, AclTableType, AclTableTypeBuilder,
     MetaDataValue, register_acl_orch, unregister_acl_orch,
+};
+
+// Re-export VRFOrch and related types
+pub use vrf::{
+    L3VniEntry, VrfEntry, VrfId, VrfName, VrfOrch, VrfOrchCallbacks, VrfOrchConfig,
+    VrfOrchError, VrfVlanId, Vni, register_vrf_orch, unregister_vrf_orch,
 };
