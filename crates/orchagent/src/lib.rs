@@ -27,6 +27,7 @@
 //! migration period, it coexists with the C++ orchagent via FFI bridges.
 
 pub mod acl;
+pub mod bfd;
 pub mod crm;
 pub mod daemon;
 pub mod flex_counter;
@@ -102,4 +103,11 @@ pub use mlag::{
     MlagIfUpdate, MlagIslUpdate, MlagOrch, MlagOrchCallbacks, MlagOrchConfig,
     MlagOrchError, MlagOrchStats, MlagSubjectType, MlagUpdate, register_mlag_orch,
     unregister_mlag_orch,
+};
+
+// Re-export BfdOrch and related types
+pub use bfd::{
+    BfdOrch, BfdOrchCallbacks, BfdOrchConfig, BfdOrchError, BfdOrchStats,
+    BfdSessionConfig, BfdSessionInfo, BfdSessionKey, BfdSessionState, BfdSessionType,
+    BfdUpdate, register_bfd_orch, unregister_bfd_orch,
 };
