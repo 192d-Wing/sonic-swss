@@ -28,6 +28,7 @@
 
 pub mod acl;
 pub mod bfd;
+pub mod buffer;
 pub mod crm;
 pub mod daemon;
 pub mod debug_counter;
@@ -42,6 +43,7 @@ pub mod mlag;
 pub mod nhg;
 pub mod nvgre;
 pub mod orch;
+pub mod pbh;
 pub mod pfcwd;
 pub mod policer;
 pub mod ports;
