@@ -18,8 +18,12 @@
 //! - RAII for automatic resource cleanup
 //! - Type-safe SAI object ID wrappers
 
+mod ffi;
+mod orch;
 mod types;
 
+pub use ffi::{register_nhg_orch, unregister_nhg_orch};
+pub use orch::{NhgOrch, NhgOrchCallbacks, NhgOrchConfig, NhgOrchError, NhgOrchStats};
 pub use types::{
     LabelStack, NextHopGroupEntry, NextHopGroupKey, NextHopGroupMember, NextHopKey, NhgEntry,
 };

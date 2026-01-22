@@ -16,6 +16,10 @@
 //! - RAII for all resources
 //! - Type-safe action handlers via traits
 
+mod ffi;
+mod orch;
 mod types;
 
-pub use types::{DetectionTime, PfcWdAction, PfcWdConfig, PfcWdHwStats, PfcWdQueueEntry, RestorationTime};
+pub use ffi::{register_pfcwd_orch, unregister_pfcwd_orch};
+pub use orch::{PfcWdOrch, PfcWdOrchCallbacks, PfcWdOrchConfig, PfcWdOrchError, PfcWdOrchStats};
+pub use types::{DetectionTime, PfcWdAction, PfcWdConfig, PfcWdEntry, PfcWdHwStats, PfcWdQueueEntry, PfcWdStats, RestorationTime};

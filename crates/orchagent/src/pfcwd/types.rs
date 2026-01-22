@@ -70,10 +70,26 @@ impl RestorationTime {
 /// PFC watchdog configuration.
 #[derive(Debug, Clone)]
 pub struct PfcWdConfig {
-    pub port_name: String,
+    pub queue_name: String,
     pub detection_time: DetectionTime,
     pub restoration_time: RestorationTime,
     pub action: PfcWdAction,
+}
+
+impl PfcWdConfig {
+    pub fn new(
+        queue_name: String,
+        action: PfcWdAction,
+        detection_time: DetectionTime,
+        restoration_time: RestorationTime,
+    ) -> Self {
+        Self {
+            queue_name,
+            detection_time,
+            restoration_time,
+            action,
+        }
+    }
 }
 
 /// PFC watchdog queue entry.
@@ -83,6 +99,39 @@ pub struct PfcWdQueueEntry {
     pub port_id: RawSaiObjectId,
     pub queue_index: u8,
     pub port_alias: String,
+}
+
+/// PFC watchdog entry.
+#[derive(Debug, Clone)]
+pub struct PfcWdEntry {
+    pub queue_name: String,
+    pub watchdog_id: RawSaiObjectId,
+    pub action: PfcWdAction,
+    pub detection_time: DetectionTime,
+    pub restoration_time: RestorationTime,
+    pub enabled: bool,
+    pub storm_detected: bool,
+}
+
+impl PfcWdEntry {
+    pub fn from_config(config: PfcWdConfig, watchdog_id: RawSaiObjectId) -> Self {
+        Self {
+            queue_name: config.queue_name,
+            watchdog_id,
+            action: config.action,
+            detection_time: config.detection_time,
+            restoration_time: config.restoration_time,
+            enabled: false,
+            storm_detected: false,
+        }
+    }
+}
+
+/// PFC watchdog statistics.
+#[derive(Debug, Clone, Default)]
+pub struct PfcWdStats {
+    pub storms_detected: u64,
+    pub storms_restored: u64,
 }
 
 /// Hardware statistics snapshot.

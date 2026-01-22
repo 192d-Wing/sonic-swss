@@ -89,6 +89,42 @@ impl SubnetType {
     }
 }
 
+/// Tunnel decap configuration (simplified for orchestration).
+#[derive(Debug, Clone)]
+pub struct TunnelDecapConfig {
+    pub tunnel_name: String,
+    pub tunnel_type: String,
+}
+
+impl TunnelDecapConfig {
+    pub fn new(tunnel_name: String, tunnel_type: String) -> Self {
+        Self {
+            tunnel_name,
+            tunnel_type,
+        }
+    }
+}
+
+/// Tunnel decap entry.
+#[derive(Debug, Clone)]
+pub struct TunnelDecapEntry {
+    pub tunnel_name: String,
+    pub tunnel_id: RawSaiObjectId,
+    pub tunnel_type: String,
+    pub term_entries: HashMap<String, RawSaiObjectId>,
+}
+
+impl TunnelDecapEntry {
+    pub fn from_config(config: TunnelDecapConfig, tunnel_id: RawSaiObjectId) -> Self {
+        Self {
+            tunnel_name: config.tunnel_name,
+            tunnel_id,
+            tunnel_type: config.tunnel_type,
+            term_entries: HashMap::new(),
+        }
+    }
+}
+
 /// Tunnel configuration.
 #[derive(Debug, Clone)]
 pub struct TunnelConfig {

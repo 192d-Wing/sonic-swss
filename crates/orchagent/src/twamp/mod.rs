@@ -20,8 +20,12 @@
 //! - RAII for resource cleanup
 //! - Atomic state transitions
 
+mod ffi;
+mod orch;
 mod types;
 
+pub use ffi::{register_twamp_orch, unregister_twamp_orch};
+pub use orch::{TwampOrch, TwampOrchCallbacks, TwampOrchConfig, TwampOrchError, TwampOrchStats};
 pub use types::{
     Dscp, SessionTimeout, TimestampFormat, TwampMode, TwampRole, TwampSessionConfig,
     TwampSessionEntry, TwampSessionStatus, TwampStats, TwampUdpPort, TxMode,
