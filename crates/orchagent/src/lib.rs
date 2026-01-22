@@ -33,6 +33,7 @@ pub mod daemon;
 pub mod flex_counter;
 pub mod mlag;
 pub mod orch;
+pub mod policer;
 pub mod ports;
 pub mod route;
 pub mod sflow;
@@ -118,4 +119,11 @@ pub use sflow::{
     PortSflowInfo, SampleDirection, SflowConfig, SflowOrch, SflowOrchCallbacks,
     SflowOrchConfig, SflowOrchError, SflowOrchStats, SflowSession,
     register_sflow_orch, unregister_sflow_orch,
+};
+
+// Re-export PolicerOrch and related types
+pub use policer::{
+    ColorSource, MeterType, PacketAction, PolicerConfig, PolicerEntry, PolicerMode,
+    PolicerOrch, PolicerOrchCallbacks, PolicerOrchConfig, PolicerOrchError, PolicerOrchStats,
+    StormType, register_policer_orch, unregister_policer_orch,
 };
