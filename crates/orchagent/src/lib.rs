@@ -30,13 +30,17 @@ pub mod acl;
 pub mod bfd;
 pub mod crm;
 pub mod daemon;
+pub mod debug_counter;
 pub mod flex_counter;
+pub mod isolation_group;
 pub mod mlag;
+pub mod nvgre;
 pub mod orch;
 pub mod policer;
 pub mod ports;
 pub mod route;
 pub mod sflow;
+pub mod stp;
 pub mod vrf;
 pub mod watermark;
 
@@ -126,4 +130,31 @@ pub use policer::{
     ColorSource, MeterType, PacketAction, PolicerConfig, PolicerEntry, PolicerMode,
     PolicerOrch, PolicerOrchCallbacks, PolicerOrchConfig, PolicerOrchError, PolicerOrchStats,
     StormType, register_policer_orch, unregister_policer_orch,
+};
+
+// Re-export StpOrch and related types
+pub use stp::{
+    SaiStpPortState, StpInstanceEntry, StpOrch, StpOrchCallbacks, StpOrchConfig,
+    StpOrchError, StpOrchStats, StpPortIds, StpState, register_stp_orch, unregister_stp_orch,
+};
+
+// Re-export NvgreOrch and related types
+pub use nvgre::{
+    MapType, NvgreTunnel, NvgreTunnelConfig, NvgreTunnelMapConfig, NvgreTunnelMapEntry,
+    NvgreOrch, NvgreOrchCallbacks, NvgreOrchConfig, NvgreOrchError, NvgreOrchStats,
+    TunnelSaiIds, NVGRE_VSID_MAX_VALUE, register_nvgre_orch, unregister_nvgre_orch,
+};
+
+// Re-export IsolationGroupOrch and related types
+pub use isolation_group::{
+    IsolationGroupConfig, IsolationGroupEntry, IsolationGroupOrch, IsolationGroupOrchCallbacks,
+    IsolationGroupOrchConfig, IsolationGroupOrchError, IsolationGroupOrchStats, IsolationGroupType,
+    register_isolation_group_orch, unregister_isolation_group_orch,
+};
+
+// Re-export DebugCounterOrch and related types
+pub use debug_counter::{
+    DebugCounterConfig, DebugCounterEntry, DebugCounterOrch, DebugCounterOrchCallbacks,
+    DebugCounterOrchConfig, DebugCounterOrchError, DebugCounterOrchStats, DebugCounterType,
+    DropReason, FreeCounter, register_debug_counter_orch, unregister_debug_counter_orch,
 };
