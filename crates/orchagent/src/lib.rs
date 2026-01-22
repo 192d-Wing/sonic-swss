@@ -29,6 +29,9 @@
 pub mod acl;
 pub mod bfd;
 pub mod buffer;
+pub mod chassis;
+pub mod copp;
+pub mod countercheck;
 pub mod crm;
 pub mod daemon;
 pub mod debug_counter;
@@ -37,11 +40,13 @@ pub mod fabric_ports;
 pub mod fdb;
 pub mod fg_nhg;
 pub mod flex_counter;
+pub mod icmp;
 pub mod intfs;
 pub mod isolation_group;
 pub mod macsec;
 pub mod mirror;
 pub mod mlag;
+pub mod mplsroute;
 pub mod mux;
 pub mod nat;
 pub mod neigh;
@@ -64,6 +69,7 @@ pub mod vnet;
 pub mod vrf;
 pub mod vxlan;
 pub mod watermark;
+pub mod zmq;
 
 // Re-export commonly used types
 pub use sonic_orch_common::{
