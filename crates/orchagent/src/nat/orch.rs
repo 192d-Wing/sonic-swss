@@ -62,8 +62,90 @@ impl NatOrch {
         self.entries.get(key)
     }
 
+    pub fn add_entry(&mut self, entry: NatEntry) -> Result<(), NatOrchError> {
+        let key = entry.key.clone();
+
+        if self.entries.contains_key(&key) {
+            return Err(NatOrchError::SaiError("NAT entry already exists".to_string()));
+        }
+
+        self.stats.stats.entries_created = self.stats.stats.entries_created.saturating_add(1);
+        self.entries.insert(key, entry);
+
+        Ok(())
+    }
+
+    pub fn remove_entry(&mut self, key: &NatEntryKey) -> Result<NatEntry, NatOrchError> {
+        self.entries.remove(key)
+            .ok_or_else(|| NatOrchError::EntryNotFound(key.clone()))
+    }
+
+    pub fn get_snat_entries(&self) -> Vec<&NatEntry> {
+        self.entries
+            .values()
+            .filter(|entry| entry.is_snat())
+            .collect()
+    }
+
+    pub fn get_dnat_entries(&self) -> Vec<&NatEntry> {
+        self.entries
+            .values()
+            .filter(|entry| entry.is_dnat())
+            .collect()
+    }
+
+    pub fn get_double_nat_entries(&self) -> Vec<&NatEntry> {
+        self.entries
+            .values()
+            .filter(|entry| entry.is_double_nat())
+            .collect()
+    }
+
     pub fn get_pool(&self, key: &NatPoolKey) -> Option<&NatPoolEntry> {
         self.pools.get(key)
+    }
+
+    pub fn add_pool(&mut self, entry: NatPoolEntry) -> Result<(), NatOrchError> {
+        let key = entry.key.clone();
+
+        if self.pools.contains_key(&key) {
+            return Err(NatOrchError::SaiError("NAT pool already exists".to_string()));
+        }
+
+        // Validate IP range
+        let (start, end) = entry.config.ip_range;
+        if start > end {
+            return Err(NatOrchError::InvalidIpRange(
+                format!("Start IP {} > End IP {}", start, end)
+            ));
+        }
+
+        // Validate port range if present
+        if let Some((start_port, end_port)) = entry.config.port_range {
+            if start_port > end_port {
+                return Err(NatOrchError::InvalidPortRange(
+                    format!("Start port {} > End port {}", start_port, end_port)
+                ));
+            }
+        }
+
+        self.stats.stats.pools_created = self.stats.stats.pools_created.saturating_add(1);
+        self.pools.insert(key, entry);
+
+        Ok(())
+    }
+
+    pub fn remove_pool(&mut self, key: &NatPoolKey) -> Result<NatPoolEntry, NatOrchError> {
+        self.pools.remove(key)
+            .ok_or_else(|| NatOrchError::PoolNotFound(key.clone()))
+    }
+
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn pool_count(&self) -> usize {
+        self.pools.len()
     }
 
     pub fn stats(&self) -> &NatOrchStats {
