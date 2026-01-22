@@ -1,7 +1,5 @@
 //! MACsec (Media Access Control Security) types.
 
-use std::collections::HashMap;
-
 pub type RawSaiObjectId = u64;
 pub type Sci = u64; // Secure Channel Identifier
 

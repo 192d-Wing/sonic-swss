@@ -144,3 +144,193 @@ impl VxlanOrch {
         &self.stats
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_tunnel(tunnel_name: &str, src_ip: &str, dst_ip: &str) -> VxlanTunnelEntry {
+        let src_addr: std::net::IpAddr = src_ip.parse().unwrap();
+        let dst_addr: std::net::IpAddr = dst_ip.parse().unwrap();
+        VxlanTunnelEntry {
+            key: super::super::types::VxlanTunnelKey::new(src_addr, dst_addr),
+            config: super::super::types::VxlanTunnelConfig {
+                src_ip: src_addr,
+                dst_ip: dst_addr,
+                tunnel_name: tunnel_name.to_string(),
+            },
+            tunnel_oid: 0,
+            encap_mapper_oid: 0,
+            decap_mapper_oid: 0,
+        }
+    }
+
+    fn create_test_vrf_map(vni: u32, vrf_name: &str) -> VxlanVrfMapEntry {
+        super::super::types::VxlanVrfMapEntry::new(
+            super::super::types::VxlanVrfMapKey::new(vni, vrf_name.to_string())
+        )
+    }
+
+    fn create_test_vlan_map(vni: u32, vlan_id: u16) -> VxlanVlanMapEntry {
+        super::super::types::VxlanVlanMapEntry::new(
+            super::super::types::VxlanVlanMapKey::new(vni, vlan_id)
+        )
+    }
+
+    #[test]
+    fn test_add_tunnel() {
+        let mut orch = VxlanOrch::new(VxlanOrchConfig::default());
+        let tunnel = create_test_tunnel("vtep1", "10.0.0.1", "10.0.0.2");
+
+        assert_eq!(orch.tunnel_count(), 0);
+        orch.add_tunnel(tunnel).unwrap();
+        assert_eq!(orch.tunnel_count(), 1);
+        assert_eq!(orch.stats().stats.tunnels_created, 1);
+    }
+
+    #[test]
+    fn test_add_duplicate_tunnel() {
+        let mut orch = VxlanOrch::new(VxlanOrchConfig::default());
+        // Use same src/dst IPs to create truly duplicate keys
+        let tunnel1 = create_test_tunnel("vtep1", "10.0.0.1", "10.0.0.2");
+        let tunnel2 = create_test_tunnel("vtep2", "10.0.0.1", "10.0.0.2");
+
+        orch.add_tunnel(tunnel1).unwrap();
+        let result = orch.add_tunnel(tunnel2);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), VxlanOrchError::SaiError(_)));
+    }
+
+    #[test]
+    fn test_remove_tunnel() {
+        let mut orch = VxlanOrch::new(VxlanOrchConfig::default());
+        let tunnel = create_test_tunnel("vtep1", "10.0.0.1", "10.0.0.2");
+        let key = tunnel.key.clone();
+
+        orch.add_tunnel(tunnel).unwrap();
+        assert_eq!(orch.tunnel_count(), 1);
+
+        let removed = orch.remove_tunnel(&key).unwrap();
+        let expected_src: std::net::IpAddr = "10.0.0.1".parse().unwrap();
+        assert_eq!(removed.config.src_ip, expected_src);
+        assert_eq!(orch.tunnel_count(), 0);
+    }
+
+    #[test]
+    fn test_remove_tunnel_not_found() {
+        let mut orch = VxlanOrch::new(VxlanOrchConfig::default());
+        let src_ip: std::net::IpAddr = "10.0.0.1".parse().unwrap();
+        let dst_ip: std::net::IpAddr = "10.0.0.2".parse().unwrap();
+        let key = super::super::types::VxlanTunnelKey::new(src_ip, dst_ip);
+
+        let result = orch.remove_tunnel(&key);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), VxlanOrchError::TunnelNotFound(_)));
+    }
+
+    #[test]
+    fn test_add_vrf_map() {
+        let mut orch = VxlanOrch::new(VxlanOrchConfig::default());
+        let vrf_map = create_test_vrf_map(1000, "Vrf_default");
+
+        orch.add_vrf_map(vrf_map).unwrap();
+        assert_eq!(orch.stats().stats.vrf_maps_created, 1);
+
+        let retrieved = orch.get_vrf_map(1000, "Vrf_default").unwrap();
+        assert_eq!(retrieved.key.vrf_name, "Vrf_default");
+    }
+
+    #[test]
+    fn test_add_duplicate_vrf_map() {
+        let mut orch = VxlanOrch::new(VxlanOrchConfig::default());
+        let vrf_map1 = create_test_vrf_map(1000, "Vrf_default");
+        let vrf_map2 = create_test_vrf_map(1000, "Vrf_default");
+
+        orch.add_vrf_map(vrf_map1).unwrap();
+        let result = orch.add_vrf_map(vrf_map2);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_remove_vrf_map() {
+        let mut orch = VxlanOrch::new(VxlanOrchConfig::default());
+        let vrf_map = create_test_vrf_map(1000, "Vrf_default");
+
+        orch.add_vrf_map(vrf_map).unwrap();
+        let removed = orch.remove_vrf_map(1000, "Vrf_default").unwrap();
+        assert_eq!(removed.key.vrf_name, "Vrf_default");
+
+        let result = orch.get_vrf_map(1000, "Vrf_default");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_remove_vrf_map_not_found() {
+        let mut orch = VxlanOrch::new(VxlanOrchConfig::default());
+        let result = orch.remove_vrf_map(1000, "Vrf_default");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), VxlanOrchError::VrfMapNotFound(_, _)));
+    }
+
+    #[test]
+    fn test_add_vlan_map() {
+        let mut orch = VxlanOrch::new(VxlanOrchConfig::default());
+        let vlan_map = create_test_vlan_map(2000, 100);
+
+        orch.add_vlan_map(vlan_map).unwrap();
+        assert_eq!(orch.stats().stats.vlan_maps_created, 1);
+
+        let retrieved = orch.get_vlan_map(2000, 100).unwrap();
+        assert_eq!(retrieved.key.vlan_id, 100);
+    }
+
+    #[test]
+    fn test_add_duplicate_vlan_map() {
+        let mut orch = VxlanOrch::new(VxlanOrchConfig::default());
+        let vlan_map1 = create_test_vlan_map(2000, 100);
+        let vlan_map2 = create_test_vlan_map(2000, 100);
+
+        orch.add_vlan_map(vlan_map1).unwrap();
+        let result = orch.add_vlan_map(vlan_map2);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_remove_vlan_map() {
+        let mut orch = VxlanOrch::new(VxlanOrchConfig::default());
+        let vlan_map = create_test_vlan_map(2000, 100);
+
+        orch.add_vlan_map(vlan_map).unwrap();
+        let removed = orch.remove_vlan_map(2000, 100).unwrap();
+        assert_eq!(removed.key.vlan_id, 100);
+
+        let result = orch.get_vlan_map(2000, 100);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_get_maps_by_vni() {
+        let mut orch = VxlanOrch::new(VxlanOrchConfig::default());
+        orch.add_vrf_map(create_test_vrf_map(1000, "Vrf1")).unwrap();
+        orch.add_vrf_map(create_test_vrf_map(1000, "Vrf2")).unwrap();
+        orch.add_vlan_map(create_test_vlan_map(1000, 100)).unwrap();
+        orch.add_vlan_map(create_test_vlan_map(1000, 200)).unwrap();
+        orch.add_vrf_map(create_test_vrf_map(2000, "Vrf3")).unwrap();
+
+        let (vrf_maps, vlan_maps) = orch.get_maps_by_vni(1000);
+        assert_eq!(vrf_maps.len(), 2);
+        assert_eq!(vlan_maps.len(), 2);
+
+        let (vrf_maps_2000, vlan_maps_2000) = orch.get_maps_by_vni(2000);
+        assert_eq!(vrf_maps_2000.len(), 1);
+        assert_eq!(vlan_maps_2000.len(), 0);
+    }
+
+    #[test]
+    fn test_get_maps_by_vni_empty() {
+        let orch = VxlanOrch::new(VxlanOrchConfig::default());
+        let (vrf_maps, vlan_maps) = orch.get_maps_by_vni(9999);
+        assert_eq!(vrf_maps.len(), 0);
+        assert_eq!(vlan_maps.len(), 0);
+    }
+}

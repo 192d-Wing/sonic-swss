@@ -161,3 +161,204 @@ impl BufferOrch {
         &self.stats
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::types::{BufferPoolConfig, BufferProfileConfig};
+
+    fn create_test_pool(name: &str, size: u64) -> BufferPoolEntry {
+        BufferPoolEntry {
+            name: name.to_string(),
+            config: BufferPoolConfig {
+                pool_type: super::super::types::BufferPoolType::Ingress,
+                mode: super::super::types::BufferPoolMode::Dynamic,
+                size,
+                threshold_mode: super::super::types::ThresholdMode::Dynamic,
+                xoff_threshold: None,
+                xon_threshold: None,
+            },
+            sai_oid: 0,
+            ref_count: 0,
+        }
+    }
+
+    fn create_test_profile(name: &str, pool_name: &str, size: u64) -> BufferProfileEntry {
+        BufferProfileEntry {
+            name: name.to_string(),
+            config: super::super::types::BufferProfileConfig {
+                pool_name: pool_name.to_string(),
+                size,
+                dynamic_threshold: None,
+                static_threshold: None,
+                xoff_threshold: None,
+                xon_threshold: None,
+                xon_offset: None,
+            },
+            sai_oid: 0,
+            ref_count: 0,
+        }
+    }
+
+    #[test]
+    fn test_add_pool() {
+        let mut orch = BufferOrch::new(BufferOrchConfig::default());
+        let pool = create_test_pool("ingress_lossless_pool", 10485760);
+
+        orch.add_pool(pool).unwrap();
+        assert_eq!(orch.pool_count(), 1);
+        assert_eq!(orch.stats().stats.pools_created, 1);
+    }
+
+    #[test]
+    fn test_add_duplicate_pool() {
+        let mut orch = BufferOrch::new(BufferOrchConfig::default());
+        let pool1 = create_test_pool("ingress_lossless_pool", 10485760);
+        let pool2 = create_test_pool("ingress_lossless_pool", 20971520);
+
+        orch.add_pool(pool1).unwrap();
+        let result = orch.add_pool(pool2);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), BufferOrchError::SaiError(_)));
+    }
+
+    #[test]
+    fn test_remove_pool() {
+        let mut orch = BufferOrch::new(BufferOrchConfig::default());
+        let pool = create_test_pool("ingress_lossless_pool", 10485760);
+
+        orch.add_pool(pool).unwrap();
+        let removed = orch.remove_pool("ingress_lossless_pool").unwrap();
+        assert_eq!(removed.config.size, 10485760);
+        assert_eq!(orch.pool_count(), 0);
+    }
+
+    #[test]
+    fn test_remove_pool_with_references() {
+        let mut orch = BufferOrch::new(BufferOrchConfig::default());
+        let pool = create_test_pool("ingress_lossless_pool", 10485760);
+
+        orch.add_pool(pool).unwrap();
+        orch.increment_pool_ref("ingress_lossless_pool").unwrap();
+
+        let result = orch.remove_pool("ingress_lossless_pool");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), BufferOrchError::RefCountError(_)));
+    }
+
+    #[test]
+    fn test_pool_ref_counting() {
+        let mut orch = BufferOrch::new(BufferOrchConfig::default());
+        let pool = create_test_pool("ingress_lossless_pool", 10485760);
+
+        orch.add_pool(pool).unwrap();
+
+        let count1 = orch.increment_pool_ref("ingress_lossless_pool").unwrap();
+        assert_eq!(count1, 1);
+
+        let count2 = orch.increment_pool_ref("ingress_lossless_pool").unwrap();
+        assert_eq!(count2, 2);
+
+        let count3 = orch.decrement_pool_ref("ingress_lossless_pool").unwrap();
+        assert_eq!(count3, 1);
+
+        let count4 = orch.decrement_pool_ref("ingress_lossless_pool").unwrap();
+        assert_eq!(count4, 0);
+    }
+
+    #[test]
+    fn test_pool_ref_underflow() {
+        let mut orch = BufferOrch::new(BufferOrchConfig::default());
+        let pool = create_test_pool("ingress_lossless_pool", 10485760);
+
+        orch.add_pool(pool).unwrap();
+
+        let result = orch.decrement_pool_ref("ingress_lossless_pool");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), BufferOrchError::RefCountError(_)));
+    }
+
+    #[test]
+    fn test_add_profile() {
+        let mut orch = BufferOrch::new(BufferOrchConfig::default());
+        let pool = create_test_pool("ingress_lossless_pool", 10485760);
+        let profile = create_test_profile("pg_lossless_profile", "ingress_lossless_pool", 1024);
+
+        orch.add_pool(pool).unwrap();
+        orch.add_profile(profile).unwrap();
+        assert_eq!(orch.profile_count(), 1);
+        assert_eq!(orch.stats().stats.profiles_created, 1);
+    }
+
+    #[test]
+    fn test_add_profile_without_pool() {
+        let mut orch = BufferOrch::new(BufferOrchConfig::default());
+        let profile = create_test_profile("pg_lossless_profile", "missing_pool", 1024);
+
+        let result = orch.add_profile(profile);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), BufferOrchError::PoolNotFound(_)));
+    }
+
+    #[test]
+    fn test_remove_profile() {
+        let mut orch = BufferOrch::new(BufferOrchConfig::default());
+        let pool = create_test_pool("ingress_lossless_pool", 10485760);
+        let profile = create_test_profile("pg_lossless_profile", "ingress_lossless_pool", 1024);
+
+        orch.add_pool(pool).unwrap();
+        orch.add_profile(profile).unwrap();
+
+        let removed = orch.remove_profile("pg_lossless_profile").unwrap();
+        assert_eq!(removed.config.size, 1024);
+        assert_eq!(orch.profile_count(), 0);
+    }
+
+    #[test]
+    fn test_remove_profile_with_references() {
+        let mut orch = BufferOrch::new(BufferOrchConfig::default());
+        let pool = create_test_pool("ingress_lossless_pool", 10485760);
+        let profile = create_test_profile("pg_lossless_profile", "ingress_lossless_pool", 1024);
+
+        orch.add_pool(pool).unwrap();
+        orch.add_profile(profile).unwrap();
+        orch.increment_profile_ref("pg_lossless_profile").unwrap();
+
+        let result = orch.remove_profile("pg_lossless_profile");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), BufferOrchError::RefCountError(_)));
+    }
+
+    #[test]
+    fn test_profile_ref_counting() {
+        let mut orch = BufferOrch::new(BufferOrchConfig::default());
+        let pool = create_test_pool("ingress_lossless_pool", 10485760);
+        let profile = create_test_profile("pg_lossless_profile", "ingress_lossless_pool", 1024);
+
+        orch.add_pool(pool).unwrap();
+        orch.add_profile(profile).unwrap();
+
+        let count1 = orch.increment_profile_ref("pg_lossless_profile").unwrap();
+        assert_eq!(count1, 1);
+
+        let count2 = orch.increment_profile_ref("pg_lossless_profile").unwrap();
+        assert_eq!(count2, 2);
+
+        let count3 = orch.decrement_profile_ref("pg_lossless_profile").unwrap();
+        assert_eq!(count3, 1);
+    }
+
+    #[test]
+    fn test_profile_ref_underflow() {
+        let mut orch = BufferOrch::new(BufferOrchConfig::default());
+        let pool = create_test_pool("ingress_lossless_pool", 10485760);
+        let profile = create_test_profile("pg_lossless_profile", "ingress_lossless_pool", 1024);
+
+        orch.add_pool(pool).unwrap();
+        orch.add_profile(profile).unwrap();
+
+        let result = orch.decrement_profile_ref("pg_lossless_profile");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), BufferOrchError::RefCountError(_)));
+    }
+}
