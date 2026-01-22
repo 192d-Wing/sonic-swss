@@ -27,6 +27,7 @@
 //! migration period, it coexists with the C++ orchagent via FFI bridges.
 
 pub mod acl;
+pub mod crm;
 pub mod daemon;
 pub mod flex_counter;
 pub mod orch;
@@ -85,4 +86,12 @@ pub use watermark::{
     ClearRequest, WatermarkGroup, WatermarkOrch, WatermarkOrchCallbacks,
     WatermarkOrchConfig, WatermarkOrchError, WatermarkStatus, WatermarkTable,
     register_watermark_orch, unregister_watermark_orch,
+};
+
+// Re-export CrmOrch and related types
+pub use crm::{
+    CrmOrch, CrmOrchCallbacks, CrmOrchConfig, CrmOrchError, CrmOrchStats,
+    CrmResourceCounter, CrmResourceEntry, CrmResourceStatus, CrmResourceType,
+    CrmThresholdField, CrmThresholdType, ThresholdCheck, register_crm_orch,
+    unregister_crm_orch,
 };
