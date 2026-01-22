@@ -14,6 +14,10 @@
 //! - Arc<RwLock<T>> for thread-safe shared state
 //! - Type-safe event enums replacing string lookups
 
+mod ffi;
+mod orch;
 mod types;
 
+pub use ffi::{register_dtel_orch, unregister_dtel_orch};
+pub use orch::{DtelOrch, DtelOrchCallbacks, DtelOrchConfig, DtelOrchError, DtelOrchStats};
 pub use types::{DtelEventType, IntSessionConfig, IntSessionEntry};
