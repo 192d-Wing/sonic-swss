@@ -42,6 +42,7 @@ pub mod isolation_group;
 pub mod mirror;
 pub mod mlag;
 pub mod mux;
+pub mod neigh;
 pub mod nhg;
 pub mod nvgre;
 pub mod orch;
@@ -58,6 +59,7 @@ pub mod switch;
 pub mod tunnel_decap;
 pub mod twamp;
 pub mod vrf;
+pub mod vxlan;
 pub mod watermark;
 
 // Re-export commonly used types
