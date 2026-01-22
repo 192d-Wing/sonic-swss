@@ -43,6 +43,7 @@ pub mod macsec;
 pub mod mirror;
 pub mod mlag;
 pub mod mux;
+pub mod nat;
 pub mod neigh;
 pub mod nhg;
 pub mod nvgre;
