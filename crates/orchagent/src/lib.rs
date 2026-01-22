@@ -35,6 +35,7 @@ pub mod mlag;
 pub mod orch;
 pub mod ports;
 pub mod route;
+pub mod sflow;
 pub mod vrf;
 pub mod watermark;
 
@@ -110,4 +111,11 @@ pub use bfd::{
     BfdOrch, BfdOrchCallbacks, BfdOrchConfig, BfdOrchError, BfdOrchStats,
     BfdSessionConfig, BfdSessionInfo, BfdSessionKey, BfdSessionState, BfdSessionType,
     BfdUpdate, register_bfd_orch, unregister_bfd_orch,
+};
+
+// Re-export SflowOrch and related types
+pub use sflow::{
+    PortSflowInfo, SampleDirection, SflowConfig, SflowOrch, SflowOrchCallbacks,
+    SflowOrchConfig, SflowOrchError, SflowOrchStats, SflowSession,
+    register_sflow_orch, unregister_sflow_orch,
 };
