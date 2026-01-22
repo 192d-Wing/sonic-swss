@@ -49,6 +49,81 @@ impl NeighOrch {
         self.neighbors.get(key)
     }
 
+    pub fn add_neighbor(&mut self, entry: NeighborEntry) -> Result<(), NeighOrchError> {
+        let key = entry.key.clone();
+
+        if self.neighbors.contains_key(&key) {
+            return self.update_neighbor(entry);
+        }
+
+        // Update stats based on IP version
+        if entry.is_ipv4() {
+            self.stats.stats.ipv4_neighbors = self.stats.stats.ipv4_neighbors.saturating_add(1);
+        } else {
+            self.stats.stats.ipv6_neighbors = self.stats.stats.ipv6_neighbors.saturating_add(1);
+        }
+
+        self.stats.stats.neighbors_added = self.stats.stats.neighbors_added.saturating_add(1);
+        self.neighbors.insert(key, entry);
+
+        Ok(())
+    }
+
+    pub fn remove_neighbor(&mut self, key: &NeighborKey) -> Result<NeighborEntry, NeighOrchError> {
+        let entry = self.neighbors.remove(key)
+            .ok_or_else(|| NeighOrchError::NeighborNotFound(key.clone()))?;
+
+        // Update stats based on IP version
+        if entry.is_ipv4() {
+            self.stats.stats.ipv4_neighbors = self.stats.stats.ipv4_neighbors.saturating_sub(1);
+        } else {
+            self.stats.stats.ipv6_neighbors = self.stats.stats.ipv6_neighbors.saturating_sub(1);
+        }
+
+        self.stats.stats.neighbors_removed = self.stats.stats.neighbors_removed.saturating_add(1);
+
+        Ok(entry)
+    }
+
+    pub fn update_neighbor(&mut self, entry: NeighborEntry) -> Result<(), NeighOrchError> {
+        let key = entry.key.clone();
+
+        if !self.neighbors.contains_key(&key) {
+            return Err(NeighOrchError::NeighborNotFound(key));
+        }
+
+        self.stats.stats.neighbors_updated = self.stats.stats.neighbors_updated.saturating_add(1);
+        self.neighbors.insert(key, entry);
+
+        Ok(())
+    }
+
+    pub fn get_neighbors_by_interface(&self, interface: &str) -> Vec<&NeighborEntry> {
+        self.neighbors
+            .values()
+            .filter(|entry| entry.key.interface == interface)
+            .collect()
+    }
+
+    pub fn clear_interface(&mut self, interface: &str) -> usize {
+        let keys_to_remove: Vec<_> = self.neighbors
+            .keys()
+            .filter(|key| key.interface == interface)
+            .cloned()
+            .collect();
+
+        let count = keys_to_remove.len();
+        for key in keys_to_remove {
+            let _ = self.remove_neighbor(&key);
+        }
+
+        count
+    }
+
+    pub fn neighbor_count(&self) -> usize {
+        self.neighbors.len()
+    }
+
     pub fn stats(&self) -> &NeighOrchStats {
         &self.stats
     }
