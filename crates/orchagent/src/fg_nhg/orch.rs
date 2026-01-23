@@ -61,3 +61,136 @@ impl FgNhgOrch {
         &self.stats
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fg_nhg_orch_new_default_config() {
+        let config = FgNhgOrchConfig::default();
+        let orch = FgNhgOrch::new(config);
+
+        assert_eq!(orch.stats.stats.nhgs_created, 0);
+        assert_eq!(orch.stats.stats.members_added, 0);
+        assert_eq!(orch.stats.errors, 0);
+        assert_eq!(orch.nhgs.len(), 0);
+    }
+
+    #[test]
+    fn test_fg_nhg_orch_new_with_config() {
+        let config = FgNhgOrchConfig {
+            default_bucket_size: 128,
+            enable_rebalancing: true,
+        };
+        let orch = FgNhgOrch::new(config);
+
+        assert_eq!(orch.stats().errors, 0);
+    }
+
+    #[test]
+    fn test_fg_nhg_orch_config_with_bucket_size() {
+        let config = FgNhgOrchConfig::default().with_bucket_size(256);
+
+        assert_eq!(config.default_bucket_size, 256);
+    }
+
+    #[test]
+    fn test_fg_nhg_orch_get_nhg_not_found() {
+        let orch = FgNhgOrch::new(FgNhgOrchConfig::default());
+        let prefix = FgNhgPrefix::new("192.168.0.0/24".to_string());
+
+        assert!(orch.get_nhg(&prefix).is_none());
+    }
+
+    #[test]
+    fn test_fg_nhg_orch_stats_access() {
+        let orch = FgNhgOrch::new(FgNhgOrchConfig::default());
+        let stats = orch.stats();
+
+        assert_eq!(stats.stats.nhgs_created, 0);
+        assert_eq!(stats.stats.members_added, 0);
+        assert_eq!(stats.stats.rebalances, 0);
+        assert_eq!(stats.errors, 0);
+    }
+
+    #[test]
+    fn test_fg_nhg_orch_empty_initialization() {
+        let orch = FgNhgOrch::new(FgNhgOrchConfig::default());
+
+        assert_eq!(orch.nhgs.len(), 0);
+        let prefix = FgNhgPrefix::new("10.0.0.0/8".to_string());
+        assert!(orch.get_nhg(&prefix).is_none());
+    }
+
+    #[test]
+    fn test_fg_nhg_orch_config_clone() {
+        let config1 = FgNhgOrchConfig {
+            default_bucket_size: 64,
+            enable_rebalancing: false,
+        };
+        let config2 = config1.clone();
+
+        assert_eq!(config1.default_bucket_size, config2.default_bucket_size);
+        assert_eq!(config1.enable_rebalancing, config2.enable_rebalancing);
+    }
+
+    #[test]
+    fn test_fg_nhg_orch_stats_default() {
+        let stats = FgNhgOrchStats::default();
+
+        assert_eq!(stats.stats.nhgs_created, 0);
+        assert_eq!(stats.stats.members_added, 0);
+        assert_eq!(stats.stats.rebalances, 0);
+        assert_eq!(stats.errors, 0);
+    }
+
+    #[test]
+    fn test_fg_nhg_orch_stats_clone() {
+        let mut stats1 = FgNhgOrchStats::default();
+        stats1.errors = 5;
+        stats1.stats.nhgs_created = 10;
+
+        let stats2 = stats1.clone();
+
+        assert_eq!(stats1.errors, stats2.errors);
+        assert_eq!(stats1.stats.nhgs_created, stats2.stats.nhgs_created);
+    }
+
+    #[test]
+    fn test_fg_nhg_orch_error_nhg_not_found() {
+        let prefix = FgNhgPrefix::new("192.168.1.0/24".to_string());
+        let error = FgNhgOrchError::NhgNotFound(prefix.clone());
+
+        match error {
+            FgNhgOrchError::NhgNotFound(p) => {
+                assert_eq!(p.ip_prefix, prefix.ip_prefix);
+            }
+            _ => panic!("Wrong error type"),
+        }
+    }
+
+    #[test]
+    fn test_fg_nhg_orch_error_invalid_bucket_size() {
+        let error = FgNhgOrchError::InvalidBucketSize(0);
+
+        match error {
+            FgNhgOrchError::InvalidBucketSize(size) => {
+                assert_eq!(size, 0);
+            }
+            _ => panic!("Wrong error type"),
+        }
+    }
+
+    #[test]
+    fn test_fg_nhg_orch_error_invalid_weight() {
+        let error = FgNhgOrchError::InvalidWeight(100);
+
+        match error {
+            FgNhgOrchError::InvalidWeight(weight) => {
+                assert_eq!(weight, 100);
+            }
+            _ => panic!("Wrong error type"),
+        }
+    }
+}
