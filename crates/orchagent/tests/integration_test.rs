@@ -50,6 +50,8 @@ pub enum SaiObjectType {
     BufferCounter,
     Samplepacket,
     VirtualRouter,
+    DebugCounter,
+    TwampSession,
 }
 
 impl MockSai {
@@ -4804,4 +4806,1502 @@ mod integration_tests {
             assert_eq!(orch.stats().vrfs_removed, 1);
         }
     }
+
+    mod twamp_orch_tests {
+        use super::*;
+        use sonic_orchagent::twamp::{TwampOrch, TwampOrchConfig, TwampOrchCallbacks, TwampSessionConfig, TwampMode, TwampRole};
+        use sonic_types::IpAddress;
+        use std::sync::{Arc, Mutex};
+        use std::str::FromStr;
+
+        /// Mock callbacks for TwampOrch testing
+        struct MockTwampCallbacks {
+            sai: Arc<MockSai>,
+            created_sessions: Mutex<Vec<String>>,
+            removed_sessions: Mutex<Vec<u64>>,
+        }
+
+        impl MockTwampCallbacks {
+            fn new(sai: Arc<MockSai>) -> Self {
+                Self {
+                    sai,
+                    created_sessions: Mutex::new(Vec::new()),
+                    removed_sessions: Mutex::new(Vec::new()),
+                }
+            }
+        }
+
+        impl TwampOrchCallbacks for MockTwampCallbacks {
+            fn create_twamp_session(&self, config: &TwampSessionConfig) -> Result<u64, String> {
+                let oid = self.sai.create_object(
+                    SaiObjectType::TwampSession,
+                    vec![
+                        ("name".to_string(), config.name.clone()),
+                        ("mode".to_string(), config.mode.as_str().to_string()),
+                        ("role".to_string(), config.role.as_str().to_string()),
+                        ("src_ip".to_string(), config.src_ip.to_string()),
+                        ("dst_ip".to_string(), config.dst_ip.to_string()),
+                        ("padding_size".to_string(), config.padding_size.to_string()),
+                        ("tx_interval".to_string(), config.tx_interval.map(|i| i.to_string()).unwrap_or_default()),
+                    ],
+                )?;
+
+                self.created_sessions
+                    .lock()
+                    .unwrap()
+                    .push(config.name.clone());
+
+                Ok(oid)
+            }
+
+            fn remove_twamp_session(&self, session_id: u64) -> Result<(), String> {
+                self.removed_sessions.lock().unwrap().push(session_id);
+                self.sai.remove_object(session_id)
+            }
+
+            fn set_session_transmit(&self, _session_id: u64, _enabled: bool) -> Result<(), String> {
+                Ok(())
+            }
+        }
+
+        /// Helper to create a TWAMP session with SAI integration
+        fn create_twamp_session(
+            orch: &mut TwampOrch,
+            name: &str,
+            mode: TwampMode,
+            role: TwampRole,
+            src_ip: &str,
+            dst_ip: &str,
+        ) -> Result<(), String> {
+            let mut config = TwampSessionConfig::new(name.to_string(), mode, role);
+            config.src_ip = IpAddress::from_str(src_ip).unwrap();
+            config.dst_ip = IpAddress::from_str(dst_ip).unwrap();
+            orch.create_session(config).map_err(|e| format!("{:?}", e))
+        }
+
+        #[test]
+        fn test_twamp_light_mode_session_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockTwampCallbacks::new(Arc::clone(&sai)));
+            let mut orch = TwampOrch::new(TwampOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Initially no sessions
+            assert_eq!(orch.session_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::TwampSession), 0);
+
+            // Create TWAMP Light mode session
+            create_twamp_session(
+                &mut orch,
+                "light_session",
+                TwampMode::Light,
+                TwampRole::Sender,
+                "10.0.0.1",
+                "10.0.0.2",
+            ).unwrap();
+
+            // Verify session created in orchestrator
+            assert_eq!(orch.session_count(), 1);
+            assert!(orch.session_exists("light_session"));
+
+            // Verify SAI object created
+            assert_eq!(sai.count_objects(SaiObjectType::TwampSession), 1);
+
+            // Verify callbacks were called
+            let created = callbacks.created_sessions.lock().unwrap();
+            assert_eq!(created.len(), 1);
+            assert_eq!(created[0], "light_session");
+            drop(created);
+
+            // Verify SAI object attributes
+            let sai_obj = sai.get_object(1).unwrap();
+            assert_eq!(sai_obj.object_type, SaiObjectType::TwampSession);
+            let mode_attr = sai_obj.attributes.iter()
+                .find(|(k, _)| k == "mode")
+                .map(|(_, v)| v.as_str());
+            assert_eq!(mode_attr, Some("light"));
+
+            // Verify statistics
+            assert_eq!(orch.stats().sessions_created, 1);
+            assert_eq!(orch.stats().sessions_removed, 0);
+
+            // Remove session
+            orch.remove_session("light_session").unwrap();
+
+            // Verify cleanup
+            assert_eq!(orch.session_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::TwampSession), 0);
+            assert_eq!(orch.stats().sessions_removed, 1);
+
+            let removed = callbacks.removed_sessions.lock().unwrap();
+            assert_eq!(removed.len(), 1);
+        }
+
+        #[test]
+        fn test_twamp_full_mode_session_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockTwampCallbacks::new(Arc::clone(&sai)));
+            let mut orch = TwampOrch::new(TwampOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Initially no sessions
+            assert_eq!(orch.session_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::TwampSession), 0);
+
+            // Create TWAMP Full mode session
+            create_twamp_session(
+                &mut orch,
+                "full_session",
+                TwampMode::Full,
+                TwampRole::Sender,
+                "192.168.1.1",
+                "192.168.1.2",
+            ).unwrap();
+
+            // Verify session created in orchestrator
+            assert_eq!(orch.session_count(), 1);
+            assert!(orch.session_exists("full_session"));
+
+            // Verify SAI object created
+            assert_eq!(sai.count_objects(SaiObjectType::TwampSession), 1);
+
+            // Verify callbacks were called
+            let created = callbacks.created_sessions.lock().unwrap();
+            assert_eq!(created.len(), 1);
+            assert_eq!(created[0], "full_session");
+            drop(created);
+
+            // Verify SAI object attributes
+            let sai_obj = sai.get_object(1).unwrap();
+            assert_eq!(sai_obj.object_type, SaiObjectType::TwampSession);
+
+            let mode_attr = sai_obj.attributes.iter()
+                .find(|(k, _)| k == "mode")
+                .map(|(_, v)| v.as_str());
+            assert_eq!(mode_attr, Some("full"));
+
+            let role_attr = sai_obj.attributes.iter()
+                .find(|(k, _)| k == "role")
+                .map(|(_, v)| v.as_str());
+            assert_eq!(role_attr, Some("sender"));
+
+            // Verify IP addresses in SAI object
+            let src_ip_attr = sai_obj.attributes.iter()
+                .find(|(k, _)| k == "src_ip")
+                .map(|(_, v)| v.as_str());
+            assert_eq!(src_ip_attr, Some("192.168.1.1"));
+
+            let dst_ip_attr = sai_obj.attributes.iter()
+                .find(|(k, _)| k == "dst_ip")
+                .map(|(_, v)| v.as_str());
+            assert_eq!(dst_ip_attr, Some("192.168.1.2"));
+
+            // Verify statistics
+            assert_eq!(orch.stats().sessions_created, 1);
+            assert_eq!(orch.stats().sessions_removed, 0);
+
+            // Remove session
+            orch.remove_session("full_session").unwrap();
+
+            // Verify cleanup
+            assert_eq!(orch.session_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::TwampSession), 0);
+            assert_eq!(orch.stats().sessions_removed, 1);
+        }
+
+        #[test]
+        fn test_twamp_session_packet_configuration_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockTwampCallbacks::new(Arc::clone(&sai)));
+            let mut orch = TwampOrch::new(TwampOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Create session with custom packet configuration
+            let mut config = TwampSessionConfig::new(
+                "packet_config_session".to_string(),
+                TwampMode::Full,
+                TwampRole::Sender,
+            );
+            config.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+            config.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+            config.padding_size = 512;  // Custom padding size
+            config.tx_interval = Some(100);  // 100ms TX interval
+
+            orch.create_session(config).unwrap();
+
+            // Verify session created
+            assert_eq!(orch.session_count(), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::TwampSession), 1);
+
+            // Verify SAI object has correct packet configuration
+            let sai_obj = sai.get_object(1).unwrap();
+            assert_eq!(sai_obj.object_type, SaiObjectType::TwampSession);
+
+            let padding_attr = sai_obj.attributes.iter()
+                .find(|(k, _)| k == "padding_size")
+                .map(|(_, v)| v.as_str());
+            assert_eq!(padding_attr, Some("512"));
+
+            let tx_interval_attr = sai_obj.attributes.iter()
+                .find(|(k, _)| k == "tx_interval")
+                .map(|(_, v)| v.as_str());
+            assert_eq!(tx_interval_attr, Some("100"));
+
+            // Verify statistics
+            assert_eq!(orch.stats().sessions_created, 1);
+
+            // Create another session with different configuration
+            let mut config2 = TwampSessionConfig::new(
+                "packet_config_session2".to_string(),
+                TwampMode::Light,
+                TwampRole::Reflector,
+            );
+            config2.src_ip = IpAddress::from_str("10.0.0.3").unwrap();
+            config2.dst_ip = IpAddress::from_str("10.0.0.4").unwrap();
+            config2.padding_size = 256;  // Different padding size
+            config2.tx_interval = Some(50);  // 50ms TX interval
+
+            orch.create_session(config2).unwrap();
+
+            // Verify both sessions exist
+            assert_eq!(orch.session_count(), 2);
+            assert_eq!(sai.count_objects(SaiObjectType::TwampSession), 2);
+
+            // Verify second session SAI object
+            let sai_obj2 = sai.get_object(2).unwrap();
+            let padding_attr2 = sai_obj2.attributes.iter()
+                .find(|(k, _)| k == "padding_size")
+                .map(|(_, v)| v.as_str());
+            assert_eq!(padding_attr2, Some("256"));
+
+            let tx_interval_attr2 = sai_obj2.attributes.iter()
+                .find(|(k, _)| k == "tx_interval")
+                .map(|(_, v)| v.as_str());
+            assert_eq!(tx_interval_attr2, Some("50"));
+
+            // Cleanup
+            orch.remove_session("packet_config_session").unwrap();
+            orch.remove_session("packet_config_session2").unwrap();
+
+            assert_eq!(orch.session_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::TwampSession), 0);
+            assert_eq!(orch.stats().sessions_removed, 2);
+        }
+
+        #[test]
+        fn test_twamp_session_removal_and_cleanup_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockTwampCallbacks::new(Arc::clone(&sai)));
+            let mut orch = TwampOrch::new(TwampOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Create multiple sessions
+            for i in 1..=5 {
+                create_twamp_session(
+                    &mut orch,
+                    &format!("session{}", i),
+                    if i % 2 == 0 { TwampMode::Full } else { TwampMode::Light },
+                    TwampRole::Sender,
+                    &format!("10.0.0.{}", i),
+                    &format!("10.0.1.{}", i),
+                ).unwrap();
+            }
+
+            // Verify all sessions created
+            assert_eq!(orch.session_count(), 5);
+            assert_eq!(sai.count_objects(SaiObjectType::TwampSession), 5);
+            assert_eq!(orch.stats().sessions_created, 5);
+
+            // Verify each session exists
+            for i in 1..=5 {
+                assert!(orch.session_exists(&format!("session{}", i)));
+            }
+
+            // Verify callbacks tracked all creations
+            let created = callbacks.created_sessions.lock().unwrap();
+            assert_eq!(created.len(), 5);
+            drop(created);
+
+            // Remove sessions one by one
+            for i in 1..=3 {
+                orch.remove_session(&format!("session{}", i)).unwrap();
+                assert_eq!(orch.session_count(), 5 - i);
+                assert!(!orch.session_exists(&format!("session{}", i)));
+            }
+
+            // Verify partial cleanup
+            assert_eq!(orch.session_count(), 2);
+            assert_eq!(sai.count_objects(SaiObjectType::TwampSession), 2);
+            assert_eq!(orch.stats().sessions_removed, 3);
+
+            // Verify remaining sessions still exist
+            assert!(orch.session_exists("session4"));
+            assert!(orch.session_exists("session5"));
+
+            // Verify callbacks tracked removals
+            let removed = callbacks.removed_sessions.lock().unwrap();
+            assert_eq!(removed.len(), 3);
+            assert_eq!(removed[0], 1);
+            assert_eq!(removed[1], 2);
+            assert_eq!(removed[2], 3);
+            drop(removed);
+
+            // Remove remaining sessions
+            orch.remove_session("session4").unwrap();
+            orch.remove_session("session5").unwrap();
+
+            // Verify complete cleanup
+            assert_eq!(orch.session_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::TwampSession), 0);
+            assert_eq!(orch.stats().sessions_created, 5);
+            assert_eq!(orch.stats().sessions_removed, 5);
+
+            // Verify all SAI objects removed
+            for i in 1..=5 {
+                assert!(sai.get_object(i).is_none());
+            }
+
+            // Verify callbacks tracked all removals
+            let removed = callbacks.removed_sessions.lock().unwrap();
+            assert_eq!(removed.len(), 5);
+        }
+    }
+
+    // DebugCounterOrch integration tests
+    mod debug_counter_orch_tests {
+        use super::*;
+        use sonic_orchagent::debug_counter::{
+            DebugCounterOrch, DebugCounterOrchCallbacks, DebugCounterOrchConfig,
+            DebugCounterConfig, DebugCounterType,
+        };
+        use sonic_sai::types::RawSaiObjectId;
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+
+        /// Mock callbacks for DebugCounterOrch integration testing
+        struct MockDebugCounterCallbacks {
+            sai: Arc<MockSai>,
+            drop_reasons: Arc<Mutex<HashMap<RawSaiObjectId, Vec<String>>>>,
+            flex_counters: Arc<Mutex<Vec<String>>>,
+        }
+
+        impl MockDebugCounterCallbacks {
+            fn new(sai: Arc<MockSai>) -> Self {
+                Self {
+                    sai,
+                    drop_reasons: Arc::new(Mutex::new(HashMap::new())),
+                    flex_counters: Arc::new(Mutex::new(Vec::new())),
+                }
+            }
+        }
+
+        impl DebugCounterOrchCallbacks for MockDebugCounterCallbacks {
+            fn create_debug_counter(&self, counter_type: DebugCounterType) -> Result<RawSaiObjectId, String> {
+                let oid = self.sai.create_object(
+                    SaiObjectType::DebugCounter,
+                    vec![
+                        ("type".to_string(), counter_type.as_str().to_string()),
+                        ("bind_method".to_string(), if counter_type.is_port_counter() { "port" } else { "switch" }.to_string()),
+                    ],
+                )?;
+                Ok(oid)
+            }
+
+            fn remove_debug_counter(&self, oid: RawSaiObjectId) -> Result<(), String> {
+                self.drop_reasons.lock().unwrap().remove(&oid);
+                self.sai.remove_object(oid)
+            }
+
+            fn add_drop_reason_to_counter(&self, counter_id: RawSaiObjectId, drop_reason: &str) -> Result<(), String> {
+                self.drop_reasons
+                    .lock()
+                    .unwrap()
+                    .entry(counter_id)
+                    .or_insert_with(Vec::new)
+                    .push(drop_reason.to_string());
+                Ok(())
+            }
+
+            fn remove_drop_reason_from_counter(&self, counter_id: RawSaiObjectId, drop_reason: &str) -> Result<(), String> {
+                if let Some(reasons) = self.drop_reasons.lock().unwrap().get_mut(&counter_id) {
+                    reasons.retain(|r| r != drop_reason);
+                }
+                Ok(())
+            }
+
+            fn register_flex_counter(&self, _counter_id: RawSaiObjectId, counter_name: &str) -> Result<(), String> {
+                self.flex_counters.lock().unwrap().push(counter_name.to_string());
+                Ok(())
+            }
+
+            fn unregister_flex_counter(&self, counter_name: &str) -> Result<(), String> {
+                self.flex_counters.lock().unwrap().retain(|name| name != counter_name);
+                Ok(())
+            }
+
+            fn get_available_drop_reasons(&self, is_ingress: bool) -> Vec<String> {
+                if is_ingress {
+                    vec![
+                        "L3_ANY".to_string(),
+                        "L2_ANY".to_string(),
+                        "SMAC_MULTICAST".to_string(),
+                        "SMAC_EQUALS_DMAC".to_string(),
+                        "INGRESS_VLAN_FILTER".to_string(),
+                        "FDB_UC_DISCARD".to_string(),
+                        "FDB_MC_DISCARD".to_string(),
+                        "L3_EGRESS_LINK_DOWN".to_string(),
+                        "DECAP_ERROR".to_string(),
+                    ]
+                } else {
+                    vec![
+                        "L2_ANY".to_string(),
+                        "L3_ANY".to_string(),
+                        "TUNNEL_LOOPBACK_PACKET_DROP".to_string(),
+                        "EGRESS_VLAN_FILTER".to_string(),
+                    ]
+                }
+            }
+        }
+
+        /// Helper function to create a debug counter configuration
+        fn create_debug_counter(
+            name: &str,
+            counter_type: DebugCounterType,
+            drop_reasons: Vec<&str>,
+        ) -> DebugCounterConfig {
+            let mut config = DebugCounterConfig::new(name.to_string(), counter_type);
+            for reason in drop_reasons {
+                config.add_drop_reason(reason.to_string());
+            }
+            config
+        }
+
+        #[test]
+        fn test_debug_counter_creation_integration() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+            let callbacks = Arc::new(MockDebugCounterCallbacks::new(Arc::clone(&sai)));
+            orch.set_callbacks(callbacks);
+
+            assert_eq!(sai.count_objects(SaiObjectType::DebugCounter), 0);
+
+            // Create counter with L2 and L3 drop reasons
+            let config = create_debug_counter(
+                "DROP_COUNTER_L2_L3",
+                DebugCounterType::PortIngressDrops,
+                vec!["L2_ANY", "L3_ANY"],
+            );
+            orch.create_debug_counter(config).unwrap();
+
+            // Verify orchestration state
+            assert_eq!(orch.counter_count(), 1);
+            assert!(orch.counter_exists("DROP_COUNTER_L2_L3"));
+            assert_eq!(orch.stats().counters_created, 1);
+            assert_eq!(orch.stats().drop_reasons_added, 2);
+
+            let entry = orch.get_counter("DROP_COUNTER_L2_L3").unwrap();
+            assert_eq!(entry.counter_type, DebugCounterType::PortIngressDrops);
+            assert_eq!(entry.drop_reason_count(), 2);
+            assert!(entry.drop_reasons.contains("L2_ANY"));
+            assert!(entry.drop_reasons.contains("L3_ANY"));
+
+            // Verify SAI synchronization
+            assert_eq!(sai.count_objects(SaiObjectType::DebugCounter), 1);
+
+            let sai_obj = sai.get_object(entry.counter_id).unwrap();
+            assert_eq!(sai_obj.object_type, SaiObjectType::DebugCounter);
+            assert_eq!(sai_obj.attributes[0].1, "PORT_INGRESS_DROPS");
+            assert_eq!(sai_obj.attributes[1].1, "port");
+        }
+
+        #[test]
+        fn test_debug_counter_direction_configuration_integration() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+            let callbacks = Arc::new(MockDebugCounterCallbacks::new(Arc::clone(&sai)));
+            orch.set_callbacks(callbacks);
+
+            assert_eq!(sai.count_objects(SaiObjectType::DebugCounter), 0);
+
+            // Create ingress counter
+            let ingress_config = create_debug_counter(
+                "INGRESS_DROPS",
+                DebugCounterType::PortIngressDrops,
+                vec!["L3_ANY", "INGRESS_VLAN_FILTER"],
+            );
+            orch.create_debug_counter(ingress_config).unwrap();
+
+            // Create egress counter
+            let egress_config = create_debug_counter(
+                "EGRESS_DROPS",
+                DebugCounterType::PortEgressDrops,
+                vec!["L2_ANY", "EGRESS_VLAN_FILTER"],
+            );
+            orch.create_debug_counter(egress_config).unwrap();
+
+            // Create switch-level counter (both directions conceptually)
+            let switch_config = create_debug_counter(
+                "SWITCH_DROPS",
+                DebugCounterType::SwitchIngressDrops,
+                vec!["L3_ANY", "DECAP_ERROR"],
+            );
+            orch.create_debug_counter(switch_config).unwrap();
+
+            // Verify orchestration state
+            assert_eq!(orch.counter_count(), 3);
+            assert_eq!(orch.stats().counters_created, 3);
+
+            let ingress = orch.get_counter("INGRESS_DROPS").unwrap();
+            assert!(ingress.counter_type.is_ingress());
+            assert!(ingress.counter_type.is_port_counter());
+
+            let egress = orch.get_counter("EGRESS_DROPS").unwrap();
+            assert!(egress.counter_type.is_egress());
+            assert!(egress.counter_type.is_port_counter());
+
+            let switch = orch.get_counter("SWITCH_DROPS").unwrap();
+            assert!(switch.counter_type.is_ingress());
+            assert!(switch.counter_type.is_switch_counter());
+
+            // Verify SAI synchronization
+            assert_eq!(sai.count_objects(SaiObjectType::DebugCounter), 3);
+
+            // Verify each counter has correct SAI attributes
+            for (name, expected_type, expected_bind) in [
+                ("INGRESS_DROPS", "PORT_INGRESS_DROPS", "port"),
+                ("EGRESS_DROPS", "PORT_EGRESS_DROPS", "port"),
+                ("SWITCH_DROPS", "SWITCH_INGRESS_DROPS", "switch"),
+            ] {
+                let entry = orch.get_counter(name).unwrap();
+                let sai_obj = sai.get_object(entry.counter_id).unwrap();
+                assert_eq!(sai_obj.attributes[0].1, expected_type);
+                assert_eq!(sai_obj.attributes[1].1, expected_bind);
+            }
+        }
+
+        #[test]
+        fn test_multiple_debug_counters_with_different_drop_reason_types_integration() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+            let callbacks = Arc::new(MockDebugCounterCallbacks::new(Arc::clone(&sai)));
+            orch.set_callbacks(callbacks.clone());
+
+            assert_eq!(sai.count_objects(SaiObjectType::DebugCounter), 0);
+
+            // Counter 1: Layer 2 drops only
+            let l2_config = create_debug_counter(
+                "L2_DROPS",
+                DebugCounterType::PortIngressDrops,
+                vec!["L2_ANY", "SMAC_MULTICAST", "SMAC_EQUALS_DMAC"],
+            );
+            orch.create_debug_counter(l2_config).unwrap();
+
+            // Counter 2: Layer 3 drops only
+            let l3_config = create_debug_counter(
+                "L3_DROPS",
+                DebugCounterType::PortIngressDrops,
+                vec!["L3_ANY", "L3_EGRESS_LINK_DOWN"],
+            );
+            orch.create_debug_counter(l3_config).unwrap();
+
+            // Counter 3: VLAN-specific drops
+            let vlan_config = create_debug_counter(
+                "VLAN_DROPS",
+                DebugCounterType::SwitchIngressDrops,
+                vec!["INGRESS_VLAN_FILTER"],
+            );
+            orch.create_debug_counter(vlan_config).unwrap();
+
+            // Counter 4: FDB drops
+            let fdb_config = create_debug_counter(
+                "FDB_DROPS",
+                DebugCounterType::SwitchIngressDrops,
+                vec!["FDB_UC_DISCARD", "FDB_MC_DISCARD"],
+            );
+            orch.create_debug_counter(fdb_config).unwrap();
+
+            // Verify orchestration state
+            assert_eq!(orch.counter_count(), 4);
+            assert_eq!(orch.stats().counters_created, 4);
+            assert_eq!(orch.stats().drop_reasons_added, 3 + 2 + 1 + 2); // Total drop reasons added
+
+            // Verify each counter has correct drop reasons
+            let l2_counter = orch.get_counter("L2_DROPS").unwrap();
+            assert_eq!(l2_counter.drop_reason_count(), 3);
+            assert!(l2_counter.drop_reasons.contains("L2_ANY"));
+            assert!(l2_counter.drop_reasons.contains("SMAC_MULTICAST"));
+
+            let l3_counter = orch.get_counter("L3_DROPS").unwrap();
+            assert_eq!(l3_counter.drop_reason_count(), 2);
+            assert!(l3_counter.drop_reasons.contains("L3_ANY"));
+
+            let vlan_counter = orch.get_counter("VLAN_DROPS").unwrap();
+            assert_eq!(vlan_counter.drop_reason_count(), 1);
+            assert!(vlan_counter.drop_reasons.contains("INGRESS_VLAN_FILTER"));
+
+            let fdb_counter = orch.get_counter("FDB_DROPS").unwrap();
+            assert_eq!(fdb_counter.drop_reason_count(), 2);
+            assert!(fdb_counter.drop_reasons.contains("FDB_UC_DISCARD"));
+            assert!(fdb_counter.drop_reasons.contains("FDB_MC_DISCARD"));
+
+            // Verify SAI synchronization - all counters created
+            assert_eq!(sai.count_objects(SaiObjectType::DebugCounter), 4);
+
+            // Verify drop reasons were registered with SAI
+            let drop_reasons = callbacks.drop_reasons.lock().unwrap();
+            assert_eq!(drop_reasons.get(&l2_counter.counter_id).unwrap().len(), 3);
+            assert_eq!(drop_reasons.get(&l3_counter.counter_id).unwrap().len(), 2);
+            assert_eq!(drop_reasons.get(&vlan_counter.counter_id).unwrap().len(), 1);
+            assert_eq!(drop_reasons.get(&fdb_counter.counter_id).unwrap().len(), 2);
+        }
+
+        #[test]
+        fn test_debug_counter_removal_and_cleanup_integration() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+            let callbacks = Arc::new(MockDebugCounterCallbacks::new(Arc::clone(&sai)));
+            orch.set_callbacks(callbacks.clone());
+
+            assert_eq!(sai.count_objects(SaiObjectType::DebugCounter), 0);
+
+            // Create multiple counters
+            let config1 = create_debug_counter(
+                "COUNTER_1",
+                DebugCounterType::PortIngressDrops,
+                vec!["L2_ANY", "L3_ANY"],
+            );
+            let config2 = create_debug_counter(
+                "COUNTER_2",
+                DebugCounterType::PortEgressDrops,
+                vec!["EGRESS_VLAN_FILTER"],
+            );
+            let config3 = create_debug_counter(
+                "COUNTER_3",
+                DebugCounterType::SwitchIngressDrops,
+                vec!["DECAP_ERROR", "FDB_UC_DISCARD"],
+            );
+
+            orch.create_debug_counter(config1).unwrap();
+            orch.create_debug_counter(config2).unwrap();
+            orch.create_debug_counter(config3).unwrap();
+
+            let counter1_oid = orch.get_counter("COUNTER_1").unwrap().counter_id;
+            let counter2_oid = orch.get_counter("COUNTER_2").unwrap().counter_id;
+            let counter3_oid = orch.get_counter("COUNTER_3").unwrap().counter_id;
+
+            assert_eq!(orch.counter_count(), 3);
+            assert_eq!(sai.count_objects(SaiObjectType::DebugCounter), 3);
+
+            // Verify drop reasons are registered
+            {
+                let drop_reasons = callbacks.drop_reasons.lock().unwrap();
+                assert_eq!(drop_reasons.get(&counter1_oid).unwrap().len(), 2);
+                assert_eq!(drop_reasons.get(&counter2_oid).unwrap().len(), 1);
+                assert_eq!(drop_reasons.get(&counter3_oid).unwrap().len(), 2);
+            }
+
+            // Remove COUNTER_2
+            orch.remove_debug_counter("COUNTER_2").unwrap();
+
+            // Verify orchestration cleanup
+            assert_eq!(orch.counter_count(), 2);
+            assert!(!orch.counter_exists("COUNTER_2"));
+            assert!(orch.counter_exists("COUNTER_1"));
+            assert!(orch.counter_exists("COUNTER_3"));
+            assert_eq!(orch.stats().counters_created, 3);
+            assert_eq!(orch.stats().counters_removed, 1);
+
+            // Verify SAI cleanup - COUNTER_2 should be gone
+            assert_eq!(sai.count_objects(SaiObjectType::DebugCounter), 2);
+            assert!(sai.get_object(counter2_oid).is_none());
+
+            // Verify drop reasons cleaned up for COUNTER_2
+            {
+                let drop_reasons = callbacks.drop_reasons.lock().unwrap();
+                assert!(!drop_reasons.contains_key(&counter2_oid));
+                assert!(drop_reasons.contains_key(&counter1_oid));
+                assert!(drop_reasons.contains_key(&counter3_oid));
+            }
+
+            // Remove remaining counters
+            orch.remove_debug_counter("COUNTER_1").unwrap();
+            orch.remove_debug_counter("COUNTER_3").unwrap();
+
+            // Verify complete cleanup
+            assert_eq!(orch.counter_count(), 0);
+            assert_eq!(orch.stats().counters_removed, 3);
+            assert_eq!(sai.count_objects(SaiObjectType::DebugCounter), 0);
+
+            // Verify all drop reasons cleaned up
+            {
+                let drop_reasons = callbacks.drop_reasons.lock().unwrap();
+                assert!(drop_reasons.is_empty());
+            }
+        }
+    }
 }
+
+    // CrmOrch integration tests
+    mod crm_orch_tests {
+        use super::*;
+        use sonic_orchagent::crm::{
+            CrmOrch, CrmOrchCallbacks, CrmOrchConfig, CrmResourceType, CrmThresholdType,
+            ThresholdCheck, CRM_COUNTERS_TABLE_KEY,
+        };
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+
+        struct MockCrmCallbacks {
+            sai: Arc<MockSai>,
+            resource_availability: Arc<Mutex<HashMap<CrmResourceType, (u32, u32)>>>,
+            threshold_events: Arc<Mutex<Vec<ThresholdEvent>>>,
+            counter_writes: Arc<Mutex<Vec<CounterWrite>>>,
+            is_dpu: bool,
+        }
+
+        #[derive(Debug, Clone)]
+        struct ThresholdEvent {
+            resource: String,
+            counter_key: String,
+            used: u32,
+            available: u32,
+            threshold: u32,
+            exceeded: bool,
+        }
+
+        #[derive(Debug, Clone)]
+        struct CounterWrite {
+            resource: String,
+            key: String,
+            used: u32,
+            available: u32,
+        }
+
+        impl MockCrmCallbacks {
+            fn new(sai: Arc<MockSai>) -> Self {
+                Self {
+                    sai,
+                    resource_availability: Arc::new(Mutex::new(HashMap::new())),
+                    threshold_events: Arc::new(Mutex::new(Vec::new())),
+                    counter_writes: Arc::new(Mutex::new(Vec::new())),
+                    is_dpu: false,
+                }
+            }
+
+            fn set_resource_availability(&self, resource_type: CrmResourceType, used: u32, available: u32) {
+                self.resource_availability.lock().unwrap().insert(resource_type, (used, available));
+            }
+
+            fn get_threshold_events(&self) -> Vec<ThresholdEvent> {
+                self.threshold_events.lock().unwrap().clone()
+            }
+
+            fn get_counter_writes(&self) -> Vec<CounterWrite> {
+                self.counter_writes.lock().unwrap().clone()
+            }
+
+            fn clear_events(&self) {
+                self.threshold_events.lock().unwrap().clear();
+            }
+        }
+
+        impl CrmOrchCallbacks for MockCrmCallbacks {
+            fn publish_threshold_event(
+                &self,
+                resource: &str,
+                counter_key: &str,
+                used: u32,
+                available: u32,
+                threshold: u32,
+                exceeded: bool,
+            ) {
+                self.threshold_events.lock().unwrap().push(ThresholdEvent {
+                    resource: resource.to_string(),
+                    counter_key: counter_key.to_string(),
+                    used,
+                    available,
+                    threshold,
+                    exceeded,
+                });
+            }
+
+            fn query_resource_availability(
+                &self,
+                resource_type: CrmResourceType,
+            ) -> Option<(u32, u32)> {
+                self.resource_availability.lock().unwrap().get(&resource_type).copied()
+            }
+
+            fn query_acl_availability(
+                &self,
+                _stage: sonic_orchagent::crm::AclStage,
+                _bind_point: sonic_orchagent::crm::AclBindPoint,
+            ) -> Option<(u32, u32)> {
+                None
+            }
+
+            fn write_counters(
+                &self,
+                resource: &str,
+                key: &str,
+                used: u32,
+                available: u32,
+            ) {
+                self.counter_writes.lock().unwrap().push(CounterWrite {
+                    resource: resource.to_string(),
+                    key: key.to_string(),
+                    used,
+                    available,
+                });
+            }
+
+            fn is_dpu(&self) -> bool {
+                self.is_dpu
+            }
+        }
+
+        #[test]
+        fn test_crm_resource_tracking_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockCrmCallbacks::new(Arc::clone(&sai)));
+            let mut orch = CrmOrch::new(CrmOrchConfig::default());
+            orch.set_callbacks(Arc::clone(&callbacks) as Arc<dyn CrmOrchCallbacks>);
+
+            // Track IPv4 routes
+            assert_eq!(orch.increment_used(CrmResourceType::Ipv4Route).unwrap(), 1);
+            assert_eq!(orch.increment_used(CrmResourceType::Ipv4Route).unwrap(), 2);
+            assert_eq!(orch.increment_used(CrmResourceType::Ipv4Route).unwrap(), 3);
+            assert_eq!(orch.get_used(CrmResourceType::Ipv4Route), Some(3));
+
+            // Track IPv6 routes
+            assert_eq!(orch.increment_used(CrmResourceType::Ipv6Route).unwrap(), 1);
+            assert_eq!(orch.increment_used(CrmResourceType::Ipv6Route).unwrap(), 2);
+            assert_eq!(orch.get_used(CrmResourceType::Ipv6Route), Some(2));
+
+            // Track nexthops
+            assert_eq!(orch.increment_used(CrmResourceType::NexthopGroup).unwrap(), 1);
+            assert_eq!(orch.increment_used(CrmResourceType::NexthopGroupMember).unwrap(), 1);
+            assert_eq!(orch.increment_used(CrmResourceType::NexthopGroupMember).unwrap(), 2);
+            assert_eq!(orch.increment_used(CrmResourceType::NexthopGroupMember).unwrap(), 3);
+
+            // Verify statistics (3 + 2 + 1 + 3 = 9 increments total)
+            assert_eq!(orch.stats().increments, 9);
+            assert_eq!(orch.stats().decrements, 0);
+
+            // Set available counters from SAI
+            callbacks.set_resource_availability(CrmResourceType::Ipv4Route, 3, 1000);
+            callbacks.set_resource_availability(CrmResourceType::Ipv6Route, 2, 500);
+            callbacks.set_resource_availability(CrmResourceType::NexthopGroup, 1, 100);
+
+            // Trigger timer expiration to query SAI and update counters
+            orch.handle_timer_expiration();
+
+            // Verify available counters were updated
+            assert_eq!(orch.get_available(CrmResourceType::Ipv4Route), Some(1000));
+            assert_eq!(orch.get_available(CrmResourceType::Ipv6Route), Some(500));
+            assert_eq!(orch.get_available(CrmResourceType::NexthopGroup), Some(100));
+
+            // Verify counter writes to COUNTERS_DB
+            let writes = callbacks.get_counter_writes();
+            assert!(writes.iter().any(|w| w.resource == "ipv4_route" && w.used == 3 && w.available == 1000));
+            assert!(writes.iter().any(|w| w.resource == "ipv6_route" && w.used == 2 && w.available == 500));
+            assert!(writes.iter().any(|w| w.resource == "nexthop_group" && w.used == 1 && w.available == 100));
+
+            // Verify timer statistics
+            assert_eq!(orch.stats().timer_expirations, 1);
+
+            // Test decrement
+            assert_eq!(orch.decrement_used(CrmResourceType::Ipv4Route).unwrap(), 2);
+            assert_eq!(orch.get_used(CrmResourceType::Ipv4Route), Some(2));
+            assert_eq!(orch.stats().decrements, 1);
+        }
+
+        #[test]
+        fn test_crm_threshold_configuration_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockCrmCallbacks::new(Arc::clone(&sai)));
+            let mut orch = CrmOrch::new(CrmOrchConfig::default());
+            orch.set_callbacks(Arc::clone(&callbacks) as Arc<dyn CrmOrchCallbacks>);
+
+            // Configure percentage-based thresholds for IPv4 routes
+            orch.set_threshold_type(CrmResourceType::Ipv4Route, CrmThresholdType::Percentage).unwrap();
+            orch.set_high_threshold(CrmResourceType::Ipv4Route, 85).unwrap();
+            orch.set_low_threshold(CrmResourceType::Ipv4Route, 70).unwrap();
+
+            let entry = orch.get_resource(CrmResourceType::Ipv4Route).unwrap();
+            assert_eq!(entry.threshold_type, CrmThresholdType::Percentage);
+            assert_eq!(entry.high_threshold, 85);
+            assert_eq!(entry.low_threshold, 70);
+
+            // Configure absolute (used) thresholds for IPv6 neighbors
+            orch.set_threshold_type(CrmResourceType::Ipv6Neighbor, CrmThresholdType::Used).unwrap();
+            orch.set_high_threshold(CrmResourceType::Ipv6Neighbor, 1000).unwrap();
+            orch.set_low_threshold(CrmResourceType::Ipv6Neighbor, 500).unwrap();
+
+            let entry = orch.get_resource(CrmResourceType::Ipv6Neighbor).unwrap();
+            assert_eq!(entry.threshold_type, CrmThresholdType::Used);
+            assert_eq!(entry.high_threshold, 1000);
+            assert_eq!(entry.low_threshold, 500);
+
+            // Configure free threshold for FDB entries
+            orch.set_threshold_type(CrmResourceType::FdbEntry, CrmThresholdType::Free).unwrap();
+            orch.set_high_threshold(CrmResourceType::FdbEntry, 200).unwrap();
+            orch.set_low_threshold(CrmResourceType::FdbEntry, 100).unwrap();
+
+            let entry = orch.get_resource(CrmResourceType::FdbEntry).unwrap();
+            assert_eq!(entry.threshold_type, CrmThresholdType::Free);
+            assert_eq!(entry.high_threshold, 200);
+            assert_eq!(entry.low_threshold, 100);
+
+            // Verify config update statistics
+            assert_eq!(orch.stats().config_updates, 9);
+
+            // Test configuration via field names
+            orch.handle_config_field("ipv4_route_threshold_type", "used").unwrap();
+            orch.handle_config_field("ipv4_route_high_threshold", "5000").unwrap();
+            orch.handle_config_field("ipv4_route_low_threshold", "3000").unwrap();
+
+            let entry = orch.get_resource(CrmResourceType::Ipv4Route).unwrap();
+            assert_eq!(entry.threshold_type, CrmThresholdType::Used);
+            assert_eq!(entry.high_threshold, 5000);
+            assert_eq!(entry.low_threshold, 3000);
+
+            assert_eq!(orch.stats().config_updates, 12);
+        }
+
+        #[test]
+        fn test_crm_polling_interval_updates_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockCrmCallbacks::new(Arc::clone(&sai)));
+            let mut orch = CrmOrch::new(CrmOrchConfig::default());
+            orch.set_callbacks(Arc::clone(&callbacks) as Arc<dyn CrmOrchCallbacks>);
+
+            // Verify default polling interval (300 seconds = 5 minutes)
+            assert_eq!(orch.polling_interval(), std::time::Duration::from_secs(300));
+
+            // Update polling interval to 60 seconds
+            orch.set_polling_interval(std::time::Duration::from_secs(60));
+            assert_eq!(orch.polling_interval(), std::time::Duration::from_secs(60));
+            assert_eq!(orch.stats().config_updates, 1);
+
+            // Update polling interval to 2 minutes
+            orch.set_polling_interval(std::time::Duration::from_secs(120));
+            assert_eq!(orch.polling_interval(), std::time::Duration::from_secs(120));
+            assert_eq!(orch.stats().config_updates, 2);
+
+            // Test very short interval (1 second)
+            orch.set_polling_interval(std::time::Duration::from_secs(1));
+            assert_eq!(orch.polling_interval(), std::time::Duration::from_secs(1));
+
+            // Test very long interval (1 hour)
+            orch.set_polling_interval(std::time::Duration::from_secs(3600));
+            assert_eq!(orch.polling_interval(), std::time::Duration::from_secs(3600));
+
+            // Test configuration via field name
+            orch.handle_config_field("polling_interval", "180").unwrap();
+            assert_eq!(orch.polling_interval(), std::time::Duration::from_secs(180));
+
+            // Add some resources and trigger timer to verify polling works
+            orch.increment_used(CrmResourceType::Ipv4Route).unwrap();
+            orch.increment_used(CrmResourceType::Ipv6Route).unwrap();
+
+            callbacks.set_resource_availability(CrmResourceType::Ipv4Route, 1, 1000);
+            callbacks.set_resource_availability(CrmResourceType::Ipv6Route, 1, 500);
+
+            // Trigger multiple timer expirations
+            orch.handle_timer_expiration();
+            orch.handle_timer_expiration();
+            orch.handle_timer_expiration();
+
+            // Verify timer statistics
+            assert_eq!(orch.stats().timer_expirations, 3);
+
+            // Verify counter writes occurred for each timer expiration
+            let writes = callbacks.get_counter_writes();
+            let ipv4_writes = writes.iter().filter(|w| w.resource == "ipv4_route").count();
+            let ipv6_writes = writes.iter().filter(|w| w.resource == "ipv6_route").count();
+            assert!(ipv4_writes >= 3);
+            assert!(ipv6_writes >= 3);
+        }
+
+        #[test]
+        fn test_crm_resource_alarm_triggering_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockCrmCallbacks::new(Arc::clone(&sai)));
+            let mut orch = CrmOrch::new(CrmOrchConfig::default());
+            orch.set_callbacks(Arc::clone(&callbacks) as Arc<dyn CrmOrchCallbacks>);
+
+            // Configure percentage-based thresholds
+            orch.set_threshold_type(CrmResourceType::Ipv4Route, CrmThresholdType::Percentage).unwrap();
+            orch.set_high_threshold(CrmResourceType::Ipv4Route, 85).unwrap();
+            orch.set_low_threshold(CrmResourceType::Ipv4Route, 70).unwrap();
+
+            // Add routes to trigger high threshold
+            // 90% usage: 90 used, 10 available
+            for _ in 0..90 {
+                orch.increment_used(CrmResourceType::Ipv4Route).unwrap();
+            }
+            assert_eq!(orch.get_used(CrmResourceType::Ipv4Route), Some(90));
+
+            // Set available from SAI
+            callbacks.set_resource_availability(CrmResourceType::Ipv4Route, 90, 10);
+
+            // Trigger timer to check thresholds
+            orch.handle_timer_expiration();
+
+            // Verify high threshold event was published
+            let events = callbacks.get_threshold_events();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].resource, "ipv4_route");
+            assert_eq!(events[0].used, 90);
+            assert_eq!(events[0].available, 10);
+            assert_eq!(events[0].threshold, 85);
+            assert!(events[0].exceeded);
+            assert_eq!(orch.stats().threshold_events, 1);
+
+            // Clear events for next test
+            callbacks.clear_events();
+
+            // Reduce usage below low threshold to trigger recovery
+            // 60% usage: 60 used, 40 available
+            for _ in 0..30 {
+                orch.decrement_used(CrmResourceType::Ipv4Route).unwrap();
+            }
+            callbacks.set_resource_availability(CrmResourceType::Ipv4Route, 60, 40);
+
+            // Trigger timer to check thresholds
+            orch.handle_timer_expiration();
+
+            // Verify recovery event was published
+            let events = callbacks.get_threshold_events();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].resource, "ipv4_route");
+            assert_eq!(events[0].used, 60);
+            assert_eq!(events[0].available, 40);
+            assert_eq!(events[0].threshold, 70);
+            assert!(!events[0].exceeded);
+
+            // Test absolute (used) threshold
+            callbacks.clear_events();
+            orch.set_threshold_type(CrmResourceType::Ipv6Neighbor, CrmThresholdType::Used).unwrap();
+            orch.set_high_threshold(CrmResourceType::Ipv6Neighbor, 100).unwrap();
+            orch.set_low_threshold(CrmResourceType::Ipv6Neighbor, 50).unwrap();
+
+            // Add neighbors to exceed threshold
+            for _ in 0..110 {
+                orch.increment_used(CrmResourceType::Ipv6Neighbor).unwrap();
+            }
+            callbacks.set_resource_availability(CrmResourceType::Ipv6Neighbor, 110, 500);
+
+            orch.handle_timer_expiration();
+
+            // Verify threshold exceeded
+            let events = callbacks.get_threshold_events();
+            let ipv6_event = events.iter().find(|e| e.resource == "ipv6_neighbor");
+            assert!(ipv6_event.is_some());
+            let event = ipv6_event.unwrap();
+            assert_eq!(event.used, 110);
+            assert!(event.exceeded);
+            assert_eq!(event.threshold, 100);
+
+            // Test free threshold
+            callbacks.clear_events();
+            orch.set_threshold_type(CrmResourceType::FdbEntry, CrmThresholdType::Free).unwrap();
+            orch.set_high_threshold(CrmResourceType::FdbEntry, 200).unwrap();
+            orch.set_low_threshold(CrmResourceType::FdbEntry, 100).unwrap();
+
+            // Set high free count to trigger threshold
+            orch.increment_used(CrmResourceType::FdbEntry).unwrap();
+            callbacks.set_resource_availability(CrmResourceType::FdbEntry, 1, 250);
+
+            orch.handle_timer_expiration();
+
+            // Verify free threshold exceeded (high free is considered exceeded)
+            let events = callbacks.get_threshold_events();
+            let fdb_event = events.iter().find(|e| e.resource == "fdb_entry");
+            assert!(fdb_event.is_some());
+            let event = fdb_event.unwrap();
+            assert_eq!(event.available, 250);
+            assert!(event.exceeded);
+            assert_eq!(event.threshold, 200);
+        }
+    }
+
+    // WatermarkOrch integration tests
+    mod watermark_orch_tests {
+        use super::*;
+        use sonic_orchagent::watermark::{
+            WatermarkOrch, WatermarkOrchConfig, WatermarkOrchCallbacks,
+            WatermarkGroup, WatermarkTable, ClearRequest, QueueType,
+        };
+        use std::collections::HashMap;
+        use std::sync::Mutex;
+        use std::time::Duration;
+        use sonic_sai::types::RawSaiObjectId;
+
+        /// Helper to create watermark config with custom interval
+        fn create_watermark_config(interval_secs: u64) -> WatermarkOrchConfig {
+            WatermarkOrchConfig::with_interval_secs(interval_secs)
+        }
+
+        /// Mock callbacks for testing watermark clearing
+        struct MockWatermarkCallbacks {
+            ports_ready: bool,
+            cleared_watermarks: Arc<Mutex<Vec<(WatermarkTable, String, RawSaiObjectId)>>>,
+            cleared_by_name: Arc<Mutex<Vec<(WatermarkTable, String, String)>>>,
+            buffer_pools: HashMap<String, RawSaiObjectId>,
+        }
+
+        impl MockWatermarkCallbacks {
+            fn new(ports_ready: bool) -> Self {
+                Self {
+                    ports_ready,
+                    cleared_watermarks: Arc::new(Mutex::new(Vec::new())),
+                    cleared_by_name: Arc::new(Mutex::new(Vec::new())),
+                    buffer_pools: HashMap::new(),
+                }
+            }
+
+            fn with_buffer_pools(mut self, pools: HashMap<String, RawSaiObjectId>) -> Self {
+                self.buffer_pools = pools;
+                self
+            }
+
+            fn clear_count(&self) -> usize {
+                self.cleared_watermarks.lock().unwrap().len()
+            }
+
+            fn clear_by_name_count(&self) -> usize {
+                self.cleared_by_name.lock().unwrap().len()
+            }
+        }
+
+        impl WatermarkOrchCallbacks for MockWatermarkCallbacks {
+            fn all_ports_ready(&self) -> bool {
+                self.ports_ready
+            }
+
+            fn clear_watermark(&self, table: WatermarkTable, stat_name: &str, obj_id: RawSaiObjectId) {
+                self.cleared_watermarks
+                    .lock()
+                    .unwrap()
+                    .push((table, stat_name.to_string(), obj_id));
+            }
+
+            fn clear_watermark_by_name(&self, table: WatermarkTable, stat_name: &str, name: &str) {
+                self.cleared_by_name
+                    .lock()
+                    .unwrap()
+                    .push((table, stat_name.to_string(), name.to_string()));
+            }
+
+            fn get_buffer_pool_oids(&self) -> HashMap<String, RawSaiObjectId> {
+                self.buffer_pools.clone()
+            }
+        }
+
+        #[test]
+        fn test_watermark_queue_monitoring_integration() {
+            let sai = MockSai::new();
+            let mut orch = WatermarkOrch::new(WatermarkOrchConfig::default());
+
+            // Create queue objects in SAI
+            let unicast_q1 = sai.create_object(
+                SaiObjectType::QueueCounter,
+                vec![("type".to_string(), "UNICAST".to_string())]
+            ).unwrap();
+            let unicast_q2 = sai.create_object(
+                SaiObjectType::QueueCounter,
+                vec![("type".to_string(), "UNICAST".to_string())]
+            ).unwrap();
+            let multicast_q1 = sai.create_object(
+                SaiObjectType::QueueCounter,
+                vec![("type".to_string(), "MULTICAST".to_string())]
+            ).unwrap();
+            let multicast_q2 = sai.create_object(
+                SaiObjectType::QueueCounter,
+                vec![("type".to_string(), "MULTICAST".to_string())]
+            ).unwrap();
+
+            // Setup watermark orchestrator with queue IDs
+            orch.add_queue_id(QueueType::Unicast, unicast_q1);
+            orch.add_queue_id(QueueType::Unicast, unicast_q2);
+            orch.add_queue_id(QueueType::Multicast, multicast_q1);
+            orch.add_queue_id(QueueType::Multicast, multicast_q2);
+            orch.add_queue_id(QueueType::All, unicast_q1);
+            orch.add_queue_id(QueueType::All, unicast_q2);
+
+            assert!(orch.queue_ids_initialized());
+            assert_eq!(orch.queue_ids().unicast.len(), 2);
+            assert_eq!(orch.queue_ids().multicast.len(), 2);
+            assert_eq!(orch.queue_ids().all.len(), 2);
+
+            // Enable queue watermark monitoring
+            let should_start_timer = orch.handle_flex_counter_status(WatermarkGroup::Queue, true);
+            assert!(should_start_timer);
+            assert!(orch.is_enabled());
+            assert!(orch.status().queue_enabled());
+
+            // Setup mock callbacks
+            let callbacks = Arc::new(MockWatermarkCallbacks::new(true));
+            orch.set_callbacks(callbacks.clone());
+
+            // Clear unicast queue watermarks
+            orch.handle_clear_request(WatermarkTable::User, ClearRequest::QueueSharedUnicast).unwrap();
+            assert_eq!(callbacks.clear_count(), 2);
+            assert_eq!(orch.stats().clears_processed, 1);
+
+            // Clear multicast queue watermarks
+            orch.handle_clear_request(WatermarkTable::User, ClearRequest::QueueSharedMulticast).unwrap();
+            assert_eq!(callbacks.clear_count(), 4);
+            assert_eq!(orch.stats().clears_processed, 2);
+
+            // Disable queue watermark monitoring
+            let should_stop_timer = orch.handle_flex_counter_status(WatermarkGroup::Queue, false);
+            assert!(!should_stop_timer);
+            assert!(!orch.is_enabled());
+            assert!(!orch.status().queue_enabled());
+
+            // Verify statistics
+            assert_eq!(orch.stats().config_updates, 2);
+
+            // Cleanup - verify SAI objects exist
+            assert_eq!(sai.count_objects(SaiObjectType::QueueCounter), 4);
+            sai.clear();
+            assert_eq!(sai.count_objects(SaiObjectType::QueueCounter), 0);
+        }
+
+        #[test]
+        fn test_watermark_priority_group_monitoring_integration() {
+            let sai = MockSai::new();
+            let mut orch = WatermarkOrch::new(WatermarkOrchConfig::default());
+
+            // Create PG objects in SAI (typically 8 PGs per port)
+            let mut pg_oids = Vec::new();
+            for i in 0..8 {
+                let oid = sai.create_object(
+                    SaiObjectType::BufferCounter,
+                    vec![
+                        ("pg_index".to_string(), i.to_string()),
+                        ("type".to_string(), "PRIORITY_GROUP".to_string())
+                    ]
+                ).unwrap();
+                pg_oids.push(oid);
+                orch.add_pg_id(oid);
+            }
+
+            assert!(orch.pg_ids_initialized());
+            assert_eq!(orch.pg_ids().len(), 8);
+
+            // Enable PG watermark monitoring
+            let should_start_timer = orch.handle_flex_counter_status(WatermarkGroup::PriorityGroup, true);
+            assert!(should_start_timer);
+            assert!(orch.is_enabled());
+            assert!(orch.status().pg_enabled());
+
+            // Setup mock callbacks
+            let callbacks = Arc::new(MockWatermarkCallbacks::new(true));
+            orch.set_callbacks(callbacks.clone());
+
+            // Clear PG headroom watermarks
+            orch.handle_clear_request(WatermarkTable::Persistent, ClearRequest::PgHeadroom).unwrap();
+            assert_eq!(callbacks.clear_count(), 8);
+            assert_eq!(orch.stats().clears_processed, 1);
+
+            // Clear PG shared watermarks
+            orch.handle_clear_request(WatermarkTable::Persistent, ClearRequest::PgShared).unwrap();
+            assert_eq!(callbacks.clear_count(), 16);
+            assert_eq!(orch.stats().clears_processed, 2);
+
+            // Verify timer expiration handles PG watermarks
+            orch.handle_timer_expiration();
+            assert_eq!(orch.stats().timer_expirations, 1);
+            // Timer clears both headroom and shared for all PGs
+            assert_eq!(callbacks.clear_count(), 32);
+
+            // Disable PG watermark monitoring
+            orch.handle_flex_counter_status(WatermarkGroup::PriorityGroup, false);
+            assert!(!orch.is_enabled());
+            assert!(!orch.status().pg_enabled());
+
+            // Verify SAI objects
+            assert_eq!(sai.count_objects(SaiObjectType::BufferCounter), 8);
+
+            // Cleanup
+            sai.clear();
+            assert_eq!(sai.count_objects(SaiObjectType::BufferCounter), 0);
+        }
+
+        #[test]
+        fn test_watermark_buffer_pool_monitoring_integration() {
+            let sai = MockSai::new();
+            let mut orch = WatermarkOrch::new(WatermarkOrchConfig::default());
+
+            // Create buffer pool objects in SAI
+            let ingress_lossless = sai.create_object(
+                SaiObjectType::BufferPool,
+                vec![
+                    ("name".to_string(), "ingress_lossless_pool".to_string()),
+                    ("type".to_string(), "INGRESS".to_string()),
+                    ("mode".to_string(), "DYNAMIC".to_string())
+                ]
+            ).unwrap();
+
+            let egress_lossless = sai.create_object(
+                SaiObjectType::BufferPool,
+                vec![
+                    ("name".to_string(), "egress_lossless_pool".to_string()),
+                    ("type".to_string(), "EGRESS".to_string()),
+                    ("mode".to_string(), "DYNAMIC".to_string())
+                ]
+            ).unwrap();
+
+            let ingress_lossy = sai.create_object(
+                SaiObjectType::BufferPool,
+                vec![
+                    ("name".to_string(), "ingress_lossy_pool".to_string()),
+                    ("type".to_string(), "INGRESS".to_string()),
+                    ("mode".to_string(), "STATIC".to_string())
+                ]
+            ).unwrap();
+
+            // Setup buffer pool OID mapping
+            let mut pools = HashMap::new();
+            pools.insert("ingress_lossless_pool".to_string(), ingress_lossless);
+            pools.insert("egress_lossless_pool".to_string(), egress_lossless);
+            pools.insert("ingress_lossy_pool".to_string(), ingress_lossy);
+
+            let callbacks = Arc::new(MockWatermarkCallbacks::new(true).with_buffer_pools(pools));
+            orch.set_callbacks(callbacks.clone());
+
+            // Enable both queue and PG monitoring (enables buffer pool monitoring)
+            orch.handle_flex_counter_status(WatermarkGroup::Queue, true);
+            orch.handle_flex_counter_status(WatermarkGroup::PriorityGroup, true);
+            assert!(orch.is_enabled());
+
+            // Clear buffer pool watermarks
+            orch.handle_clear_request(WatermarkTable::User, ClearRequest::BufferPool).unwrap();
+            assert_eq!(callbacks.clear_count(), 3);
+            assert_eq!(callbacks.clear_by_name_count(), 3);
+            assert_eq!(orch.stats().clears_processed, 1);
+
+            // Clear headroom pool watermarks
+            orch.handle_clear_request(WatermarkTable::User, ClearRequest::HeadroomPool).unwrap();
+            assert_eq!(callbacks.clear_count(), 6);
+            assert_eq!(callbacks.clear_by_name_count(), 6);
+            assert_eq!(orch.stats().clears_processed, 2);
+
+            // Verify timer expiration handles buffer pools
+            orch.handle_timer_expiration();
+            assert_eq!(orch.stats().timer_expirations, 1);
+            // Timer clears both buffer pool and headroom pool watermarks (3 pools x 2 types = 6)
+            assert_eq!(callbacks.clear_count(), 12);
+            assert_eq!(callbacks.clear_by_name_count(), 12);
+
+            // Verify SAI objects
+            assert_eq!(sai.count_objects(SaiObjectType::BufferPool), 3);
+
+            let pool1 = sai.get_object(ingress_lossless).unwrap();
+            assert_eq!(pool1.object_type, SaiObjectType::BufferPool);
+
+            // Cleanup
+            sai.clear();
+            assert_eq!(sai.count_objects(SaiObjectType::BufferPool), 0);
+        }
+
+        #[test]
+        fn test_watermark_telemetry_interval_configuration_integration() {
+            let sai = MockSai::new();
+
+            // Test default configuration
+            let mut orch = WatermarkOrch::new(WatermarkOrchConfig::default());
+            assert_eq!(orch.telemetry_interval(), Duration::from_secs(120));
+            assert!(!orch.timer_changed());
+
+            // Create queue and PG objects
+            let queue_oid = sai.create_object(
+                SaiObjectType::QueueCounter,
+                vec![("type".to_string(), "UNICAST".to_string())]
+            ).unwrap();
+            let pg_oid = sai.create_object(
+                SaiObjectType::BufferCounter,
+                vec![("type".to_string(), "PRIORITY_GROUP".to_string())]
+            ).unwrap();
+
+            orch.add_queue_id(QueueType::Unicast, queue_oid);
+            orch.add_pg_id(pg_oid);
+
+            // Setup callbacks
+            let callbacks = Arc::new(MockWatermarkCallbacks::new(true));
+            orch.set_callbacks(callbacks.clone());
+
+            // Enable monitoring
+            orch.handle_flex_counter_status(WatermarkGroup::Queue, true);
+            orch.handle_flex_counter_status(WatermarkGroup::PriorityGroup, true);
+
+            // Test custom interval configuration
+            let orch2 = WatermarkOrch::new(create_watermark_config(60));
+            assert_eq!(orch2.telemetry_interval(), Duration::from_secs(60));
+
+            let orch3 = WatermarkOrch::new(create_watermark_config(300));
+            assert_eq!(orch3.telemetry_interval(), Duration::from_secs(300));
+
+            // Test interval updates
+            orch.set_telemetry_interval_secs(30);
+            assert_eq!(orch.telemetry_interval(), Duration::from_secs(30));
+            assert!(orch.timer_changed());
+            assert_eq!(orch.stats().config_updates, 3);
+
+            // Test timer changed flag is cleared on expiration
+            orch.handle_timer_expiration();
+            assert!(!orch.timer_changed());
+            assert_eq!(orch.stats().timer_expirations, 1);
+
+            // Test multiple interval updates
+            orch.set_telemetry_interval_secs(45);
+            assert!(orch.timer_changed());
+            assert_eq!(orch.telemetry_interval(), Duration::from_secs(45));
+            assert_eq!(orch.stats().config_updates, 4);
+
+            orch.set_telemetry_interval_secs(90);
+            assert!(orch.timer_changed());
+            assert_eq!(orch.telemetry_interval(), Duration::from_secs(90));
+            assert_eq!(orch.stats().config_updates, 5);
+
+            // Setting same interval should not trigger change
+            orch.clear_timer_changed();
+            orch.set_telemetry_interval_secs(90);
+            assert!(!orch.timer_changed());
+            assert_eq!(orch.stats().config_updates, 5);
+
+            // Test interval change during monitoring
+            orch.set_telemetry_interval_secs(15);
+            assert!(orch.timer_changed());
+            orch.handle_timer_expiration();
+            assert!(!orch.timer_changed());
+            assert_eq!(orch.stats().timer_expirations, 2);
+
+            // Verify watermarks were cleared during timer expirations
+            // Each expiration clears: 2 PG stats + 1 queue stat + 0 buffer pools = 3 clears per expiration
+            assert_eq!(callbacks.clear_count(), 6);
+
+            // Test zero interval (disable telemetry)
+            orch.set_telemetry_interval_secs(0);
+            assert_eq!(orch.telemetry_interval(), Duration::from_secs(0));
+            assert!(orch.timer_changed());
+
+            // Timer still runs but with zero interval
+            orch.handle_timer_expiration();
+            assert!(!orch.timer_changed());
+            assert_eq!(orch.stats().timer_expirations, 3);
+
+            // Verify final statistics
+            assert_eq!(orch.stats().config_updates, 7);
+            assert_eq!(orch.stats().timer_expirations, 3);
+
+            // Cleanup
+            assert_eq!(sai.count_objects(SaiObjectType::QueueCounter), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::BufferCounter), 1);
+            sai.clear();
+        }
+    }
