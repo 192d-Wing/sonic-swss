@@ -10,7 +10,7 @@
 
 mod ffi;
 mod orch;
-mod types;
+pub mod types;
 
 pub use ffi::{register_mirror_orch, unregister_mirror_orch};
 pub use orch::{MirrorOrch, MirrorOrchCallbacks, MirrorOrchConfig, MirrorOrchError, MirrorOrchStats};

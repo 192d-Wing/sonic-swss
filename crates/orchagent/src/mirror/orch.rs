@@ -21,7 +21,7 @@ pub trait MirrorOrchCallbacks: Send + Sync {}
 pub struct MirrorOrch {
     config: MirrorOrchConfig,
     stats: MirrorOrchStats,
-    sessions: HashMap<String, MirrorEntry>,
+    pub sessions: HashMap<String, MirrorEntry>,
 }
 
 impl MirrorOrch {

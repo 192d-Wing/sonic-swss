@@ -40,6 +40,18 @@ impl IntfsOrch {
     pub fn get_interface(&self, name: &str) -> Option<&IntfsEntry> {
         self.interfaces.get(name)
     }
+
+    pub fn add_interface(&mut self, name: String, entry: IntfsEntry) {
+        self.interfaces.insert(name, entry);
+    }
+
+    pub fn remove_interface(&mut self, name: &str) -> Option<IntfsEntry> {
+        self.interfaces.remove(name)
+    }
+
+    pub fn interface_count(&self) -> usize {
+        self.interfaces.len()
+    }
 }
 
 #[cfg(test)]

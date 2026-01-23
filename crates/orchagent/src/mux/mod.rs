@@ -10,7 +10,7 @@
 
 mod ffi;
 mod orch;
-mod types;
+pub mod types;
 
 pub use ffi::{register_mux_orch, unregister_mux_orch};
 pub use orch::{MuxOrch, MuxOrchCallbacks, MuxOrchConfig, MuxOrchError, MuxOrchStats};

@@ -38,6 +38,18 @@ impl CounterCheckOrch {
         self.checks.get(key)
     }
 
+    pub fn add_check(&mut self, key: CounterCheckKey, entry: CounterCheckEntry) {
+        self.checks.insert(key, entry);
+    }
+
+    pub fn remove_check(&mut self, key: &CounterCheckKey) -> Option<CounterCheckEntry> {
+        self.checks.remove(key)
+    }
+
+    pub fn check_count(&self) -> usize {
+        self.checks.len()
+    }
+
     pub fn stats(&self) -> &CounterCheckOrchStats {
         &self.stats
     }
