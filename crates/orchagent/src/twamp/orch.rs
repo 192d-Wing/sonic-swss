@@ -132,4 +132,381 @@ mod tests {
         assert!(orch.create_session(config).is_ok());
         assert_eq!(orch.session_count(), 1);
     }
+
+    // ========== TWAMP Session Management Tests ==========
+
+    #[test]
+    fn test_remove_session() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = TwampSessionConfig::new("session1".to_string(), TwampMode::Full, TwampRole::Sender);
+        config.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+
+        orch.create_session(config).unwrap();
+        assert_eq!(orch.session_count(), 1);
+
+        assert!(orch.remove_session("session1").is_ok());
+        assert_eq!(orch.session_count(), 0);
+        assert!(!orch.session_exists("session1"));
+    }
+
+    #[test]
+    fn test_duplicate_session_handling() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = TwampSessionConfig::new("session1".to_string(), TwampMode::Full, TwampRole::Sender);
+        config.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+
+        assert!(orch.create_session(config.clone()).is_ok());
+
+        let result = orch.create_session(config);
+        assert!(matches!(result, Err(TwampOrchError::SessionExists(_))));
+    }
+
+    #[test]
+    fn test_session_exists() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        assert!(!orch.session_exists("session1"));
+
+        let mut config = TwampSessionConfig::new("session1".to_string(), TwampMode::Full, TwampRole::Sender);
+        config.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+
+        orch.create_session(config).unwrap();
+        assert!(orch.session_exists("session1"));
+    }
+
+    #[test]
+    fn test_session_state_tracking() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config1 = TwampSessionConfig::new("session1".to_string(), TwampMode::Full, TwampRole::Sender);
+        config1.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config1.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+
+        let mut config2 = TwampSessionConfig::new("session2".to_string(), TwampMode::Light, TwampRole::Reflector);
+        config2.src_ip = IpAddress::from_str("10.0.0.3").unwrap();
+        config2.dst_ip = IpAddress::from_str("10.0.0.4").unwrap();
+
+        orch.create_session(config1).unwrap();
+        orch.create_session(config2).unwrap();
+        assert_eq!(orch.session_count(), 2);
+
+        orch.remove_session("session1").unwrap();
+        assert_eq!(orch.session_count(), 1);
+        assert!(!orch.session_exists("session1"));
+        assert!(orch.session_exists("session2"));
+    }
+
+    // ========== Session Configuration Tests ==========
+
+    #[test]
+    fn test_session_with_custom_ips() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = TwampSessionConfig::new("session1".to_string(), TwampMode::Full, TwampRole::Sender);
+        config.src_ip = IpAddress::from_str("192.168.1.1").unwrap();
+        config.dst_ip = IpAddress::from_str("192.168.1.2").unwrap();
+
+        assert!(orch.create_session(config).is_ok());
+        assert_eq!(orch.session_count(), 1);
+    }
+
+    #[test]
+    fn test_session_with_custom_udp_ports() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = TwampSessionConfig::new("session1".to_string(), TwampMode::Full, TwampRole::Sender);
+        config.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+        config.src_udp_port = TwampUdpPort::new(5000).unwrap();
+        config.dst_udp_port = TwampUdpPort::new(6000).unwrap();
+
+        assert!(orch.create_session(config).is_ok());
+        assert_eq!(orch.session_count(), 1);
+    }
+
+    #[test]
+    fn test_session_with_packet_count() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = TwampSessionConfig::new("session1".to_string(), TwampMode::Full, TwampRole::Sender);
+        config.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+        config.tx_mode = Some(super::super::types::TxMode::PacketNum(1000));
+
+        assert!(orch.create_session(config).is_ok());
+        assert_eq!(orch.session_count(), 1);
+    }
+
+    #[test]
+    fn test_session_with_timeout() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = TwampSessionConfig::new("session1".to_string(), TwampMode::Full, TwampRole::Sender);
+        config.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+        config.timeout = Some(super::super::types::SessionTimeout::new(5).unwrap());
+
+        assert!(orch.create_session(config).is_ok());
+        assert_eq!(orch.session_count(), 1);
+    }
+
+    #[test]
+    fn test_session_with_dscp() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = TwampSessionConfig::new("session1".to_string(), TwampMode::Full, TwampRole::Sender);
+        config.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+        config.dscp = Dscp::new(46).unwrap(); // EF DSCP value
+
+        assert!(orch.create_session(config).is_ok());
+        assert_eq!(orch.session_count(), 1);
+    }
+
+    // ========== Session Types Tests ==========
+
+    #[test]
+    fn test_light_mode_session() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = TwampSessionConfig::new("light_session".to_string(), TwampMode::Light, TwampRole::Sender);
+        config.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+
+        assert!(orch.create_session(config).is_ok());
+        assert_eq!(orch.session_count(), 1);
+    }
+
+    #[test]
+    fn test_full_mode_session() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = TwampSessionConfig::new("full_session".to_string(), TwampMode::Full, TwampRole::Sender);
+        config.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+
+        assert!(orch.create_session(config).is_ok());
+        assert_eq!(orch.session_count(), 1);
+    }
+
+    #[test]
+    fn test_reflector_role_session() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = TwampSessionConfig::new("reflector_session".to_string(), TwampMode::Full, TwampRole::Reflector);
+        config.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+
+        assert!(orch.create_session(config).is_ok());
+        assert_eq!(orch.session_count(), 1);
+    }
+
+    // ========== Packet Configuration Tests ==========
+
+    #[test]
+    fn test_session_with_padding() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = TwampSessionConfig::new("session1".to_string(), TwampMode::Full, TwampRole::Sender);
+        config.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+        config.padding_size = 256; // Add padding
+
+        assert!(orch.create_session(config).is_ok());
+        assert_eq!(orch.session_count(), 1);
+    }
+
+    #[test]
+    fn test_session_with_continuous_tx_mode() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = TwampSessionConfig::new("session1".to_string(), TwampMode::Full, TwampRole::Sender);
+        config.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+        config.tx_mode = Some(super::super::types::TxMode::Continuous(60)); // 60 seconds
+
+        assert!(orch.create_session(config).is_ok());
+        assert_eq!(orch.session_count(), 1);
+    }
+
+    // ========== Error Handling Tests ==========
+
+    #[test]
+    fn test_remove_nonexistent_session() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let result = orch.remove_session("nonexistent");
+        assert!(matches!(result, Err(TwampOrchError::SessionNotFound(_))));
+    }
+
+    #[test]
+    fn test_create_session_without_callbacks() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        // Don't set callbacks
+
+        let mut config = TwampSessionConfig::new("session1".to_string(), TwampMode::Full, TwampRole::Sender);
+        config.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+
+        let result = orch.create_session(config);
+        assert!(matches!(result, Err(TwampOrchError::SaiError(_))));
+    }
+
+    struct FailingCallbacks;
+    impl TwampOrchCallbacks for FailingCallbacks {
+        fn create_twamp_session(&self, _config: &TwampSessionConfig) -> Result<RawSaiObjectId, String> {
+            Err("SAI creation failed".to_string())
+        }
+        fn remove_twamp_session(&self, _session_id: RawSaiObjectId) -> Result<(), String> {
+            Err("SAI removal failed".to_string())
+        }
+        fn set_session_transmit(&self, _session_id: RawSaiObjectId, _enabled: bool) -> Result<(), String> {
+            Err("SAI transmit set failed".to_string())
+        }
+    }
+
+    #[test]
+    fn test_sai_creation_failure() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(FailingCallbacks));
+
+        let mut config = TwampSessionConfig::new("session1".to_string(), TwampMode::Full, TwampRole::Sender);
+        config.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+
+        let result = orch.create_session(config);
+        assert!(matches!(result, Err(TwampOrchError::SaiError(_))));
+        assert_eq!(orch.session_count(), 0);
+    }
+
+    // ========== Statistics Tests ==========
+
+    #[test]
+    fn test_stats_sessions_created() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        assert_eq!(orch.stats().sessions_created, 0);
+
+        let mut config1 = TwampSessionConfig::new("session1".to_string(), TwampMode::Full, TwampRole::Sender);
+        config1.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config1.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+
+        orch.create_session(config1).unwrap();
+        assert_eq!(orch.stats().sessions_created, 1);
+
+        let mut config2 = TwampSessionConfig::new("session2".to_string(), TwampMode::Light, TwampRole::Reflector);
+        config2.src_ip = IpAddress::from_str("10.0.0.3").unwrap();
+        config2.dst_ip = IpAddress::from_str("10.0.0.4").unwrap();
+
+        orch.create_session(config2).unwrap();
+        assert_eq!(orch.stats().sessions_created, 2);
+    }
+
+    #[test]
+    fn test_stats_sessions_removed() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config1 = TwampSessionConfig::new("session1".to_string(), TwampMode::Full, TwampRole::Sender);
+        config1.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config1.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+
+        let mut config2 = TwampSessionConfig::new("session2".to_string(), TwampMode::Light, TwampRole::Reflector);
+        config2.src_ip = IpAddress::from_str("10.0.0.3").unwrap();
+        config2.dst_ip = IpAddress::from_str("10.0.0.4").unwrap();
+
+        orch.create_session(config1).unwrap();
+        orch.create_session(config2).unwrap();
+
+        assert_eq!(orch.stats().sessions_removed, 0);
+
+        orch.remove_session("session1").unwrap();
+        assert_eq!(orch.stats().sessions_removed, 1);
+
+        orch.remove_session("session2").unwrap();
+        assert_eq!(orch.stats().sessions_removed, 2);
+    }
+
+    // ========== Edge Cases Tests ==========
+
+    #[test]
+    fn test_multiple_sessions_to_same_destination() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config1 = TwampSessionConfig::new("session1".to_string(), TwampMode::Full, TwampRole::Sender);
+        config1.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config1.dst_ip = IpAddress::from_str("10.0.0.2").unwrap();
+        config1.src_udp_port = TwampUdpPort::new(5000).unwrap();
+        config1.dst_udp_port = TwampUdpPort::new(6000).unwrap();
+
+        let mut config2 = TwampSessionConfig::new("session2".to_string(), TwampMode::Light, TwampRole::Sender);
+        config2.src_ip = IpAddress::from_str("10.0.0.1").unwrap();
+        config2.dst_ip = IpAddress::from_str("10.0.0.2").unwrap(); // Same destination
+        config2.src_udp_port = TwampUdpPort::new(5001).unwrap();
+        config2.dst_udp_port = TwampUdpPort::new(6001).unwrap();
+
+        assert!(orch.create_session(config1).is_ok());
+        assert!(orch.create_session(config2).is_ok());
+        assert_eq!(orch.session_count(), 2);
+    }
+
+    #[test]
+    fn test_session_cleanup() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        // Create multiple sessions
+        for i in 1..=5 {
+            let mut config = TwampSessionConfig::new(format!("session{}", i), TwampMode::Full, TwampRole::Sender);
+            config.src_ip = IpAddress::from_str(&format!("10.0.0.{}", i)).unwrap();
+            config.dst_ip = IpAddress::from_str(&format!("10.0.1.{}", i)).unwrap();
+            orch.create_session(config).unwrap();
+        }
+
+        assert_eq!(orch.session_count(), 5);
+
+        // Remove all sessions
+        for i in 1..=5 {
+            orch.remove_session(&format!("session{}", i)).unwrap();
+        }
+
+        assert_eq!(orch.session_count(), 0);
+        assert_eq!(orch.stats().sessions_created, 5);
+        assert_eq!(orch.stats().sessions_removed, 5);
+    }
+
+    #[test]
+    fn test_ipv6_session() {
+        let mut orch = TwampOrch::new(TwampOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = TwampSessionConfig::new("ipv6_session".to_string(), TwampMode::Full, TwampRole::Sender);
+        config.src_ip = IpAddress::from_str("2001:db8::1").unwrap();
+        config.dst_ip = IpAddress::from_str("2001:db8::2").unwrap();
+
+        assert!(orch.create_session(config).is_ok());
+        assert_eq!(orch.session_count(), 1);
+    }
 }
