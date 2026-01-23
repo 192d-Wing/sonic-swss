@@ -862,6 +862,8 @@ impl PortsOrch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ports::port::{PortAutoNegMode, PortFecMode};
+    use crate::ports::queue::{PriorityGroupInfo, QueueInfo, QueueType};
 
     #[test]
     fn test_ports_orch_new() {
@@ -1132,5 +1134,1068 @@ mod tests {
             .unwrap();
 
         assert_eq!(port_created_count.load(Ordering::SeqCst), 2);
+    }
+
+    // ============ Port Management Tests ============
+
+    #[test]
+    fn test_create_port_with_various_speeds() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        // 1G port
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet0".to_string());
+        config.speed = Some(1000);
+        orch.configure_port(config).unwrap();
+        assert_eq!(orch.get_port("Ethernet0").unwrap().speed, 1000);
+
+        // 10G port
+        orch.add_port_from_hardware("Ethernet4".to_string(), 0x1001, vec![1])
+            .unwrap();
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet4".to_string());
+        config.speed = Some(10000);
+        orch.configure_port(config).unwrap();
+        assert_eq!(orch.get_port("Ethernet4").unwrap().speed, 10000);
+
+        // 25G port
+        orch.add_port_from_hardware("Ethernet8".to_string(), 0x1002, vec![2])
+            .unwrap();
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet8".to_string());
+        config.speed = Some(25000);
+        orch.configure_port(config).unwrap();
+        assert_eq!(orch.get_port("Ethernet8").unwrap().speed, 25000);
+
+        // 40G port (4 lanes)
+        orch.add_port_from_hardware("Ethernet12".to_string(), 0x1003, vec![3, 4, 5, 6])
+            .unwrap();
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet12".to_string());
+        config.speed = Some(40000);
+        orch.configure_port(config).unwrap();
+        assert_eq!(orch.get_port("Ethernet12").unwrap().speed, 40000);
+
+        // 100G port (4 lanes)
+        orch.add_port_from_hardware("Ethernet16".to_string(), 0x1004, vec![7, 8, 9, 10])
+            .unwrap();
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet16".to_string());
+        config.speed = Some(100000);
+        orch.configure_port(config).unwrap();
+        assert_eq!(orch.get_port("Ethernet16").unwrap().speed, 100000);
+    }
+
+    #[test]
+    fn test_create_port_with_fec_modes() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0, 1, 2, 3])
+            .unwrap();
+
+        // Test RS FEC
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet0".to_string());
+        config.fec = Some(PortFecMode::Rs);
+        orch.configure_port(config).unwrap();
+        assert_eq!(orch.get_port("Ethernet0").unwrap().fec_mode, PortFecMode::Rs);
+
+        // Test FC FEC
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet0".to_string());
+        config.fec = Some(PortFecMode::Fc);
+        orch.configure_port(config).unwrap();
+        assert_eq!(orch.get_port("Ethernet0").unwrap().fec_mode, PortFecMode::Fc);
+
+        // Test None FEC
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet0".to_string());
+        config.fec = Some(PortFecMode::None);
+        orch.configure_port(config).unwrap();
+        assert_eq!(orch.get_port("Ethernet0").unwrap().fec_mode, PortFecMode::None);
+    }
+
+    #[test]
+    fn test_remove_port() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1234, vec![0])
+            .unwrap();
+        orch.add_port_from_hardware("Ethernet4".to_string(), 0x5678, vec![1])
+            .unwrap();
+
+        assert_eq!(orch.port_count(), 2);
+
+        orch.remove_port("Ethernet0").unwrap();
+        assert_eq!(orch.port_count(), 1);
+        assert!(!orch.has_port("Ethernet0"));
+        assert!(orch.has_port("Ethernet4"));
+
+        assert_eq!(orch.stats().ports_deleted, 1);
+    }
+
+    #[test]
+    fn test_port_admin_up_down() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1234, vec![0])
+            .unwrap();
+
+        // Initially down
+        assert_eq!(
+            orch.get_port("Ethernet0").unwrap().admin_state,
+            PortAdminState::Down
+        );
+
+        // Set to up
+        orch.set_port_admin_state("Ethernet0", PortAdminState::Up)
+            .unwrap();
+        assert_eq!(
+            orch.get_port("Ethernet0").unwrap().admin_state,
+            PortAdminState::Up
+        );
+
+        // Set back to down
+        orch.set_port_admin_state("Ethernet0", PortAdminState::Down)
+            .unwrap();
+        assert_eq!(
+            orch.get_port("Ethernet0").unwrap().admin_state,
+            PortAdminState::Down
+        );
+    }
+
+    #[test]
+    fn test_port_oper_up_down() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1234, vec![0])
+            .unwrap();
+
+        // Initially down
+        assert_eq!(
+            orch.get_port("Ethernet0").unwrap().oper_state,
+            PortOperState::Down
+        );
+
+        // Set to up
+        orch.set_port_oper_state("Ethernet0", PortOperState::Up)
+            .unwrap();
+        assert_eq!(
+            orch.get_port("Ethernet0").unwrap().oper_state,
+            PortOperState::Up
+        );
+
+        // Set back to down
+        orch.set_port_oper_state("Ethernet0", PortOperState::Down)
+            .unwrap();
+        assert_eq!(
+            orch.get_port("Ethernet0").unwrap().oper_state,
+            PortOperState::Down
+        );
+    }
+
+    #[test]
+    fn test_port_config_updates() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1234, vec![0, 1, 2, 3])
+            .unwrap();
+
+        // Initial configuration
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet0".to_string());
+        config.speed = Some(100000);
+        config.mtu = Some(9100);
+        orch.configure_port(config).unwrap();
+
+        let port = orch.get_port("Ethernet0").unwrap();
+        assert_eq!(port.speed, 100000);
+        assert_eq!(port.mtu, 9100);
+
+        // Update configuration
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet0".to_string());
+        config.speed = Some(40000);
+        config.mtu = Some(1500);
+        orch.configure_port(config).unwrap();
+
+        let port = orch.get_port("Ethernet0").unwrap();
+        assert_eq!(port.speed, 40000);
+        assert_eq!(port.mtu, 1500);
+
+        assert_eq!(orch.stats().port_config_changes, 2);
+    }
+
+    #[test]
+    fn test_multiple_port_types() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        // Create physical port
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+
+        // Create LAG
+        orch.create_lag("PortChannel0001", 0x2000).unwrap();
+
+        // Create VLAN
+        orch.create_vlan("Vlan100", 100, 0x3000).unwrap();
+
+        assert_eq!(orch.port_count(), 3);
+
+        let eth_port = orch.get_port("Ethernet0").unwrap();
+        assert_eq!(eth_port.port_type, PortType::Phy);
+
+        let lag_port = orch.get_port("PortChannel0001").unwrap();
+        assert_eq!(lag_port.port_type, PortType::Lag);
+
+        let vlan_port = orch.get_port("Vlan100").unwrap();
+        assert_eq!(vlan_port.port_type, PortType::Vlan);
+    }
+
+    // ============ LAG Operations Tests ============
+
+    #[test]
+    fn test_create_lag() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.create_lag("PortChannel0001", 0x2000).unwrap();
+
+        assert!(orch.has_lag("PortChannel0001"));
+        assert_eq!(orch.lag_count(), 1);
+
+        let lag = orch.get_lag("PortChannel0001").unwrap();
+        assert_eq!(lag.alias, "PortChannel0001");
+        assert_eq!(lag.member_count(), 0);
+    }
+
+    #[test]
+    fn test_add_lag_members() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        // Create ports
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+        orch.add_port_from_hardware("Ethernet4".to_string(), 0x1001, vec![1])
+            .unwrap();
+        orch.add_port_from_hardware("Ethernet8".to_string(), 0x1002, vec![2])
+            .unwrap();
+
+        // Create LAG
+        orch.create_lag("PortChannel0001", 0x2000).unwrap();
+
+        // Add members
+        orch.add_lag_member("PortChannel0001", "Ethernet0").unwrap();
+        orch.add_lag_member("PortChannel0001", "Ethernet4").unwrap();
+        orch.add_lag_member("PortChannel0001", "Ethernet8").unwrap();
+
+        let lag = orch.get_lag("PortChannel0001").unwrap();
+        assert_eq!(lag.member_count(), 3);
+        assert!(lag.has_member("Ethernet0"));
+        assert!(lag.has_member("Ethernet4"));
+        assert!(lag.has_member("Ethernet8"));
+    }
+
+    #[test]
+    fn test_remove_lag_members() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+        orch.add_port_from_hardware("Ethernet4".to_string(), 0x1001, vec![1])
+            .unwrap();
+
+        orch.create_lag("PortChannel0001", 0x2000).unwrap();
+        orch.add_lag_member("PortChannel0001", "Ethernet0").unwrap();
+        orch.add_lag_member("PortChannel0001", "Ethernet4").unwrap();
+
+        assert_eq!(orch.get_lag("PortChannel0001").unwrap().member_count(), 2);
+
+        orch.remove_lag_member("PortChannel0001", "Ethernet0")
+            .unwrap();
+        assert_eq!(orch.get_lag("PortChannel0001").unwrap().member_count(), 1);
+
+        orch.remove_lag_member("PortChannel0001", "Ethernet4")
+            .unwrap();
+        assert_eq!(orch.get_lag("PortChannel0001").unwrap().member_count(), 0);
+    }
+
+    #[test]
+    fn test_lag_member_to_lag_mapping() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+        orch.add_port_from_hardware("Ethernet4".to_string(), 0x1001, vec![1])
+            .unwrap();
+
+        orch.create_lag("PortChannel0001", 0x2000).unwrap();
+        orch.add_lag_member("PortChannel0001", "Ethernet0").unwrap();
+
+        assert_eq!(
+            orch.get_lag_for_member("Ethernet0"),
+            Some("PortChannel0001".to_string())
+        );
+        assert_eq!(orch.get_lag_for_member("Ethernet4"), None);
+
+        // Verify port has lag_id set
+        let port = orch.get_port("Ethernet0").unwrap();
+        assert_eq!(port.lag_id, Some(0x2000));
+    }
+
+    #[test]
+    fn test_remove_lag() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+        orch.create_lag("PortChannel0001", 0x2000).unwrap();
+        orch.add_lag_member("PortChannel0001", "Ethernet0").unwrap();
+
+        assert_eq!(orch.lag_count(), 1);
+
+        orch.remove_lag("PortChannel0001").unwrap();
+
+        assert_eq!(orch.lag_count(), 0);
+        assert!(!orch.has_lag("PortChannel0001"));
+        assert_eq!(orch.get_lag_for_member("Ethernet0"), None);
+        assert_eq!(orch.stats().lags_deleted, 1);
+    }
+
+    #[test]
+    fn test_empty_lag() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.create_lag("PortChannel0001", 0x2000).unwrap();
+
+        let lag = orch.get_lag("PortChannel0001").unwrap();
+        assert_eq!(lag.member_count(), 0);
+
+        // Empty LAG can be removed
+        orch.remove_lag("PortChannel0001").unwrap();
+        assert!(!orch.has_lag("PortChannel0001"));
+    }
+
+    #[test]
+    fn test_multiple_lags() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+        orch.add_port_from_hardware("Ethernet4".to_string(), 0x1001, vec![1])
+            .unwrap();
+        orch.add_port_from_hardware("Ethernet8".to_string(), 0x1002, vec![2])
+            .unwrap();
+        orch.add_port_from_hardware("Ethernet12".to_string(), 0x1003, vec![3])
+            .unwrap();
+
+        orch.create_lag("PortChannel0001", 0x2000).unwrap();
+        orch.create_lag("PortChannel0002", 0x2001).unwrap();
+
+        orch.add_lag_member("PortChannel0001", "Ethernet0").unwrap();
+        orch.add_lag_member("PortChannel0001", "Ethernet4").unwrap();
+        orch.add_lag_member("PortChannel0002", "Ethernet8").unwrap();
+        orch.add_lag_member("PortChannel0002", "Ethernet12").unwrap();
+
+        assert_eq!(orch.lag_count(), 2);
+        assert_eq!(orch.get_lag("PortChannel0001").unwrap().member_count(), 2);
+        assert_eq!(orch.get_lag("PortChannel0002").unwrap().member_count(), 2);
+    }
+
+    #[test]
+    fn test_lag_max_limit() {
+        let mut config = PortsOrchConfig::default();
+        config.max_lags = 2;
+        let mut orch = PortsOrch::new(config);
+
+        orch.create_lag("PortChannel0001", 0x2000).unwrap();
+        orch.create_lag("PortChannel0002", 0x2001).unwrap();
+
+        let result = orch.create_lag("PortChannel0003", 0x2002);
+        assert!(matches!(result, Err(PortsOrchError::ResourceExhausted(_))));
+    }
+
+    // ============ VLAN Operations Tests ============
+
+    #[test]
+    fn test_create_vlan() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.create_vlan("Vlan100", 100, 0x3000).unwrap();
+
+        assert!(orch.has_vlan("Vlan100"));
+        assert_eq!(orch.vlan_count(), 1);
+
+        let vlan = orch.get_vlan("Vlan100").unwrap();
+        assert_eq!(vlan.alias, "Vlan100");
+        assert_eq!(vlan.vlan_number, 100);
+        assert_eq!(vlan.member_count(), 0);
+    }
+
+    #[test]
+    fn test_add_vlan_members_tagged() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+        orch.add_port_from_hardware("Ethernet4".to_string(), 0x1001, vec![1])
+            .unwrap();
+
+        orch.create_vlan("Vlan100", 100, 0x3000).unwrap();
+
+        orch.add_vlan_member(
+            "Vlan100",
+            "Ethernet0",
+            VlanTaggingMode::Tagged,
+            0x4000,
+            0x5000,
+        )
+        .unwrap();
+
+        orch.add_vlan_member(
+            "Vlan100",
+            "Ethernet4",
+            VlanTaggingMode::Tagged,
+            0x4001,
+            0x5001,
+        )
+        .unwrap();
+
+        let vlan = orch.get_vlan("Vlan100").unwrap();
+        assert_eq!(vlan.member_count(), 2);
+        assert!(vlan.has_member("Ethernet0"));
+        assert!(vlan.has_member("Ethernet4"));
+    }
+
+    #[test]
+    fn test_add_vlan_members_untagged() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+
+        orch.create_vlan("Vlan100", 100, 0x3000).unwrap();
+
+        orch.add_vlan_member(
+            "Vlan100",
+            "Ethernet0",
+            VlanTaggingMode::Untagged,
+            0x4000,
+            0x5000,
+        )
+        .unwrap();
+
+        let vlan = orch.get_vlan("Vlan100").unwrap();
+        assert_eq!(vlan.member_count(), 1);
+
+        let member = vlan.members.get("Ethernet0").unwrap();
+        assert_eq!(member.tagging_mode, VlanTaggingMode::Untagged);
+    }
+
+    #[test]
+    fn test_remove_vlan_members() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+        orch.add_port_from_hardware("Ethernet4".to_string(), 0x1001, vec![1])
+            .unwrap();
+
+        orch.create_vlan("Vlan100", 100, 0x3000).unwrap();
+        orch.add_vlan_member(
+            "Vlan100",
+            "Ethernet0",
+            VlanTaggingMode::Tagged,
+            0x4000,
+            0x5000,
+        )
+        .unwrap();
+        orch.add_vlan_member(
+            "Vlan100",
+            "Ethernet4",
+            VlanTaggingMode::Tagged,
+            0x4001,
+            0x5001,
+        )
+        .unwrap();
+
+        assert_eq!(orch.get_vlan("Vlan100").unwrap().member_count(), 2);
+
+        orch.remove_vlan_member("Vlan100", "Ethernet0").unwrap();
+        assert_eq!(orch.get_vlan("Vlan100").unwrap().member_count(), 1);
+
+        orch.remove_vlan_member("Vlan100", "Ethernet4").unwrap();
+        assert_eq!(orch.get_vlan("Vlan100").unwrap().member_count(), 0);
+    }
+
+    #[test]
+    fn test_port_in_multiple_vlans() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+
+        orch.create_vlan("Vlan100", 100, 0x3000).unwrap();
+        orch.create_vlan("Vlan200", 200, 0x3001).unwrap();
+        orch.create_vlan("Vlan300", 300, 0x3002).unwrap();
+
+        orch.add_vlan_member(
+            "Vlan100",
+            "Ethernet0",
+            VlanTaggingMode::Tagged,
+            0x4000,
+            0x5000,
+        )
+        .unwrap();
+        orch.add_vlan_member(
+            "Vlan200",
+            "Ethernet0",
+            VlanTaggingMode::Tagged,
+            0x4001,
+            0x5001,
+        )
+        .unwrap();
+        orch.add_vlan_member(
+            "Vlan300",
+            "Ethernet0",
+            VlanTaggingMode::Tagged,
+            0x4002,
+            0x5002,
+        )
+        .unwrap();
+
+        let port = orch.get_port("Ethernet0").unwrap();
+        assert_eq!(port.vlan_members.len(), 3);
+        assert!(port.vlan_members.contains(&100));
+        assert!(port.vlan_members.contains(&200));
+        assert!(port.vlan_members.contains(&300));
+    }
+
+    #[test]
+    fn test_remove_vlan() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.create_vlan("Vlan100", 100, 0x3000).unwrap();
+        assert_eq!(orch.vlan_count(), 1);
+
+        orch.remove_vlan("Vlan100").unwrap();
+        assert_eq!(orch.vlan_count(), 0);
+        assert!(!orch.has_vlan("Vlan100"));
+        assert_eq!(orch.stats().vlans_deleted, 1);
+    }
+
+    #[test]
+    fn test_get_vlan_by_id() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.create_vlan("Vlan100", 100, 0x3000).unwrap();
+        orch.create_vlan("Vlan200", 200, 0x3001).unwrap();
+
+        let vlan = orch.get_vlan_by_id(100).unwrap();
+        assert_eq!(vlan.alias, "Vlan100");
+
+        let vlan = orch.get_vlan_by_id(200).unwrap();
+        assert_eq!(vlan.alias, "Vlan200");
+
+        assert!(orch.get_vlan_by_id(999).is_none());
+    }
+
+    #[test]
+    fn test_vlan_invalid_id() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        // VLAN ID 0 is invalid
+        let result = orch.create_vlan("Vlan0", 0, 0x3000);
+        assert!(matches!(result, Err(PortsOrchError::InvalidConfig(_))));
+
+        // VLAN ID > 4094 is invalid
+        let result = orch.create_vlan("Vlan5000", 5000, 0x3000);
+        assert!(matches!(result, Err(PortsOrchError::InvalidConfig(_))));
+    }
+
+    #[test]
+    fn test_vlan_max_limit() {
+        let mut config = PortsOrchConfig::default();
+        config.max_vlans = 2;
+        let mut orch = PortsOrch::new(config);
+
+        orch.create_vlan("Vlan100", 100, 0x3000).unwrap();
+        orch.create_vlan("Vlan200", 200, 0x3001).unwrap();
+
+        let result = orch.create_vlan("Vlan300", 300, 0x3002);
+        assert!(matches!(result, Err(PortsOrchError::ResourceExhausted(_))));
+    }
+
+    // ============ Queue Management Tests ============
+
+    #[test]
+    fn test_set_port_queues() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+
+        let queues = vec![
+            QueueInfo::new(0x5000, 0, QueueType::Unicast),
+            QueueInfo::new(0x5001, 1, QueueType::Unicast),
+            QueueInfo::new(0x5002, 2, QueueType::Unicast),
+            QueueInfo::new(0x5003, 3, QueueType::Unicast),
+        ];
+
+        orch.set_port_queues("Ethernet0", queues);
+
+        let queues = orch.get_port_queues("Ethernet0").unwrap();
+        assert_eq!(queues.len(), 4);
+        assert_eq!(queues[0].index, 0);
+        assert_eq!(queues[3].index, 3);
+    }
+
+    #[test]
+    fn test_multiple_queues_per_port() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+
+        // 8 unicast queues + 2 multicast queues
+        let queues = vec![
+            QueueInfo::new(0x5000, 0, QueueType::Unicast),
+            QueueInfo::new(0x5001, 1, QueueType::Unicast),
+            QueueInfo::new(0x5002, 2, QueueType::Unicast),
+            QueueInfo::new(0x5003, 3, QueueType::Unicast),
+            QueueInfo::new(0x5004, 4, QueueType::Unicast),
+            QueueInfo::new(0x5005, 5, QueueType::Unicast),
+            QueueInfo::new(0x5006, 6, QueueType::Unicast),
+            QueueInfo::new(0x5007, 7, QueueType::Unicast),
+            QueueInfo::new(0x5008, 0, QueueType::Multicast),
+            QueueInfo::new(0x5009, 1, QueueType::Multicast),
+        ];
+
+        orch.set_port_queues("Ethernet0", queues);
+
+        let queues = orch.get_port_queues("Ethernet0").unwrap();
+        assert_eq!(queues.len(), 10);
+
+        let unicast_count = queues.iter().filter(|q| q.queue_type == QueueType::Unicast).count();
+        let multicast_count = queues.iter().filter(|q| q.queue_type == QueueType::Multicast).count();
+
+        assert_eq!(unicast_count, 8);
+        assert_eq!(multicast_count, 2);
+    }
+
+    #[test]
+    fn test_set_port_priority_groups() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+
+        let pgs = vec![
+            PriorityGroupInfo::new(0x6000, 0, 0x1000),
+            PriorityGroupInfo::new(0x6001, 1, 0x1000),
+            PriorityGroupInfo::new(0x6002, 2, 0x1000),
+            PriorityGroupInfo::new(0x6003, 3, 0x1000),
+        ];
+
+        orch.set_port_priority_groups("Ethernet0", pgs);
+
+        let pgs = orch.get_port_priority_groups("Ethernet0").unwrap();
+        assert_eq!(pgs.len(), 4);
+        assert_eq!(pgs[0].index, 0);
+        assert_eq!(pgs[3].index, 3);
+    }
+
+    // ============ Port State Machine Tests ============
+
+    #[test]
+    fn test_port_state_config_missing_to_received() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1234, vec![0])
+            .unwrap();
+
+        assert_eq!(
+            orch.get_port_init_state("Ethernet0"),
+            Some(PortInitState::ConfigMissing)
+        );
+
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet0".to_string());
+        config.speed = Some(100000);
+        orch.configure_port(config).unwrap();
+
+        assert_eq!(
+            orch.get_port_init_state("Ethernet0"),
+            Some(PortInitState::ConfigReceived)
+        );
+    }
+
+    #[test]
+    fn test_port_state_config_received_to_done() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1234, vec![0])
+            .unwrap();
+
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet0".to_string());
+        config.speed = Some(100000);
+        orch.configure_port(config).unwrap();
+
+        assert_eq!(
+            orch.get_port_init_state("Ethernet0"),
+            Some(PortInitState::ConfigReceived)
+        );
+
+        // Mark port as initialized
+        orch.get_port_mut("Ethernet0").unwrap().initialized = true;
+
+        // Reconfigure to trigger state update
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet0".to_string());
+        orch.configure_port(config).unwrap();
+
+        assert_eq!(
+            orch.get_port_init_state("Ethernet0"),
+            Some(PortInitState::ConfigDone)
+        );
+    }
+
+    #[test]
+    fn test_all_ports_configured() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+        orch.set_expected_port_count(2);
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+        orch.add_port_from_hardware("Ethernet4".to_string(), 0x1001, vec![1])
+            .unwrap();
+
+        assert!(!orch.all_ports_configured());
+
+        // Configure first port
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet0".to_string());
+        orch.configure_port(config).unwrap();
+        orch.get_port_mut("Ethernet0").unwrap().initialized = true;
+        orch.port_init_states
+            .insert("Ethernet0".to_string(), PortInitState::ConfigDone);
+
+        assert!(!orch.all_ports_configured());
+
+        // Configure second port
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet4".to_string());
+        orch.configure_port(config).unwrap();
+        orch.get_port_mut("Ethernet4").unwrap().initialized = true;
+        orch.port_init_states
+            .insert("Ethernet4".to_string(), PortInitState::ConfigDone);
+
+        assert!(orch.all_ports_configured());
+    }
+
+    // ============ Port Attributes Tests ============
+
+    #[test]
+    fn test_port_mtu_settings() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet0".to_string());
+        config.mtu = Some(1500);
+        orch.configure_port(config).unwrap();
+        assert_eq!(orch.get_port("Ethernet0").unwrap().mtu, 1500);
+
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet0".to_string());
+        config.mtu = Some(9100);
+        orch.configure_port(config).unwrap();
+        assert_eq!(orch.get_port("Ethernet0").unwrap().mtu, 9100);
+    }
+
+    #[test]
+    fn test_port_autoneg_settings() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet0".to_string());
+        config.autoneg = Some(PortAutoNegMode::Enabled);
+        orch.configure_port(config).unwrap();
+        assert_eq!(
+            orch.get_port("Ethernet0").unwrap().autoneg,
+            PortAutoNegMode::Enabled
+        );
+
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet0".to_string());
+        config.autoneg = Some(PortAutoNegMode::Disabled);
+        orch.configure_port(config).unwrap();
+        assert_eq!(
+            orch.get_port("Ethernet0").unwrap().autoneg,
+            PortAutoNegMode::Disabled
+        );
+    }
+
+    // ============ Error Handling Tests ============
+
+    #[test]
+    fn test_invalid_port_name() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        let result = orch.set_port_admin_state("NonExistent", PortAdminState::Up);
+        assert!(matches!(result, Err(PortsOrchError::PortNotFound(_))));
+
+        let result = orch.remove_port("NonExistent");
+        assert!(matches!(result, Err(PortsOrchError::PortNotFound(_))));
+    }
+
+    #[test]
+    fn test_lag_member_port_not_found() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.create_lag("PortChannel0001", 0x2000).unwrap();
+
+        let result = orch.add_lag_member("PortChannel0001", "NonExistent");
+        assert!(matches!(result, Err(PortsOrchError::PortNotFound(_))));
+    }
+
+    #[test]
+    fn test_lag_not_found() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+
+        let result = orch.add_lag_member("NonExistent", "Ethernet0");
+        assert!(matches!(result, Err(PortsOrchError::LagNotFound(_))));
+
+        let result = orch.remove_lag("NonExistent");
+        assert!(matches!(result, Err(PortsOrchError::LagNotFound(_))));
+    }
+
+    #[test]
+    fn test_vlan_not_found() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+
+        let result = orch.add_vlan_member(
+            "NonExistent",
+            "Ethernet0",
+            VlanTaggingMode::Tagged,
+            0x4000,
+            0x5000,
+        );
+        assert!(matches!(result, Err(PortsOrchError::VlanNotFound(_))));
+
+        let result = orch.remove_vlan("NonExistent");
+        assert!(matches!(result, Err(PortsOrchError::VlanNotFound(_))));
+    }
+
+    #[test]
+    fn test_vlan_member_port_not_found() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.create_vlan("Vlan100", 100, 0x3000).unwrap();
+
+        let result = orch.add_vlan_member(
+            "Vlan100",
+            "NonExistent",
+            VlanTaggingMode::Tagged,
+            0x4000,
+            0x5000,
+        );
+        assert!(matches!(result, Err(PortsOrchError::PortNotFound(_))));
+    }
+
+    #[test]
+    fn test_duplicate_lag() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.create_lag("PortChannel0001", 0x2000).unwrap();
+
+        let result = orch.create_lag("PortChannel0001", 0x2001);
+        assert!(matches!(result, Err(PortsOrchError::PortAlreadyExists(_))));
+    }
+
+    #[test]
+    fn test_duplicate_vlan() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.create_vlan("Vlan100", 100, 0x3000).unwrap();
+
+        let result = orch.create_vlan("Vlan100", 100, 0x3001);
+        assert!(matches!(result, Err(PortsOrchError::PortAlreadyExists(_))));
+    }
+
+    // ============ Additional Tests ============
+
+    #[test]
+    fn test_cpu_port_id() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        assert_eq!(orch.cpu_port_id(), 0);
+
+        orch.set_cpu_port_id(0xFFFF);
+        assert_eq!(orch.cpu_port_id(), 0xFFFF);
+    }
+
+    #[test]
+    fn test_default_vlan_id() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        assert_eq!(orch.default_vlan_id(), 1);
+
+        orch.set_default_vlan_id(100);
+        assert_eq!(orch.default_vlan_id(), 100);
+    }
+
+    #[test]
+    fn test_get_up_ports() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+        orch.add_port_from_hardware("Ethernet4".to_string(), 0x1001, vec![1])
+            .unwrap();
+        orch.add_port_from_hardware("Ethernet8".to_string(), 0x1002, vec![2])
+            .unwrap();
+
+        orch.set_port_oper_state("Ethernet0", PortOperState::Up)
+            .unwrap();
+        orch.set_port_oper_state("Ethernet4", PortOperState::Up)
+            .unwrap();
+
+        let up_ports = orch.get_up_ports();
+        assert_eq!(up_ports.len(), 2);
+    }
+
+    #[test]
+    fn test_port_aliases() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+        orch.add_port_from_hardware("Ethernet4".to_string(), 0x1001, vec![1])
+            .unwrap();
+        orch.create_lag("PortChannel0001", 0x2000).unwrap();
+
+        let aliases = orch.port_aliases();
+        assert_eq!(aliases.len(), 3);
+        assert!(aliases.contains(&"Ethernet0".to_string()));
+        assert!(aliases.contains(&"Ethernet4".to_string()));
+        assert!(aliases.contains(&"PortChannel0001".to_string()));
+    }
+
+    #[test]
+    fn test_initialized_flag() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        assert!(!orch.is_initialized());
+
+        orch.set_initialized(true);
+        assert!(orch.is_initialized());
+
+        orch.set_initialized(false);
+        assert!(!orch.is_initialized());
+    }
+
+    #[test]
+    fn test_oper_state_change_callback() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let state_change_count = Arc::new(AtomicUsize::new(0));
+        let count_clone = state_change_count.clone();
+
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+        orch.set_callbacks(PortsOrchCallbacks {
+            on_port_state_change: Some(Arc::new(move |_alias, _state| {
+                count_clone.fetch_add(1, Ordering::SeqCst);
+            })),
+            ..Default::default()
+        });
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1234, vec![0])
+            .unwrap();
+
+        orch.set_port_oper_state("Ethernet0", PortOperState::Up)
+            .unwrap();
+        assert_eq!(state_change_count.load(Ordering::SeqCst), 1);
+
+        orch.set_port_oper_state("Ethernet0", PortOperState::Down)
+            .unwrap();
+        assert_eq!(state_change_count.load(Ordering::SeqCst), 2);
+
+        // Setting same state shouldn't trigger callback
+        orch.set_port_oper_state("Ethernet0", PortOperState::Down)
+            .unwrap();
+        assert_eq!(state_change_count.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn test_lag_created_callback() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let lag_created_count = Arc::new(AtomicUsize::new(0));
+        let count_clone = lag_created_count.clone();
+
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+        orch.set_callbacks(PortsOrchCallbacks {
+            on_lag_created: Some(Arc::new(move |_lag| {
+                count_clone.fetch_add(1, Ordering::SeqCst);
+            })),
+            ..Default::default()
+        });
+
+        orch.create_lag("PortChannel0001", 0x2000).unwrap();
+        assert_eq!(lag_created_count.load(Ordering::SeqCst), 1);
+
+        orch.create_lag("PortChannel0002", 0x2001).unwrap();
+        assert_eq!(lag_created_count.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn test_rapid_port_state_changes() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1234, vec![0])
+            .unwrap();
+
+        // Rapid changes between up and down
+        for _ in 0..10 {
+            orch.set_port_oper_state("Ethernet0", PortOperState::Up)
+                .unwrap();
+            orch.set_port_oper_state("Ethernet0", PortOperState::Down)
+                .unwrap();
+        }
+
+        assert_eq!(
+            orch.get_port("Ethernet0").unwrap().oper_state,
+            PortOperState::Down
+        );
+    }
+
+    #[test]
+    fn test_port_config_validation() {
+        let mut orch = PortsOrch::new(PortsOrchConfig::default());
+
+        orch.add_port_from_hardware("Ethernet0".to_string(), 0x1000, vec![0])
+            .unwrap();
+
+        // Test invalid MTU
+        let mut config = PortConfig::new();
+        config.alias = Some("Ethernet0".to_string());
+        config.mtu = Some(50); // Too small
+
+        let result = config.validate();
+        assert!(result.is_err());
     }
 }

@@ -398,4 +398,512 @@ mod tests {
         assert!(orch.process_pending_members("group1").is_ok());
         assert!(orch.process_pending_bind_ports("group1").is_ok());
     }
+
+    // ========== Isolation Group Management ==========
+
+    #[test]
+    fn test_create_duplicate_isolation_group() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config1 = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        assert!(orch.create_isolation_group(config1).is_ok());
+
+        // Try to create duplicate
+        let config2 = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        let result = orch.create_isolation_group(config2);
+        assert!(matches!(result, Err(IsolationGroupOrchError::GroupExists(_))));
+        assert_eq!(orch.group_count(), 1);
+    }
+
+    #[test]
+    fn test_remove_isolation_group() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config).unwrap();
+        assert_eq!(orch.group_count(), 1);
+
+        assert!(orch.remove_isolation_group("group1").is_ok());
+        assert_eq!(orch.group_count(), 0);
+        assert_eq!(orch.stats().groups_removed, 1);
+    }
+
+    #[test]
+    fn test_remove_nonexistent_group() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let result = orch.remove_isolation_group("nonexistent");
+        assert!(matches!(result, Err(IsolationGroupOrchError::GroupNotFound(_))));
+    }
+
+    #[test]
+    fn test_create_bridge_port_isolation_group() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("bridge_group1".to_string(), IsolationGroupType::BridgePort);
+        assert!(orch.create_isolation_group(config).is_ok());
+
+        let group = orch.get_group("bridge_group1").unwrap();
+        assert_eq!(group.group_type, IsolationGroupType::BridgePort);
+    }
+
+    #[test]
+    fn test_group_exists() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        assert!(!orch.group_exists("group1"));
+
+        let config = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config).unwrap();
+
+        assert!(orch.group_exists("group1"));
+        assert!(!orch.group_exists("group2"));
+    }
+
+    // ========== Member Operations ==========
+
+    #[test]
+    fn test_add_multiple_members_to_group() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config).unwrap();
+
+        assert!(orch.add_isolation_group_member("group1", "Ethernet0").is_ok());
+        assert!(orch.add_isolation_group_member("group1", "Ethernet4").is_ok());
+        assert!(orch.add_isolation_group_member("group1", "Ethernet8").is_ok());
+
+        let group = orch.get_group("group1").unwrap();
+        assert_eq!(group.members.len(), 3);
+        assert_eq!(orch.stats().members_added, 3);
+    }
+
+    #[test]
+    fn test_add_duplicate_member() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config).unwrap();
+
+        assert!(orch.add_isolation_group_member("group1", "Ethernet0").is_ok());
+        // Adding same member again should succeed but not add duplicate
+        assert!(orch.add_isolation_group_member("group1", "Ethernet0").is_ok());
+
+        let group = orch.get_group("group1").unwrap();
+        assert_eq!(group.members.len(), 1);
+        assert_eq!(orch.stats().members_added, 1); // Only counted once
+    }
+
+    #[test]
+    fn test_remove_isolation_group_member() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config).unwrap();
+
+        orch.add_isolation_group_member("group1", "Ethernet0").unwrap();
+        assert_eq!(orch.get_group("group1").unwrap().members.len(), 1);
+
+        assert!(orch.remove_isolation_group_member("group1", "Ethernet0").is_ok());
+        assert_eq!(orch.get_group("group1").unwrap().members.len(), 0);
+        assert_eq!(orch.stats().members_removed, 1);
+    }
+
+    #[test]
+    fn test_remove_nonexistent_member() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config).unwrap();
+
+        let result = orch.remove_isolation_group_member("group1", "Ethernet0");
+        assert!(matches!(result, Err(IsolationGroupOrchError::MemberNotFound(_))));
+    }
+
+    #[test]
+    fn test_add_member_to_nonexistent_group() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let result = orch.add_isolation_group_member("nonexistent", "Ethernet0");
+        assert!(matches!(result, Err(IsolationGroupOrchError::GroupNotFound(_))));
+    }
+
+    // ========== Port Isolation and Binding ==========
+
+    #[test]
+    fn test_bind_multiple_ports_to_group() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config).unwrap();
+
+        assert!(orch.bind_isolation_group("group1", "Ethernet0").is_ok());
+        assert!(orch.bind_isolation_group("group1", "Ethernet4").is_ok());
+        assert!(orch.bind_isolation_group("group1", "Ethernet8").is_ok());
+
+        let group = orch.get_group("group1").unwrap();
+        assert_eq!(group.bind_ports.len(), 3);
+        assert_eq!(orch.stats().bindings_added, 3);
+    }
+
+    #[test]
+    fn test_bind_duplicate_port() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config).unwrap();
+
+        assert!(orch.bind_isolation_group("group1", "Ethernet0").is_ok());
+        // Binding same port again should succeed but not add duplicate
+        assert!(orch.bind_isolation_group("group1", "Ethernet0").is_ok());
+
+        let group = orch.get_group("group1").unwrap();
+        assert_eq!(group.bind_ports.len(), 1);
+        assert_eq!(orch.stats().bindings_added, 1); // Only counted once
+    }
+
+    #[test]
+    fn test_unbind_isolation_group() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config).unwrap();
+
+        orch.bind_isolation_group("group1", "Ethernet0").unwrap();
+        assert_eq!(orch.get_group("group1").unwrap().bind_ports.len(), 1);
+
+        assert!(orch.unbind_isolation_group("group1", "Ethernet0").is_ok());
+        assert_eq!(orch.get_group("group1").unwrap().bind_ports.len(), 0);
+        assert_eq!(orch.stats().bindings_removed, 1);
+    }
+
+    #[test]
+    fn test_unbind_nonexistent_port() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config).unwrap();
+
+        let result = orch.unbind_isolation_group("group1", "Ethernet0");
+        assert!(matches!(result, Err(IsolationGroupOrchError::BindPortNotFound(_))));
+    }
+
+    #[test]
+    fn test_bind_to_nonexistent_group() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let result = orch.bind_isolation_group("nonexistent", "Ethernet0");
+        assert!(matches!(result, Err(IsolationGroupOrchError::GroupNotFound(_))));
+    }
+
+    // ========== Group Types and Cross-Type Operations ==========
+
+    #[test]
+    fn test_bridge_port_member_operations() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("bridge_group".to_string(), IsolationGroupType::BridgePort);
+        orch.create_isolation_group(config).unwrap();
+
+        // Add bridge port members
+        assert!(orch.add_isolation_group_member("bridge_group", "Ethernet0").is_ok());
+        assert!(orch.bind_isolation_group("bridge_group", "Ethernet4").is_ok());
+
+        let group = orch.get_group("bridge_group").unwrap();
+        assert_eq!(group.group_type, IsolationGroupType::BridgePort);
+        assert_eq!(group.members.len(), 1);
+        assert_eq!(group.bind_ports.len(), 1);
+    }
+
+    #[test]
+    fn test_multiple_groups_different_types() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let port_config = IsolationGroupConfig::new("port_group".to_string(), IsolationGroupType::Port);
+        let bridge_config = IsolationGroupConfig::new("bridge_group".to_string(), IsolationGroupType::BridgePort);
+
+        assert!(orch.create_isolation_group(port_config).is_ok());
+        assert!(orch.create_isolation_group(bridge_config).is_ok());
+
+        assert_eq!(orch.group_count(), 2);
+        assert_eq!(orch.get_group("port_group").unwrap().group_type, IsolationGroupType::Port);
+        assert_eq!(orch.get_group("bridge_group").unwrap().group_type, IsolationGroupType::BridgePort);
+    }
+
+    // ========== Reference Counting and Cleanup ==========
+
+    #[test]
+    fn test_remove_group_with_members_and_bindings() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config).unwrap();
+
+        // Add members and bindings
+        orch.add_isolation_group_member("group1", "Ethernet0").unwrap();
+        orch.add_isolation_group_member("group1", "Ethernet4").unwrap();
+        orch.bind_isolation_group("group1", "Ethernet8").unwrap();
+
+        // Remove group should succeed and cleanup all members and bindings
+        assert!(orch.remove_isolation_group("group1").is_ok());
+        assert_eq!(orch.group_count(), 0);
+        assert!(!orch.group_exists("group1"));
+    }
+
+    // ========== Statistics ==========
+
+    #[test]
+    fn test_comprehensive_statistics() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        // Create groups
+        let config1 = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        let config2 = IsolationGroupConfig::new("group2".to_string(), IsolationGroupType::BridgePort);
+        orch.create_isolation_group(config1).unwrap();
+        orch.create_isolation_group(config2).unwrap();
+
+        // Add members
+        orch.add_isolation_group_member("group1", "Ethernet0").unwrap();
+        orch.add_isolation_group_member("group1", "Ethernet4").unwrap();
+        orch.add_isolation_group_member("group2", "Ethernet8").unwrap();
+
+        // Bind ports
+        orch.bind_isolation_group("group1", "Ethernet12").unwrap();
+        orch.bind_isolation_group("group2", "Ethernet16").unwrap();
+
+        // Remove operations
+        orch.remove_isolation_group_member("group1", "Ethernet0").unwrap();
+        orch.unbind_isolation_group("group1", "Ethernet12").unwrap();
+        orch.remove_isolation_group("group2").unwrap();
+
+        let stats = orch.stats();
+        assert_eq!(stats.groups_created, 2);
+        assert_eq!(stats.groups_removed, 1);
+        assert_eq!(stats.members_added, 3);
+        assert_eq!(stats.members_removed, 1);
+        assert_eq!(stats.bindings_added, 2);
+        assert_eq!(stats.bindings_removed, 1);
+    }
+
+    #[test]
+    fn test_group_count_tracking() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        assert_eq!(orch.group_count(), 0);
+
+        let config1 = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config1).unwrap();
+        assert_eq!(orch.group_count(), 1);
+
+        let config2 = IsolationGroupConfig::new("group2".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config2).unwrap();
+        assert_eq!(orch.group_count(), 2);
+
+        orch.remove_isolation_group("group1").unwrap();
+        assert_eq!(orch.group_count(), 1);
+
+        orch.remove_isolation_group("group2").unwrap();
+        assert_eq!(orch.group_count(), 0);
+    }
+
+    // ========== Edge Cases ==========
+
+    #[test]
+    fn test_empty_isolation_group() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("empty_group".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config).unwrap();
+
+        let group = orch.get_group("empty_group").unwrap();
+        assert_eq!(group.members.len(), 0);
+        assert_eq!(group.bind_ports.len(), 0);
+
+        // Empty group should be removable
+        assert!(orch.remove_isolation_group("empty_group").is_ok());
+    }
+
+    #[test]
+    fn test_single_member_group() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("single_member".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config).unwrap();
+
+        orch.add_isolation_group_member("single_member", "Ethernet0").unwrap();
+
+        let group = orch.get_group("single_member").unwrap();
+        assert_eq!(group.members.len(), 1);
+        assert!(group.members.contains_key("Ethernet0"));
+    }
+
+    #[test]
+    fn test_get_group_mut() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config).unwrap();
+
+        // Test mutable access
+        if let Some(group) = orch.get_group_mut("group1") {
+            group.description = Some("Modified description".to_string());
+        }
+
+        let group = orch.get_group("group1").unwrap();
+        assert_eq!(group.description, Some("Modified description".to_string()));
+
+        // Test non-existent group
+        assert!(orch.get_group_mut("nonexistent").is_none());
+    }
+
+    // ========== Pending Operations ==========
+
+    #[test]
+    fn test_add_pending_member_to_nonexistent_group() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let result = orch.add_pending_member("nonexistent", "Ethernet0");
+        assert!(matches!(result, Err(IsolationGroupOrchError::GroupNotFound(_))));
+    }
+
+    #[test]
+    fn test_add_pending_bind_port_to_nonexistent_group() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let result = orch.add_pending_bind_port("nonexistent", "Ethernet0");
+        assert!(matches!(result, Err(IsolationGroupOrchError::GroupNotFound(_))));
+    }
+
+    #[test]
+    fn test_process_pending_members_nonexistent_group() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let result = orch.process_pending_members("nonexistent");
+        assert!(matches!(result, Err(IsolationGroupOrchError::GroupNotFound(_))));
+    }
+
+    #[test]
+    fn test_process_pending_bind_ports_nonexistent_group() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let result = orch.process_pending_bind_ports("nonexistent");
+        assert!(matches!(result, Err(IsolationGroupOrchError::GroupNotFound(_))));
+    }
+
+    #[test]
+    fn test_multiple_pending_members_processing() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config).unwrap();
+
+        // Add multiple pending members
+        orch.add_pending_member("group1", "Ethernet0").unwrap();
+        orch.add_pending_member("group1", "Ethernet4").unwrap();
+        orch.add_pending_member("group1", "Ethernet8").unwrap();
+
+        let group = orch.get_group("group1").unwrap();
+        assert_eq!(group.pending_members.len(), 3);
+
+        // Process all pending members
+        orch.process_pending_members("group1").unwrap();
+
+        let group = orch.get_group("group1").unwrap();
+        assert_eq!(group.members.len(), 3);
+        assert_eq!(group.pending_members.len(), 0);
+    }
+
+    // ========== Error Handling Without Callbacks ==========
+
+    #[test]
+    fn test_create_group_without_callbacks() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        // Don't set callbacks
+
+        let config = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        let result = orch.create_isolation_group(config);
+        assert!(matches!(result, Err(IsolationGroupOrchError::SaiError(_))));
+    }
+
+    #[test]
+    fn test_add_member_without_callbacks() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port);
+        orch.create_isolation_group(config).unwrap();
+
+        // Remove callbacks
+        orch.callbacks = None;
+
+        let result = orch.add_isolation_group_member("group1", "Ethernet0");
+        assert!(matches!(result, Err(IsolationGroupOrchError::SaiError(_))));
+    }
+
+    // ========== Complex Scenarios ==========
+
+    #[test]
+    fn test_group_with_description() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = IsolationGroupConfig::new("group1".to_string(), IsolationGroupType::Port)
+            .with_description("VLAN isolation group".to_string());
+        orch.create_isolation_group(config).unwrap();
+
+        let group = orch.get_group("group1").unwrap();
+        assert_eq!(group.description, Some("VLAN isolation group".to_string()));
+    }
+
+    #[test]
+    fn test_isolation_scenario_pvlan() {
+        let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        // Create a PVLAN-style isolation group
+        let config = IsolationGroupConfig::new("pvlan_isolated".to_string(), IsolationGroupType::BridgePort)
+            .with_description("Private VLAN isolated ports".to_string());
+        orch.create_isolation_group(config).unwrap();
+
+        // Add isolated ports as members (they can't talk to each other)
+        orch.add_isolation_group_member("pvlan_isolated", "Ethernet0").unwrap();
+        orch.add_isolation_group_member("pvlan_isolated", "Ethernet4").unwrap();
+        orch.add_isolation_group_member("pvlan_isolated", "Ethernet8").unwrap();
+
+        // Bind isolation to promiscuous port
+        orch.bind_isolation_group("pvlan_isolated", "Ethernet12").unwrap();
+
+        let group = orch.get_group("pvlan_isolated").unwrap();
+        assert_eq!(group.members.len(), 3);
+        assert_eq!(group.bind_ports.len(), 1);
+        assert_eq!(group.group_type, IsolationGroupType::BridgePort);
+    }
 }
