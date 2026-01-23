@@ -330,7 +330,7 @@ mod tests {
         let ctx2 = daemon.context();
 
         // Both should point to the same context
-        assert!(StdArc::ptr_eq(&ctx1.as_ref(), &ctx2.as_ref()));
+        assert!(StdArc::ptr_eq(&ctx1, &ctx2));
     }
 
     // ============================================================================
