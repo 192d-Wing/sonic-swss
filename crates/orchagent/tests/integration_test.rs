@@ -55,6 +55,9 @@ pub enum SaiObjectType {
     StpInstance,
     StpPort,
     Policer,
+    IsolationGroup,
+    IsolationGroupMember,
+    TunnelTermEntry,
 }
 
 impl MockSai {
@@ -7854,3 +7857,1493 @@ mod integration_tests {
             sai.clear();
         }
     }
+
+    // PfcwdOrch integration tests
+    mod pfcwd_orch_tests {
+        use super::*;
+        use sonic_orchagent::pfcwd::{
+            DetectionTime, PfcWdAction, PfcWdConfig, PfcWdOrch, PfcWdOrchCallbacks,
+            PfcWdOrchConfig, RestorationTime,
+        };
+        use std::sync::{Arc, Mutex};
+
+        /// Mock callbacks for PfcwdOrch testing
+        struct MockPfcwdCallbacks {
+            sai: Arc<MockSai>,
+            created_watchdogs: Mutex<Vec<PfcWdConfig>>,
+            removed_watchdogs: Mutex<Vec<u64>>,
+            started_watchdogs: Mutex<Vec<u64>>,
+            stopped_watchdogs: Mutex<Vec<u64>>,
+        }
+
+        impl MockPfcwdCallbacks {
+            fn new(sai: Arc<MockSai>) -> Self {
+                Self {
+                    sai,
+                    created_watchdogs: Mutex::new(Vec::new()),
+                    removed_watchdogs: Mutex::new(Vec::new()),
+                    started_watchdogs: Mutex::new(Vec::new()),
+                    stopped_watchdogs: Mutex::new(Vec::new()),
+                }
+            }
+        }
+
+        impl PfcWdOrchCallbacks for MockPfcwdCallbacks {
+            fn create_watchdog(&self, config: &PfcWdConfig) -> Result<u64, String> {
+                // Create a SAI object to simulate watchdog creation
+                // Note: PFC watchdog doesn't have a specific SAI object type in MockSai,
+                // so we use a generic approach tracking via the callbacks
+                let oid = {
+                    let mut next_oid = self.sai.next_oid.lock().unwrap();
+                    let oid = *next_oid;
+                    *next_oid += 1;
+                    oid
+                };
+
+                self.created_watchdogs.lock().unwrap().push(config.clone());
+                Ok(oid)
+            }
+
+            fn remove_watchdog(&self, wd_id: u64) -> Result<(), String> {
+                self.removed_watchdogs.lock().unwrap().push(wd_id);
+                Ok(())
+            }
+
+            fn start_watchdog(&self, wd_id: u64) -> Result<(), String> {
+                self.started_watchdogs.lock().unwrap().push(wd_id);
+                Ok(())
+            }
+
+            fn stop_watchdog(&self, wd_id: u64) -> Result<(), String> {
+                self.stopped_watchdogs.lock().unwrap().push(wd_id);
+                Ok(())
+            }
+        }
+
+        /// Helper function to create a PFC watchdog configuration
+        fn create_pfcwd_config(
+            queue_name: &str,
+            action: PfcWdAction,
+            detection_ms: u32,
+            restoration_ms: u32,
+        ) -> PfcWdConfig {
+            PfcWdConfig::new(
+                queue_name.to_string(),
+                action,
+                DetectionTime::new(detection_ms).unwrap(),
+                RestorationTime::new(restoration_ms).unwrap(),
+            )
+        }
+
+        #[test]
+        fn test_pfcwd_port_configuration_integration() {
+            // Test PFC watchdog configuration on ports
+            // Verifies that watchdogs can be registered and started on multiple port queues
+
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockPfcwdCallbacks::new(Arc::clone(&sai)));
+            let mut orch = PfcWdOrch::new(PfcWdOrchConfig { poll_interval_ms: 100 });
+            orch.set_callbacks(callbacks.clone());
+
+            // Initially no queues registered
+            assert_eq!(orch.queue_count(), 0);
+
+            // Configure PFC watchdog on multiple port queues (simulating Ethernet0 queues 3, 4, 5)
+            let configs = vec![
+                create_pfcwd_config("Ethernet0:3", PfcWdAction::Drop, 200, 200),
+                create_pfcwd_config("Ethernet0:4", PfcWdAction::Drop, 200, 200),
+                create_pfcwd_config("Ethernet4:3", PfcWdAction::Forward, 300, 300),
+                create_pfcwd_config("Ethernet8:5", PfcWdAction::Alert, 250, 500),
+            ];
+
+            for config in configs {
+                orch.register_queue(config).unwrap();
+            }
+
+            // Verify all queues were registered
+            assert_eq!(orch.queue_count(), 4);
+            assert!(orch.queue_exists("Ethernet0:3"));
+            assert!(orch.queue_exists("Ethernet0:4"));
+            assert!(orch.queue_exists("Ethernet4:3"));
+            assert!(orch.queue_exists("Ethernet8:5"));
+
+            // Verify statistics
+            assert_eq!(orch.stats().queues_registered, 4);
+
+            // Verify SAI callbacks were invoked for each watchdog creation
+            let created = callbacks.created_watchdogs.lock().unwrap();
+            assert_eq!(created.len(), 4);
+
+            // Verify queue names in created watchdogs
+            let queue_names: Vec<_> = created.iter().map(|c| c.queue_name.as_str()).collect();
+            assert!(queue_names.contains(&"Ethernet0:3"));
+            assert!(queue_names.contains(&"Ethernet0:4"));
+            assert!(queue_names.contains(&"Ethernet4:3"));
+            assert!(queue_names.contains(&"Ethernet8:5"));
+
+            // Start watchdogs and verify
+            orch.start_watchdog("Ethernet0:3").unwrap();
+            orch.start_watchdog("Ethernet4:3").unwrap();
+
+            let started = callbacks.started_watchdogs.lock().unwrap();
+            assert_eq!(started.len(), 2);
+        }
+
+        #[test]
+        fn test_pfcwd_storm_detection_and_action_integration() {
+            // Test storm detection and action configuration
+            // Verifies different actions (Drop, Forward, Alert) are properly handled
+
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockPfcwdCallbacks::new(Arc::clone(&sai)));
+            let mut orch = PfcWdOrch::new(PfcWdOrchConfig { poll_interval_ms: 50 });
+            orch.set_callbacks(callbacks.clone());
+
+            // Configure watchdogs with different actions
+            let drop_config = create_pfcwd_config("Ethernet0:3", PfcWdAction::Drop, 200, 200);
+            let forward_config = create_pfcwd_config("Ethernet4:3", PfcWdAction::Forward, 300, 300);
+            let alert_config = create_pfcwd_config("Ethernet8:3", PfcWdAction::Alert, 250, 500);
+
+            orch.register_queue(drop_config).unwrap();
+            orch.register_queue(forward_config).unwrap();
+            orch.register_queue(alert_config).unwrap();
+
+            // Start all watchdogs
+            orch.start_watchdog("Ethernet0:3").unwrap();
+            orch.start_watchdog("Ethernet4:3").unwrap();
+            orch.start_watchdog("Ethernet8:3").unwrap();
+
+            // Verify all watchdogs were started
+            let started = callbacks.started_watchdogs.lock().unwrap();
+            assert_eq!(started.len(), 3);
+            drop(started);
+
+            // Simulate storm detection on multiple queues
+            orch.handle_storm_detected("Ethernet0:3");
+            orch.handle_storm_detected("Ethernet4:3");
+            orch.handle_storm_detected("Ethernet8:3");
+
+            // Verify storm statistics
+            assert_eq!(orch.stats().storms_detected, 3);
+
+            // Verify orchestrator state: storms are active
+            // (In production, actions would be applied based on the action type)
+
+            // Verify created watchdog configurations have correct actions
+            let created = callbacks.created_watchdogs.lock().unwrap();
+            let drop_wd = created.iter().find(|c| c.queue_name == "Ethernet0:3").unwrap();
+            let forward_wd = created.iter().find(|c| c.queue_name == "Ethernet4:3").unwrap();
+            let alert_wd = created.iter().find(|c| c.queue_name == "Ethernet8:3").unwrap();
+
+            assert_eq!(drop_wd.action, PfcWdAction::Drop);
+            assert_eq!(forward_wd.action, PfcWdAction::Forward);
+            assert_eq!(alert_wd.action, PfcWdAction::Alert);
+
+            // Verify detection time configurations
+            assert_eq!(drop_wd.detection_time.value(), 200);
+            assert_eq!(forward_wd.detection_time.value(), 300);
+            assert_eq!(alert_wd.detection_time.value(), 250);
+        }
+
+        #[test]
+        fn test_pfcwd_recovery_action_integration() {
+            // Test recovery action configuration
+            // Verifies storm recovery and restoration time handling
+
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockPfcwdCallbacks::new(Arc::clone(&sai)));
+            let mut orch = PfcWdOrch::new(PfcWdOrchConfig { poll_interval_ms: 100 });
+            orch.set_callbacks(callbacks.clone());
+
+            // Configure watchdogs with different restoration times
+            let fast_recovery = create_pfcwd_config("Ethernet0:3", PfcWdAction::Drop, 200, 100);
+            let slow_recovery = create_pfcwd_config("Ethernet4:3", PfcWdAction::Drop, 200, 5000);
+            let no_auto_recovery = create_pfcwd_config("Ethernet8:3", PfcWdAction::Forward, 200, 0);
+
+            orch.register_queue(fast_recovery).unwrap();
+            orch.register_queue(slow_recovery).unwrap();
+            orch.register_queue(no_auto_recovery).unwrap();
+
+            // Start all watchdogs
+            orch.start_watchdog("Ethernet0:3").unwrap();
+            orch.start_watchdog("Ethernet4:3").unwrap();
+            orch.start_watchdog("Ethernet8:3").unwrap();
+
+            // Simulate storm detection
+            orch.handle_storm_detected("Ethernet0:3");
+            orch.handle_storm_detected("Ethernet4:3");
+            orch.handle_storm_detected("Ethernet8:3");
+
+            assert_eq!(orch.stats().storms_detected, 3);
+            assert_eq!(orch.stats().storms_restored, 0);
+
+            // Simulate storm recovery for all queues
+            orch.handle_storm_restored("Ethernet0:3");
+            orch.handle_storm_restored("Ethernet4:3");
+            orch.handle_storm_restored("Ethernet8:3");
+
+            // Verify recovery statistics
+            assert_eq!(orch.stats().storms_restored, 3);
+
+            // Verify restoration time configurations in created watchdogs
+            let created = callbacks.created_watchdogs.lock().unwrap();
+            let fast_wd = created.iter().find(|c| c.queue_name == "Ethernet0:3").unwrap();
+            let slow_wd = created.iter().find(|c| c.queue_name == "Ethernet4:3").unwrap();
+            let no_auto_wd = created.iter().find(|c| c.queue_name == "Ethernet8:3").unwrap();
+
+            assert_eq!(fast_wd.restoration_time.value(), 100);
+            assert_eq!(slow_wd.restoration_time.value(), 5000);
+            assert_eq!(no_auto_wd.restoration_time.value(), 0); // 0 = no auto recovery
+
+            // Verify multiple storm cycles can occur
+            orch.handle_storm_detected("Ethernet0:3");
+            orch.handle_storm_restored("Ethernet0:3");
+            orch.handle_storm_detected("Ethernet0:3");
+            orch.handle_storm_restored("Ethernet0:3");
+
+            assert_eq!(orch.stats().storms_detected, 5);
+            assert_eq!(orch.stats().storms_restored, 5);
+        }
+
+        #[test]
+        fn test_pfcwd_removal_and_cleanup_integration() {
+            // Test PFC watchdog removal and cleanup
+            // Verifies that unregistering queues properly cleans up state and invokes SAI callbacks
+
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockPfcwdCallbacks::new(Arc::clone(&sai)));
+            let mut orch = PfcWdOrch::new(PfcWdOrchConfig { poll_interval_ms: 100 });
+            orch.set_callbacks(callbacks.clone());
+
+            // Register multiple queues
+            let configs = vec![
+                create_pfcwd_config("Ethernet0:3", PfcWdAction::Drop, 200, 200),
+                create_pfcwd_config("Ethernet0:4", PfcWdAction::Drop, 200, 200),
+                create_pfcwd_config("Ethernet4:3", PfcWdAction::Forward, 300, 300),
+                create_pfcwd_config("Ethernet8:5", PfcWdAction::Alert, 250, 500),
+            ];
+
+            for config in configs {
+                orch.register_queue(config).unwrap();
+            }
+
+            assert_eq!(orch.queue_count(), 4);
+            assert_eq!(orch.stats().queues_registered, 4);
+
+            // Start some watchdogs and simulate storms
+            orch.start_watchdog("Ethernet0:3").unwrap();
+            orch.start_watchdog("Ethernet4:3").unwrap();
+            orch.handle_storm_detected("Ethernet0:3");
+
+            // Remove one queue
+            orch.unregister_queue("Ethernet0:3").unwrap();
+
+            // Verify queue was removed
+            assert_eq!(orch.queue_count(), 3);
+            assert!(!orch.queue_exists("Ethernet0:3"));
+            assert!(orch.queue_exists("Ethernet0:4"));
+            assert!(orch.queue_exists("Ethernet4:3"));
+            assert!(orch.queue_exists("Ethernet8:5"));
+
+            // Verify unregister statistics
+            assert_eq!(orch.stats().queues_unregistered, 1);
+
+            // Verify SAI remove callback was invoked
+            let removed = callbacks.removed_watchdogs.lock().unwrap();
+            assert_eq!(removed.len(), 1);
+            drop(removed);
+
+            // Remove remaining queues
+            orch.unregister_queue("Ethernet0:4").unwrap();
+            orch.unregister_queue("Ethernet4:3").unwrap();
+            orch.unregister_queue("Ethernet8:5").unwrap();
+
+            // Verify complete cleanup
+            assert_eq!(orch.queue_count(), 0);
+            assert_eq!(orch.stats().queues_unregistered, 4);
+
+            // Verify all SAI remove callbacks were invoked
+            let removed = callbacks.removed_watchdogs.lock().unwrap();
+            assert_eq!(removed.len(), 4);
+
+            // Verify trying to remove non-existent queue fails
+            let result = orch.unregister_queue("NonExistent:0");
+            assert!(result.is_err());
+
+            // Verify trying to start watchdog on removed queue fails
+            let result = orch.start_watchdog("Ethernet0:3");
+            assert!(result.is_err());
+
+            // Verify storm handling on removed queue has no effect
+            orch.handle_storm_detected("Ethernet0:3");
+            assert_eq!(orch.stats().storms_detected, 1); // Still 1 from before removal
+
+            // Re-register a queue to verify cleanup was complete
+            let new_config = create_pfcwd_config("Ethernet0:3", PfcWdAction::Drop, 300, 300);
+            orch.register_queue(new_config).unwrap();
+
+            assert_eq!(orch.queue_count(), 1);
+            assert!(orch.queue_exists("Ethernet0:3"));
+            assert_eq!(orch.stats().queues_registered, 5); // 4 original + 1 re-registered
+        }
+    }
+
+    // TunnelDecapOrch integration tests
+    mod tunnel_decap_orch_tests {
+        use super::*;
+        use sonic_orchagent::tunnel_decap::{
+            TunnelDecapOrch, TunnelDecapOrchCallbacks, TunnelDecapOrchConfig,
+            TunnelDecapConfig, TunnelTermType,
+        };
+        use sonic_sai::types::RawSaiObjectId;
+        use sonic_types::IpAddress;
+        use std::str::FromStr;
+
+        /// MockSai-based callbacks for TunnelDecapOrch integration testing
+        struct MockSaiCallbacks {
+            sai: Arc<MockSai>,
+        }
+
+        impl MockSaiCallbacks {
+            fn new(sai: Arc<MockSai>) -> Self {
+                Self { sai }
+            }
+        }
+
+        impl TunnelDecapOrchCallbacks for MockSaiCallbacks {
+            fn create_tunnel(&self, config: &TunnelDecapConfig) -> Result<RawSaiObjectId, String> {
+                self.sai.create_object(
+                    SaiObjectType::Tunnel,
+                    vec![
+                        ("name".to_string(), config.tunnel_name.clone()),
+                        ("type".to_string(), config.tunnel_type.clone()),
+                    ],
+                )
+            }
+
+            fn remove_tunnel(&self, tunnel_id: RawSaiObjectId) -> Result<(), String> {
+                self.sai.remove_object(tunnel_id)
+            }
+
+            fn create_tunnel_term_entry(
+                &self,
+                tunnel_id: RawSaiObjectId,
+                term_type: TunnelTermType,
+                src_ip: IpAddress,
+                dst_ip: IpAddress,
+            ) -> Result<RawSaiObjectId, String> {
+                self.sai.create_object(
+                    SaiObjectType::TunnelTermEntry,
+                    vec![
+                        ("tunnel_id".to_string(), tunnel_id.to_string()),
+                        ("term_type".to_string(), term_type.as_str().to_string()),
+                        ("src_ip".to_string(), src_ip.to_string()),
+                        ("dst_ip".to_string(), dst_ip.to_string()),
+                    ],
+                )
+            }
+
+            fn remove_tunnel_term_entry(&self, term_entry_id: RawSaiObjectId) -> Result<(), String> {
+                self.sai.remove_object(term_entry_id)
+            }
+        }
+
+        /// Helper function to create a tunnel decap entry with SAI synchronization
+        fn create_tunnel_decap_entry(
+            orch: &mut TunnelDecapOrch,
+            name: &str,
+            tunnel_type: &str,
+        ) -> Result<(), String> {
+            let config = TunnelDecapConfig::new(name.to_string(), tunnel_type.to_string());
+            orch.create_tunnel(config).map_err(|e| format!("{:?}", e))
+        }
+
+        #[test]
+        fn test_tunnel_decap_p2p_creation_integration() {
+            // Test Point-to-Point tunnel decap entry creation with full SAI synchronization
+            let sai = Arc::new(MockSai::new());
+            let mut orch = TunnelDecapOrch::new(TunnelDecapOrchConfig::default());
+            orch.set_callbacks(Arc::new(MockSaiCallbacks::new(Arc::clone(&sai))));
+
+            // Verify initial state
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::TunnelTermEntry), 0);
+            assert_eq!(orch.tunnel_count(), 0);
+
+            // Create IPINIP tunnel for P2P decapsulation
+            create_tunnel_decap_entry(&mut orch, "ipinip_p2p_tunnel", "IPINIP").unwrap();
+
+            // Verify tunnel SAI object was created
+            assert_eq!(orch.tunnel_count(), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 1);
+            assert!(orch.tunnel_exists("ipinip_p2p_tunnel"));
+
+            // Add P2P tunnel termination entry with specific source and destination
+            orch.add_term_entry(
+                "ipinip_p2p_tunnel",
+                "p2p_term_1".to_string(),
+                TunnelTermType::P2P,
+                IpAddress::from_str("10.0.0.1").unwrap(),
+                IpAddress::from_str("10.0.0.2").unwrap(),
+            ).unwrap();
+
+            // Verify termination entry SAI object was created
+            assert_eq!(sai.count_objects(SaiObjectType::TunnelTermEntry), 1);
+            assert_eq!(orch.stats().term_entries_created, 1);
+
+            // Verify SAI object attributes
+            let objects: Vec<_> = sai.objects.lock().unwrap().clone();
+            let tunnel_obj = objects.iter().find(|o| o.object_type == SaiObjectType::Tunnel).unwrap();
+            assert_eq!(tunnel_obj.attributes[0].1, "ipinip_p2p_tunnel");
+            assert_eq!(tunnel_obj.attributes[1].1, "IPINIP");
+
+            let term_obj = objects.iter().find(|o| o.object_type == SaiObjectType::TunnelTermEntry).unwrap();
+            assert_eq!(term_obj.attributes[1].1, "P2P");
+            assert_eq!(term_obj.attributes[2].1, "10.0.0.1");
+            assert_eq!(term_obj.attributes[3].1, "10.0.0.2");
+        }
+
+        #[test]
+        fn test_tunnel_decap_multipoint_config_integration() {
+            // Test multi-point tunnel decap configurations (P2MP, MP2MP)
+            let sai = Arc::new(MockSai::new());
+            let mut orch = TunnelDecapOrch::new(TunnelDecapOrchConfig::default());
+            orch.set_callbacks(Arc::new(MockSaiCallbacks::new(Arc::clone(&sai))));
+
+            // Create VXLAN tunnel for multipoint decapsulation
+            create_tunnel_decap_entry(&mut orch, "vxlan_multipoint", "VXLAN").unwrap();
+
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 1);
+
+            // Add P2MP termination (Point-to-Multipoint: single source, multiple destinations)
+            orch.add_term_entry(
+                "vxlan_multipoint",
+                "p2mp_term".to_string(),
+                TunnelTermType::P2MP,
+                IpAddress::from_str("192.168.1.1").unwrap(),
+                IpAddress::from_str("0.0.0.0").unwrap(), // Wildcard destination
+            ).unwrap();
+
+            assert_eq!(sai.count_objects(SaiObjectType::TunnelTermEntry), 1);
+
+            // Add MP2MP termination (Multipoint-to-Multipoint: any source to any destination)
+            orch.add_term_entry(
+                "vxlan_multipoint",
+                "mp2mp_term".to_string(),
+                TunnelTermType::MP2MP,
+                IpAddress::from_str("0.0.0.0").unwrap(), // Wildcard source
+                IpAddress::from_str("0.0.0.0").unwrap(), // Wildcard destination
+            ).unwrap();
+
+            assert_eq!(sai.count_objects(SaiObjectType::TunnelTermEntry), 2);
+
+            // Verify orchestration state
+            assert_eq!(orch.stats().term_entries_created, 2);
+            assert_eq!(orch.stats().tunnels_created, 1);
+
+            // Verify SAI object attributes for multipoint entries
+            let objects: Vec<_> = sai.objects.lock().unwrap().clone();
+            let term_entries: Vec<_> = objects.iter()
+                .filter(|o| o.object_type == SaiObjectType::TunnelTermEntry)
+                .collect();
+
+            assert_eq!(term_entries.len(), 2);
+
+            // Find P2MP entry
+            let p2mp_entry = term_entries.iter().find(|e| e.attributes[1].1 == "P2MP").unwrap();
+            assert_eq!(p2mp_entry.attributes[2].1, "192.168.1.1"); // Source IP
+
+            // Find MP2MP entry
+            let mp2mp_entry = term_entries.iter().find(|e| e.attributes[1].1 == "MP2MP").unwrap();
+            assert_eq!(mp2mp_entry.attributes[2].1, "0.0.0.0"); // Wildcard source
+        }
+
+        #[test]
+        fn test_tunnel_decap_ip_config_integration() {
+            // Test tunnel decap entry with various IP configurations (IPv4, IPv6)
+            let sai = Arc::new(MockSai::new());
+            let mut orch = TunnelDecapOrch::new(TunnelDecapOrchConfig::default());
+            orch.set_callbacks(Arc::new(MockSaiCallbacks::new(Arc::clone(&sai))));
+
+            // Create tunnel for IP-based decapsulation
+            create_tunnel_decap_entry(&mut orch, "ipv4_tunnel", "IPINIP").unwrap();
+            create_tunnel_decap_entry(&mut orch, "ipv6_tunnel", "IPINIP").unwrap();
+
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 2);
+            assert_eq!(orch.tunnel_count(), 2);
+
+            // Add IPv4 termination entry
+            orch.add_term_entry(
+                "ipv4_tunnel",
+                "ipv4_term".to_string(),
+                TunnelTermType::P2P,
+                IpAddress::from_str("172.16.0.1").unwrap(),
+                IpAddress::from_str("172.16.0.2").unwrap(),
+            ).unwrap();
+
+            // Add IPv6 termination entry
+            orch.add_term_entry(
+                "ipv6_tunnel",
+                "ipv6_term".to_string(),
+                TunnelTermType::P2P,
+                IpAddress::from_str("2001:db8::1").unwrap(),
+                IpAddress::from_str("2001:db8::2").unwrap(),
+            ).unwrap();
+
+            // Add multiple term entries to same tunnel
+            orch.add_term_entry(
+                "ipv4_tunnel",
+                "ipv4_term_2".to_string(),
+                TunnelTermType::P2P,
+                IpAddress::from_str("10.1.1.1").unwrap(),
+                IpAddress::from_str("10.1.1.2").unwrap(),
+            ).unwrap();
+
+            // Verify SAI synchronization
+            assert_eq!(sai.count_objects(SaiObjectType::TunnelTermEntry), 3);
+            assert_eq!(orch.stats().term_entries_created, 3);
+
+            // Verify SAI objects have correct IP addresses
+            let objects: Vec<_> = sai.objects.lock().unwrap().clone();
+            let term_entries: Vec<_> = objects.iter()
+                .filter(|o| o.object_type == SaiObjectType::TunnelTermEntry)
+                .collect();
+
+            // Find IPv6 entry by checking for IPv6 address format
+            let ipv6_entry = term_entries.iter()
+                .find(|e| e.attributes[2].1.contains("2001:db8"))
+                .unwrap();
+            assert_eq!(ipv6_entry.attributes[2].1, "2001:db8::1");
+            assert_eq!(ipv6_entry.attributes[3].1, "2001:db8::2");
+
+            // Find IPv4 entries
+            let ipv4_entries: Vec<_> = term_entries.iter()
+                .filter(|e| !e.attributes[2].1.contains(':'))
+                .collect();
+            assert_eq!(ipv4_entries.len(), 2);
+        }
+
+        #[test]
+        fn test_tunnel_decap_removal_cleanup_integration() {
+            // Test tunnel decap removal and cleanup with SAI synchronization
+            let sai = Arc::new(MockSai::new());
+            let mut orch = TunnelDecapOrch::new(TunnelDecapOrchConfig::default());
+            orch.set_callbacks(Arc::new(MockSaiCallbacks::new(Arc::clone(&sai))));
+
+            // Create tunnel and multiple term entries
+            create_tunnel_decap_entry(&mut orch, "cleanup_tunnel", "IPINIP").unwrap();
+
+            orch.add_term_entry(
+                "cleanup_tunnel",
+                "term1".to_string(),
+                TunnelTermType::P2P,
+                IpAddress::from_str("10.0.0.1").unwrap(),
+                IpAddress::from_str("10.0.0.2").unwrap(),
+            ).unwrap();
+
+            orch.add_term_entry(
+                "cleanup_tunnel",
+                "term2".to_string(),
+                TunnelTermType::P2MP,
+                IpAddress::from_str("10.0.0.3").unwrap(),
+                IpAddress::from_str("0.0.0.0").unwrap(),
+            ).unwrap();
+
+            orch.add_term_entry(
+                "cleanup_tunnel",
+                "term3".to_string(),
+                TunnelTermType::MP2MP,
+                IpAddress::from_str("0.0.0.0").unwrap(),
+                IpAddress::from_str("0.0.0.0").unwrap(),
+            ).unwrap();
+
+            // Verify initial state
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::TunnelTermEntry), 3);
+            assert_eq!(orch.stats().tunnels_created, 1);
+            assert_eq!(orch.stats().term_entries_created, 3);
+
+            // Attempt to remove tunnel with active term entries (should fail)
+            let result = orch.remove_tunnel("cleanup_tunnel");
+            assert!(result.is_err());
+            // Tunnel and term entries should still exist in SAI
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::TunnelTermEntry), 3);
+
+            // Remove term entries one by one, verifying SAI cleanup
+            orch.remove_term_entry("cleanup_tunnel", "term1").unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::TunnelTermEntry), 2);
+            assert_eq!(orch.stats().term_entries_removed, 1);
+
+            orch.remove_term_entry("cleanup_tunnel", "term2").unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::TunnelTermEntry), 1);
+            assert_eq!(orch.stats().term_entries_removed, 2);
+
+            orch.remove_term_entry("cleanup_tunnel", "term3").unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::TunnelTermEntry), 0);
+            assert_eq!(orch.stats().term_entries_removed, 3);
+
+            // Now tunnel removal should succeed
+            orch.remove_tunnel("cleanup_tunnel").unwrap();
+
+            // Verify complete cleanup
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::TunnelTermEntry), 0);
+            assert_eq!(orch.tunnel_count(), 0);
+            assert_eq!(orch.stats().tunnels_removed, 1);
+            assert!(!orch.tunnel_exists("cleanup_tunnel"));
+
+            // Verify SAI objects list is empty for these types
+            let objects = sai.objects.lock().unwrap();
+            assert!(objects.iter().all(|o| {
+                o.object_type != SaiObjectType::Tunnel &&
+                o.object_type != SaiObjectType::TunnelTermEntry
+            }));
+        }
+    }
+
+    // NvgreOrch integration tests
+    mod nvgre_orch_tests {
+        use super::*;
+        use sonic_orchagent::nvgre::{
+            NvgreOrch, NvgreOrchConfig, NvgreOrchCallbacks,
+            NvgreTunnelConfig, NvgreTunnelMapConfig, MapType, TunnelSaiIds,
+        };
+        use sonic_types::IpAddress;
+        use std::net::Ipv4Addr;
+        use std::collections::HashMap;
+
+        /// Mock NVGRE callbacks that integrate with MockSai
+        struct MockNvgreCallbacks {
+            sai: Arc<MockSai>,
+            vlans: Arc<Mutex<HashMap<u16, u64>>>,
+        }
+
+        impl MockNvgreCallbacks {
+            fn new(sai: Arc<MockSai>) -> Self {
+                let mut vlans = HashMap::new();
+                // Pre-populate VLANs that exist
+                vlans.insert(100, 0x10000);
+                vlans.insert(200, 0x20000);
+                vlans.insert(300, 0x30000);
+                vlans.insert(400, 0x40000);
+
+                Self {
+                    sai,
+                    vlans: Arc::new(Mutex::new(vlans)),
+                }
+            }
+        }
+
+        impl NvgreOrchCallbacks for MockNvgreCallbacks {
+            fn create_tunnel_map(&self, map_type: MapType, is_encap: bool) -> Result<u64, String> {
+                let type_str = match map_type {
+                    MapType::Vlan => "vlan",
+                    MapType::Bridge => "bridge",
+                };
+                self.sai.create_object(
+                    SaiObjectType::Tunnel,
+                    vec![
+                        ("type".to_string(), format!("tunnel_map_{}", type_str)),
+                        ("encap".to_string(), is_encap.to_string()),
+                    ],
+                )
+            }
+
+            fn remove_tunnel_map(&self, oid: u64) -> Result<(), String> {
+                self.sai.remove_object(oid)
+            }
+
+            fn create_tunnel(
+                &self,
+                src_ip: &IpAddress,
+                _tunnel_ids: &TunnelSaiIds,
+                _underlay_rif: u64,
+            ) -> Result<u64, String> {
+                self.sai.create_object(
+                    SaiObjectType::Tunnel,
+                    vec![
+                        ("type".to_string(), "nvgre".to_string()),
+                        ("src_ip".to_string(), format!("{:?}", src_ip)),
+                    ],
+                )
+            }
+
+            fn remove_tunnel(&self, oid: u64) -> Result<(), String> {
+                self.sai.remove_object(oid)
+            }
+
+            fn create_tunnel_termination(
+                &self,
+                tunnel_id: u64,
+                src_ip: &IpAddress,
+                _vr_id: u64,
+            ) -> Result<u64, String> {
+                self.sai.create_object(
+                    SaiObjectType::Tunnel,
+                    vec![
+                        ("type".to_string(), "tunnel_termination".to_string()),
+                        ("tunnel_id".to_string(), tunnel_id.to_string()),
+                        ("src_ip".to_string(), format!("{:?}", src_ip)),
+                    ],
+                )
+            }
+
+            fn remove_tunnel_termination(&self, oid: u64) -> Result<(), String> {
+                self.sai.remove_object(oid)
+            }
+
+            fn create_tunnel_map_entry(
+                &self,
+                map_type: MapType,
+                vsid: u32,
+                vlan_id: u16,
+                _is_encap: bool,
+                _encap_map_id: u64,
+                _decap_map_id: u64,
+            ) -> Result<u64, String> {
+                let type_str = match map_type {
+                    MapType::Vlan => "vlan",
+                    MapType::Bridge => "bridge",
+                };
+                self.sai.create_object(
+                    SaiObjectType::Tunnel,
+                    vec![
+                        ("type".to_string(), format!("map_entry_{}", type_str)),
+                        ("vsid".to_string(), vsid.to_string()),
+                        ("vlan_id".to_string(), vlan_id.to_string()),
+                    ],
+                )
+            }
+
+            fn remove_tunnel_map_entry(&self, oid: u64) -> Result<(), String> {
+                self.sai.remove_object(oid)
+            }
+
+            fn get_vlan_oid(&self, vlan_id: u16) -> Option<u64> {
+                self.vlans.lock().unwrap().get(&vlan_id).copied()
+            }
+
+            fn get_underlay_rif(&self) -> u64 {
+                0xFFFF
+            }
+
+            fn get_virtual_router_id(&self) -> u64 {
+                0xFFFE
+            }
+        }
+
+        fn create_test_ip(a: u8, b: u8, c: u8, d: u8) -> IpAddress {
+            IpAddress::V4(Ipv4Addr::new(a, b, c, d).into())
+        }
+
+        fn create_nvgre_orch_with_sai(sai: Arc<MockSai>) -> NvgreOrch {
+            let config = NvgreOrchConfig {
+                enable_encap: true,
+                enable_decap: true,
+            };
+            let mut orch = NvgreOrch::new(config);
+            let callbacks = Arc::new(MockNvgreCallbacks::new(sai));
+            orch.set_callbacks(callbacks);
+            orch
+        }
+
+        /// Helper function to create an NVGRE tunnel and return SAI object count
+        fn create_nvgre_tunnel(
+            orch: &mut NvgreOrch,
+            name: &str,
+            src_ip: IpAddress,
+        ) -> Result<(), String> {
+            let config = NvgreTunnelConfig::new(name.to_string(), src_ip);
+            orch.create_tunnel(config).map_err(|e| format!("{:?}", e))
+        }
+
+        /// Helper function to add VLAN-to-VSID mapping
+        fn add_vlan_vsid_mapping(
+            orch: &mut NvgreOrch,
+            tunnel_name: &str,
+            map_name: &str,
+            vlan_id: u16,
+            vsid: u32,
+        ) -> Result<(), String> {
+            let config = NvgreTunnelMapConfig::new(
+                tunnel_name.to_string(),
+                map_name.to_string(),
+                vlan_id,
+                vsid,
+            );
+            orch.add_tunnel_map(config).map_err(|e| format!("{:?}", e))
+        }
+
+        #[test]
+        fn test_nvgre_tunnel_creation_integration() {
+            // Test NVGRE tunnel creation with VSID configuration
+            // Verifies that tunnel creation properly creates SAI tunnel objects
+            // and that the orchestrator state matches SAI layer state
+            let sai = Arc::new(MockSai::new());
+            let mut orch = create_nvgre_orch_with_sai(sai.clone());
+
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 0);
+            assert_eq!(orch.tunnel_count(), 0);
+
+            // Create NVGRE tunnel
+            let result = create_nvgre_tunnel(&mut orch, "nvgre_tunnel1", create_test_ip(10, 0, 0, 1));
+            assert!(result.is_ok());
+
+            // Verify orchestrator state
+            assert_eq!(orch.tunnel_count(), 1);
+            assert!(orch.tunnel_exists("nvgre_tunnel1"));
+            assert_eq!(orch.stats().tunnels_created, 1);
+
+            // Verify SAI objects were created
+            // Expected SAI objects for one tunnel:
+            // - 4 tunnel maps (2 types x 2 directions: vlan encap, vlan decap, bridge encap, bridge decap)
+            // - 1 tunnel object
+            // - 1 tunnel termination
+            // Total: 6 SAI objects
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 6);
+
+            // Verify tunnel properties
+            let tunnel = orch.get_tunnel("nvgre_tunnel1").unwrap();
+            assert_eq!(tunnel.name, "nvgre_tunnel1");
+            assert_eq!(tunnel.src_ip, create_test_ip(10, 0, 0, 1));
+            assert!(tunnel.tunnel_ids.tunnel_id != 0);
+            assert!(tunnel.tunnel_ids.tunnel_term_id != 0);
+            assert!(tunnel.tunnel_ids.tunnel_encap_id.contains_key(&MapType::Vlan));
+            assert!(tunnel.tunnel_ids.tunnel_encap_id.contains_key(&MapType::Bridge));
+            assert!(tunnel.tunnel_ids.tunnel_decap_id.contains_key(&MapType::Vlan));
+            assert!(tunnel.tunnel_ids.tunnel_decap_id.contains_key(&MapType::Bridge));
+
+            // Add VLAN-to-VSID mapping to verify complete tunnel configuration
+            let map_result = add_vlan_vsid_mapping(&mut orch, "nvgre_tunnel1", "map1", 100, 5000);
+            assert!(map_result.is_ok());
+
+            // Verify map entry was created
+            assert_eq!(orch.stats().map_entries_created, 1);
+            let tunnel = orch.get_tunnel("nvgre_tunnel1").unwrap();
+            assert!(tunnel.has_map_entry("map1"));
+            let map_entry = tunnel.map_entries.get("map1").unwrap();
+            assert_eq!(map_entry.vsid, 5000);
+            assert_eq!(map_entry.vlan_id, 100);
+
+            // SAI should have one more object (the map entry)
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 7);
+
+            // Cleanup
+            sai.clear();
+        }
+
+        #[test]
+        fn test_nvgre_vlan_to_vsid_mapping_integration() {
+            // Test VLAN-to-VSID mapping configuration
+            // Verifies that multiple VLAN-to-VSID mappings can be created for a tunnel
+            // and that SAI map entry objects are properly created
+            let sai = Arc::new(MockSai::new());
+            let mut orch = create_nvgre_orch_with_sai(sai.clone());
+
+            // First create a tunnel
+            create_nvgre_tunnel(&mut orch, "nvgre_tunnel1", create_test_ip(10, 0, 0, 1)).unwrap();
+            let initial_sai_count = sai.count_objects(SaiObjectType::Tunnel);
+
+            // Add multiple VLAN-to-VSID mappings
+            // VLAN 100 -> VSID 1000
+            let result1 = add_vlan_vsid_mapping(&mut orch, "nvgre_tunnel1", "vlan100_map", 100, 1000);
+            assert!(result1.is_ok());
+
+            // VLAN 200 -> VSID 2000
+            let result2 = add_vlan_vsid_mapping(&mut orch, "nvgre_tunnel1", "vlan200_map", 200, 2000);
+            assert!(result2.is_ok());
+
+            // VLAN 300 -> VSID 3000
+            let result3 = add_vlan_vsid_mapping(&mut orch, "nvgre_tunnel1", "vlan300_map", 300, 3000);
+            assert!(result3.is_ok());
+
+            // Verify orchestrator state
+            assert_eq!(orch.stats().map_entries_created, 3);
+            let tunnel = orch.get_tunnel("nvgre_tunnel1").unwrap();
+            assert_eq!(tunnel.map_entries.len(), 3);
+
+            // Verify each mapping
+            assert!(tunnel.has_map_entry("vlan100_map"));
+            assert!(tunnel.has_map_entry("vlan200_map"));
+            assert!(tunnel.has_map_entry("vlan300_map"));
+
+            let map1 = tunnel.map_entries.get("vlan100_map").unwrap();
+            assert_eq!(map1.vlan_id, 100);
+            assert_eq!(map1.vsid, 1000);
+
+            let map2 = tunnel.map_entries.get("vlan200_map").unwrap();
+            assert_eq!(map2.vlan_id, 200);
+            assert_eq!(map2.vsid, 2000);
+
+            let map3 = tunnel.map_entries.get("vlan300_map").unwrap();
+            assert_eq!(map3.vlan_id, 300);
+            assert_eq!(map3.vsid, 3000);
+
+            // Verify SAI objects - should have 3 more map entry objects
+            assert_eq!(
+                sai.count_objects(SaiObjectType::Tunnel),
+                initial_sai_count + 3
+            );
+
+            // Test duplicate mapping rejection
+            let dup_result = add_vlan_vsid_mapping(&mut orch, "nvgre_tunnel1", "vlan100_map", 100, 1000);
+            assert!(dup_result.is_err());
+            assert!(dup_result.unwrap_err().contains("MapEntryExists"));
+
+            // Test VLAN not found error (VLAN 999 doesn't exist in our mock)
+            let invalid_vlan_result = add_vlan_vsid_mapping(&mut orch, "nvgre_tunnel1", "invalid_map", 999, 9999);
+            assert!(invalid_vlan_result.is_err());
+            assert!(invalid_vlan_result.unwrap_err().contains("VlanNotFound"));
+
+            // Cleanup
+            sai.clear();
+        }
+
+        #[test]
+        fn test_nvgre_multiple_tunnels_management_integration() {
+            // Test management of multiple NVGRE tunnels
+            // Verifies that multiple tunnels can be created, each with their own
+            // VLAN-to-VSID mappings, and that SAI objects are properly tracked
+            let sai = Arc::new(MockSai::new());
+            let mut orch = create_nvgre_orch_with_sai(sai.clone());
+
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 0);
+
+            // Create three NVGRE tunnels with different source IPs
+            create_nvgre_tunnel(&mut orch, "tunnel_dc1", create_test_ip(10, 1, 0, 1)).unwrap();
+            create_nvgre_tunnel(&mut orch, "tunnel_dc2", create_test_ip(10, 2, 0, 1)).unwrap();
+            create_nvgre_tunnel(&mut orch, "tunnel_dc3", create_test_ip(10, 3, 0, 1)).unwrap();
+
+            // Verify all tunnels were created
+            assert_eq!(orch.tunnel_count(), 3);
+            assert_eq!(orch.stats().tunnels_created, 3);
+            assert!(orch.tunnel_exists("tunnel_dc1"));
+            assert!(orch.tunnel_exists("tunnel_dc2"));
+            assert!(orch.tunnel_exists("tunnel_dc3"));
+
+            // Each tunnel creates 6 SAI objects (4 maps + 1 tunnel + 1 termination)
+            // 3 tunnels = 18 SAI objects
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 18);
+
+            // Add mappings to each tunnel
+            add_vlan_vsid_mapping(&mut orch, "tunnel_dc1", "dc1_vlan100", 100, 10100).unwrap();
+            add_vlan_vsid_mapping(&mut orch, "tunnel_dc1", "dc1_vlan200", 200, 10200).unwrap();
+
+            add_vlan_vsid_mapping(&mut orch, "tunnel_dc2", "dc2_vlan100", 100, 20100).unwrap();
+            add_vlan_vsid_mapping(&mut orch, "tunnel_dc2", "dc2_vlan300", 300, 20300).unwrap();
+
+            add_vlan_vsid_mapping(&mut orch, "tunnel_dc3", "dc3_vlan400", 400, 30400).unwrap();
+
+            // Verify map entries per tunnel
+            assert_eq!(orch.get_tunnel("tunnel_dc1").unwrap().map_entries.len(), 2);
+            assert_eq!(orch.get_tunnel("tunnel_dc2").unwrap().map_entries.len(), 2);
+            assert_eq!(orch.get_tunnel("tunnel_dc3").unwrap().map_entries.len(), 1);
+            assert_eq!(orch.stats().map_entries_created, 5);
+
+            // SAI should now have 18 + 5 = 23 objects
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 23);
+
+            // Verify tunnel isolation - each tunnel has its own VSID mappings
+            let dc1_map = orch.get_tunnel("tunnel_dc1").unwrap().map_entries.get("dc1_vlan100").unwrap();
+            let dc2_map = orch.get_tunnel("tunnel_dc2").unwrap().map_entries.get("dc2_vlan100").unwrap();
+
+            // Same VLAN (100) but different VSIDs per datacenter tunnel
+            assert_eq!(dc1_map.vlan_id, 100);
+            assert_eq!(dc1_map.vsid, 10100);
+            assert_eq!(dc2_map.vlan_id, 100);
+            assert_eq!(dc2_map.vsid, 20100);
+
+            // Verify different source IPs
+            assert_eq!(orch.get_tunnel("tunnel_dc1").unwrap().src_ip, create_test_ip(10, 1, 0, 1));
+            assert_eq!(orch.get_tunnel("tunnel_dc2").unwrap().src_ip, create_test_ip(10, 2, 0, 1));
+            assert_eq!(orch.get_tunnel("tunnel_dc3").unwrap().src_ip, create_test_ip(10, 3, 0, 1));
+
+            // Test that duplicate tunnel creation fails
+            let dup_tunnel = create_nvgre_tunnel(&mut orch, "tunnel_dc1", create_test_ip(10, 99, 0, 1));
+            assert!(dup_tunnel.is_err());
+            assert!(dup_tunnel.unwrap_err().contains("TunnelExists"));
+
+            // Cleanup
+            sai.clear();
+        }
+
+        #[test]
+        fn test_nvgre_tunnel_removal_and_cleanup_integration() {
+            // Test NVGRE tunnel removal and cleanup
+            // Verifies that tunnel removal properly cleans up all associated
+            // SAI objects including tunnel maps, termination entries, and map entries
+            let sai = Arc::new(MockSai::new());
+            let mut orch = create_nvgre_orch_with_sai(sai.clone());
+
+            // Create two tunnels with mappings
+            create_nvgre_tunnel(&mut orch, "tunnel_to_remove", create_test_ip(10, 0, 0, 1)).unwrap();
+            create_nvgre_tunnel(&mut orch, "tunnel_to_keep", create_test_ip(10, 0, 0, 2)).unwrap();
+
+            // Add mappings to both tunnels
+            add_vlan_vsid_mapping(&mut orch, "tunnel_to_remove", "remove_map1", 100, 1000).unwrap();
+            add_vlan_vsid_mapping(&mut orch, "tunnel_to_remove", "remove_map2", 200, 2000).unwrap();
+            add_vlan_vsid_mapping(&mut orch, "tunnel_to_keep", "keep_map1", 100, 3000).unwrap();
+
+            // Verify initial state
+            assert_eq!(orch.tunnel_count(), 2);
+            assert_eq!(orch.stats().tunnels_created, 2);
+            assert_eq!(orch.stats().map_entries_created, 3);
+
+            // Count SAI objects before removal
+            // 2 tunnels x 6 objects each = 12
+            // 3 map entries = 3
+            // Total = 15
+            let sai_count_before = sai.count_objects(SaiObjectType::Tunnel);
+            assert_eq!(sai_count_before, 15);
+
+            // Remove the first tunnel
+            let remove_result = orch.remove_tunnel("tunnel_to_remove");
+            assert!(remove_result.is_ok());
+
+            // Verify orchestrator state after removal
+            assert_eq!(orch.tunnel_count(), 1);
+            assert_eq!(orch.stats().tunnels_removed, 1);
+            assert!(!orch.tunnel_exists("tunnel_to_remove"));
+            assert!(orch.tunnel_exists("tunnel_to_keep"));
+
+            // Verify SAI objects were cleaned up
+            // Removed: 6 tunnel objects + 2 map entries = 8 objects
+            // Remaining: 6 tunnel objects + 1 map entry = 7 objects
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 7);
+
+            // Verify the remaining tunnel is intact
+            let remaining_tunnel = orch.get_tunnel("tunnel_to_keep").unwrap();
+            assert_eq!(remaining_tunnel.name, "tunnel_to_keep");
+            assert_eq!(remaining_tunnel.src_ip, create_test_ip(10, 0, 0, 2));
+            assert!(remaining_tunnel.has_map_entry("keep_map1"));
+            assert_eq!(remaining_tunnel.map_entries.get("keep_map1").unwrap().vsid, 3000);
+
+            // Test removal of non-existent tunnel
+            let remove_nonexistent = orch.remove_tunnel("nonexistent_tunnel");
+            assert!(remove_nonexistent.is_err());
+
+            // Test individual map entry removal
+            let map_remove_result = orch.remove_tunnel_map("tunnel_to_keep", "keep_map1");
+            assert!(map_remove_result.is_ok());
+            assert_eq!(orch.stats().map_entries_removed, 1);
+
+            // Verify map entry was removed but tunnel remains
+            assert!(orch.tunnel_exists("tunnel_to_keep"));
+            let tunnel_after_map_removal = orch.get_tunnel("tunnel_to_keep").unwrap();
+            assert!(!tunnel_after_map_removal.has_map_entry("keep_map1"));
+            assert_eq!(tunnel_after_map_removal.map_entries.len(), 0);
+
+            // SAI should have one less object (the removed map entry)
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 6);
+
+            // Final cleanup - remove the last tunnel
+            orch.remove_tunnel("tunnel_to_keep").unwrap();
+            assert_eq!(orch.tunnel_count(), 0);
+            assert_eq!(orch.stats().tunnels_removed, 2);
+
+            // All SAI objects should be cleaned up
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 0);
+
+            // Cleanup
+            sai.clear();
+        }
+    }
+
+    // IsolationGroupOrch integration tests
+    mod isolation_group_orch_tests {
+        use super::*;
+        use sonic_orchagent::isolation_group::{
+            IsolationGroupOrch, IsolationGroupOrchCallbacks, IsolationGroupOrchConfig,
+            IsolationGroupConfig, IsolationGroupType,
+        };
+        use std::collections::HashMap;
+        use std::sync::Arc;
+
+        /// Helper to create a test isolation group callbacks implementation
+        struct TestIsolationGroupCallbacks {
+            sai: Arc<MockSai>,
+            port_oids: Arc<Mutex<HashMap<String, u64>>>,
+            bridge_port_oids: Arc<Mutex<HashMap<String, u64>>>,
+            port_bindings: Arc<Mutex<HashMap<u64, u64>>>, // port_oid -> group_oid
+        }
+
+        impl TestIsolationGroupCallbacks {
+            fn new(sai: Arc<MockSai>) -> Self {
+                let mut port_oids = HashMap::new();
+                let mut bridge_port_oids = HashMap::new();
+
+                // Pre-populate some port OIDs for testing
+                for i in 0..16 {
+                    let port_name = format!("Ethernet{}", i * 4);
+                    port_oids.insert(port_name.clone(), 0x1000 + i as u64);
+                    bridge_port_oids.insert(port_name, 0x2000 + i as u64);
+                }
+
+                Self {
+                    sai,
+                    port_oids: Arc::new(Mutex::new(port_oids)),
+                    bridge_port_oids: Arc::new(Mutex::new(bridge_port_oids)),
+                    port_bindings: Arc::new(Mutex::new(HashMap::new())),
+                }
+            }
+        }
+
+        impl IsolationGroupOrchCallbacks for TestIsolationGroupCallbacks {
+            fn create_isolation_group(&self, group_type: IsolationGroupType) -> Result<u64, String> {
+                let type_str = match group_type {
+                    IsolationGroupType::Port => "port",
+                    IsolationGroupType::BridgePort => "bridge_port",
+                };
+
+                self.sai.create_object(
+                    SaiObjectType::IsolationGroup,
+                    vec![("type".to_string(), type_str.to_string())],
+                )
+            }
+
+            fn remove_isolation_group(&self, oid: u64) -> Result<(), String> {
+                self.sai.remove_object(oid)
+            }
+
+            fn add_isolation_group_member(
+                &self,
+                group_id: u64,
+                port_oid: u64,
+            ) -> Result<u64, String> {
+                self.sai.create_object(
+                    SaiObjectType::IsolationGroupMember,
+                    vec![
+                        ("group_id".to_string(), group_id.to_string()),
+                        ("port_oid".to_string(), port_oid.to_string()),
+                    ],
+                )
+            }
+
+            fn remove_isolation_group_member(&self, member_oid: u64) -> Result<(), String> {
+                self.sai.remove_object(member_oid)
+            }
+
+            fn bind_isolation_group_to_port(
+                &self,
+                port_oid: u64,
+                group_id: u64,
+            ) -> Result<(), String> {
+                self.port_bindings.lock().unwrap().insert(port_oid, group_id);
+                Ok(())
+            }
+
+            fn unbind_isolation_group_from_port(&self, port_oid: u64) -> Result<(), String> {
+                self.port_bindings.lock().unwrap().remove(&port_oid);
+                Ok(())
+            }
+
+            fn get_port_oid(&self, alias: &str) -> Option<u64> {
+                self.port_oids.lock().unwrap().get(alias).copied()
+            }
+
+            fn get_bridge_port_oid(&self, alias: &str) -> Option<u64> {
+                self.bridge_port_oids.lock().unwrap().get(alias).copied()
+            }
+        }
+
+        /// Helper function to create an isolation group with SAI synchronization
+        fn create_isolation_group(
+            orch: &mut IsolationGroupOrch,
+            name: &str,
+            group_type: IsolationGroupType,
+            description: Option<&str>,
+        ) -> Result<(), sonic_orchagent::isolation_group::IsolationGroupOrchError> {
+            let mut config = IsolationGroupConfig::new(name.to_string(), group_type);
+            if let Some(desc) = description {
+                config = config.with_description(desc.to_string());
+            }
+            orch.create_isolation_group(config)
+        }
+
+        #[test]
+        fn test_isolation_group_creation_integration() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+            let callbacks = Arc::new(TestIsolationGroupCallbacks::new(sai.clone()));
+            orch.set_callbacks(callbacks.clone());
+
+            // Verify no isolation groups initially
+            assert_eq!(sai.count_objects(SaiObjectType::IsolationGroup), 0);
+            assert_eq!(orch.group_count(), 0);
+
+            // Create a Port-type isolation group
+            create_isolation_group(
+                &mut orch,
+                "pvlan_isolated_1",
+                IsolationGroupType::Port,
+                Some("Private VLAN isolated ports group 1"),
+            ).unwrap();
+
+            // Verify SAI object was created
+            assert_eq!(sai.count_objects(SaiObjectType::IsolationGroup), 1);
+            assert_eq!(orch.group_count(), 1);
+
+            // Verify orchestrator state
+            let group = orch.get_group("pvlan_isolated_1").unwrap();
+            assert_eq!(group.group_type, IsolationGroupType::Port);
+            assert_eq!(group.description, Some("Private VLAN isolated ports group 1".to_string()));
+            assert!(group.oid > 0);
+
+            // Verify SAI object attributes
+            let sai_obj = sai.get_object(group.oid).unwrap();
+            assert_eq!(sai_obj.object_type, SaiObjectType::IsolationGroup);
+            assert_eq!(sai_obj.attributes[0].1, "port");
+
+            // Create a BridgePort-type isolation group
+            create_isolation_group(
+                &mut orch,
+                "pvlan_community_1",
+                IsolationGroupType::BridgePort,
+                Some("Private VLAN community ports group"),
+            ).unwrap();
+
+            assert_eq!(sai.count_objects(SaiObjectType::IsolationGroup), 2);
+            assert_eq!(orch.group_count(), 2);
+
+            let bridge_group = orch.get_group("pvlan_community_1").unwrap();
+            assert_eq!(bridge_group.group_type, IsolationGroupType::BridgePort);
+
+            // Verify statistics
+            assert_eq!(orch.stats().groups_created, 2);
+
+            // Cleanup
+            sai.clear();
+        }
+
+        #[test]
+        fn test_isolation_group_member_binding_integration() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+            let callbacks = Arc::new(TestIsolationGroupCallbacks::new(sai.clone()));
+            orch.set_callbacks(callbacks.clone());
+
+            // Create an isolation group
+            create_isolation_group(
+                &mut orch,
+                "isolated_group",
+                IsolationGroupType::Port,
+                None,
+            ).unwrap();
+
+            assert_eq!(sai.count_objects(SaiObjectType::IsolationGroup), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::IsolationGroupMember), 0);
+
+            // Add port members to the isolation group (isolated ports)
+            orch.add_isolation_group_member("isolated_group", "Ethernet0").unwrap();
+            orch.add_isolation_group_member("isolated_group", "Ethernet4").unwrap();
+            orch.add_isolation_group_member("isolated_group", "Ethernet8").unwrap();
+
+            // Verify SAI member objects were created
+            assert_eq!(sai.count_objects(SaiObjectType::IsolationGroupMember), 3);
+
+            // Verify orchestrator state
+            let group = orch.get_group("isolated_group").unwrap();
+            assert_eq!(group.members.len(), 3);
+            assert!(group.members.contains_key("Ethernet0"));
+            assert!(group.members.contains_key("Ethernet4"));
+            assert!(group.members.contains_key("Ethernet8"));
+
+            // Bind the isolation group to promiscuous ports
+            orch.bind_isolation_group("isolated_group", "Ethernet12").unwrap();
+            orch.bind_isolation_group("isolated_group", "Ethernet16").unwrap();
+
+            // Verify bindings in orchestrator
+            let group = orch.get_group("isolated_group").unwrap();
+            assert_eq!(group.bind_ports.len(), 2);
+            assert!(group.bind_ports.contains(&"Ethernet12".to_string()));
+            assert!(group.bind_ports.contains(&"Ethernet16".to_string()));
+
+            // Verify bindings in callbacks (simulating SAI state)
+            {
+                let bindings = callbacks.port_bindings.lock().unwrap();
+                assert_eq!(bindings.len(), 2);
+                assert!(bindings.contains_key(&0x1003)); // Ethernet12 port OID
+                assert!(bindings.contains_key(&0x1004)); // Ethernet16 port OID
+            }
+
+            // Verify statistics
+            assert_eq!(orch.stats().members_added, 3);
+            assert_eq!(orch.stats().bindings_added, 2);
+
+            // Remove a member
+            orch.remove_isolation_group_member("isolated_group", "Ethernet4").unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::IsolationGroupMember), 2);
+            assert_eq!(orch.stats().members_removed, 1);
+
+            // Unbind a port
+            orch.unbind_isolation_group("isolated_group", "Ethernet12").unwrap();
+            let bindings = callbacks.port_bindings.lock().unwrap();
+            assert_eq!(bindings.len(), 1);
+            assert!(!bindings.contains_key(&0x1003));
+            drop(bindings);
+            assert_eq!(orch.stats().bindings_removed, 1);
+
+            // Cleanup
+            sai.clear();
+        }
+
+        #[test]
+        fn test_multiple_isolation_groups_management_integration() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+            let callbacks = Arc::new(TestIsolationGroupCallbacks::new(sai.clone()));
+            orch.set_callbacks(callbacks.clone());
+
+            // Create multiple isolation groups for different PVLAN scenarios
+            // Group 1: Isolated ports (cannot communicate with each other)
+            create_isolation_group(
+                &mut orch,
+                "pvlan_isolated",
+                IsolationGroupType::BridgePort,
+                Some("Isolated PVLAN ports"),
+            ).unwrap();
+
+            // Group 2: Community group A (can communicate within community)
+            create_isolation_group(
+                &mut orch,
+                "pvlan_community_a",
+                IsolationGroupType::BridgePort,
+                Some("Community A PVLAN ports"),
+            ).unwrap();
+
+            // Group 3: Community group B (separate community)
+            create_isolation_group(
+                &mut orch,
+                "pvlan_community_b",
+                IsolationGroupType::BridgePort,
+                Some("Community B PVLAN ports"),
+            ).unwrap();
+
+            assert_eq!(sai.count_objects(SaiObjectType::IsolationGroup), 3);
+            assert_eq!(orch.group_count(), 3);
+
+            // Add members to isolated group
+            orch.add_isolation_group_member("pvlan_isolated", "Ethernet0").unwrap();
+            orch.add_isolation_group_member("pvlan_isolated", "Ethernet4").unwrap();
+
+            // Add members to community A
+            orch.add_isolation_group_member("pvlan_community_a", "Ethernet8").unwrap();
+            orch.add_isolation_group_member("pvlan_community_a", "Ethernet12").unwrap();
+
+            // Add members to community B
+            orch.add_isolation_group_member("pvlan_community_b", "Ethernet16").unwrap();
+            orch.add_isolation_group_member("pvlan_community_b", "Ethernet20").unwrap();
+
+            // Verify SAI member count
+            assert_eq!(sai.count_objects(SaiObjectType::IsolationGroupMember), 6);
+
+            // Bind isolation groups to promiscuous/uplink ports
+            // Isolated group bound to uplink
+            orch.bind_isolation_group("pvlan_isolated", "Ethernet24").unwrap();
+            // Community groups also bound to uplink
+            orch.bind_isolation_group("pvlan_community_a", "Ethernet24").unwrap();
+            orch.bind_isolation_group("pvlan_community_b", "Ethernet24").unwrap();
+
+            // Verify each group's state independently
+            let isolated_group = orch.get_group("pvlan_isolated").unwrap();
+            assert_eq!(isolated_group.members.len(), 2);
+            assert_eq!(isolated_group.bind_ports.len(), 1);
+
+            let community_a = orch.get_group("pvlan_community_a").unwrap();
+            assert_eq!(community_a.members.len(), 2);
+            assert_eq!(community_a.bind_ports.len(), 1);
+
+            let community_b = orch.get_group("pvlan_community_b").unwrap();
+            assert_eq!(community_b.members.len(), 2);
+            assert_eq!(community_b.bind_ports.len(), 1);
+
+            // Verify statistics
+            assert_eq!(orch.stats().groups_created, 3);
+            assert_eq!(orch.stats().members_added, 6);
+            assert_eq!(orch.stats().bindings_added, 3);
+
+            // Verify group existence checks
+            assert!(orch.group_exists("pvlan_isolated"));
+            assert!(orch.group_exists("pvlan_community_a"));
+            assert!(orch.group_exists("pvlan_community_b"));
+            assert!(!orch.group_exists("nonexistent_group"));
+
+            // Cleanup
+            sai.clear();
+        }
+
+        #[test]
+        fn test_isolation_group_removal_and_cleanup_integration() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = IsolationGroupOrch::new(IsolationGroupOrchConfig::default());
+            let callbacks = Arc::new(TestIsolationGroupCallbacks::new(sai.clone()));
+            orch.set_callbacks(callbacks.clone());
+
+            // Create isolation group
+            create_isolation_group(
+                &mut orch,
+                "test_group",
+                IsolationGroupType::Port,
+                Some("Test isolation group for cleanup"),
+            ).unwrap();
+
+            let group_oid = orch.get_group("test_group").unwrap().oid;
+
+            // Add members
+            orch.add_isolation_group_member("test_group", "Ethernet0").unwrap();
+            orch.add_isolation_group_member("test_group", "Ethernet4").unwrap();
+            orch.add_isolation_group_member("test_group", "Ethernet8").unwrap();
+
+            // Bind ports
+            orch.bind_isolation_group("test_group", "Ethernet12").unwrap();
+            orch.bind_isolation_group("test_group", "Ethernet16").unwrap();
+
+            // Verify initial state
+            assert_eq!(sai.count_objects(SaiObjectType::IsolationGroup), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::IsolationGroupMember), 3);
+            let bindings = callbacks.port_bindings.lock().unwrap();
+            assert_eq!(bindings.len(), 2);
+            drop(bindings);
+
+            // Remove the isolation group (should cleanup members and bindings)
+            orch.remove_isolation_group("test_group").unwrap();
+
+            // Verify SAI objects were removed
+            assert_eq!(sai.count_objects(SaiObjectType::IsolationGroup), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::IsolationGroupMember), 0);
+            assert!(sai.get_object(group_oid).is_none());
+
+            // Verify bindings were removed
+            let bindings = callbacks.port_bindings.lock().unwrap();
+            assert_eq!(bindings.len(), 0);
+            drop(bindings);
+
+            // Verify orchestrator state
+            assert_eq!(orch.group_count(), 0);
+            assert!(!orch.group_exists("test_group"));
+            assert!(orch.get_group("test_group").is_none());
+
+            // Verify statistics
+            assert_eq!(orch.stats().groups_created, 1);
+            assert_eq!(orch.stats().groups_removed, 1);
+            assert_eq!(orch.stats().members_added, 3);
+            // Note: members are removed as part of group removal, but not counted individually
+
+            // Create a new group to verify the system is still functional
+            create_isolation_group(
+                &mut orch,
+                "new_group",
+                IsolationGroupType::BridgePort,
+                None,
+            ).unwrap();
+
+            assert_eq!(sai.count_objects(SaiObjectType::IsolationGroup), 1);
+            assert_eq!(orch.group_count(), 1);
+            assert_eq!(orch.stats().groups_created, 2);
+
+            // Cleanup
+            sai.clear();
+        }
+    }
+
