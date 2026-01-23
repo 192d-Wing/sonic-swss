@@ -1,18 +1,40 @@
 //! CoPP orchestration logic.
 
 use super::types::{CoppStats, CoppTrapEntry, CoppTrapKey, CoppTrapConfig, RawSaiObjectId};
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::{audit_log, debug_log, info_log, warn_log, error_log};
 use std::collections::HashMap;
 use std::sync::Arc;
+use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, CoppOrchError>;
 
-#[derive(Debug, Clone)]
+/// CoPP orchestration errors with NIST-compliant error messages.
+#[derive(Debug, Clone, Error)]
 pub enum CoppOrchError {
+    /// Trap with the specified key was not found
+    #[error("CoPP trap not found: {0:?}")]
     TrapNotFound(CoppTrapKey),
+
+    /// Trap with the specified key already exists
+    #[error("CoPP trap already exists: {0:?}")]
     TrapExists(CoppTrapKey),
+
+    /// Invalid CPU queue number (must be 0-7)
+    #[error("Invalid CPU queue {0}: must be in range 0-7")]
     InvalidQueue(u8),
+
+    /// Invalid rate limit value (must be non-zero)
+    #[error("Invalid rate limit {0}: CIR and CBS must be non-zero")]
     InvalidRate(u64),
+
+    /// SAI operation failed
+    #[error("SAI operation failed: {0}")]
     SaiError(String),
+
+    /// Callbacks not configured
+    #[error("CoPP orchestrator not initialized: callbacks not configured")]
+    NotInitialized,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -59,20 +81,55 @@ impl<C: CoppOrchCallbacks> CoppOrch<C> {
     }
 
     pub fn add_trap(&mut self, key: CoppTrapKey, config: CoppTrapConfig) -> Result<RawSaiObjectId> {
+        debug_log!("CoppOrch", trap_id = %key.trap_id, "Adding CoPP trap");
+
         if self.traps.contains_key(&key) {
+            warn_log!("CoppOrch", trap_id = %key.trap_id, "Trap already exists");
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "CoppOrch",
+                "add_trap"
+            )
+            .with_object_id(&key.trap_id)
+            .with_object_type("copp_trap")
+            .with_error(format!("Trap already exists: {}", key.trap_id)));
             return Err(CoppOrchError::TrapExists(key));
         }
 
         if let Some(queue) = config.queue {
             if queue >= 8 {
+                error_log!("CoppOrch", trap_id = %key.trap_id, queue = queue, "Invalid CPU queue number");
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ErrorCondition,
+                    "CoppOrch",
+                    "add_trap"
+                )
+                .with_object_id(&key.trap_id)
+                .with_object_type("copp_trap")
+                .with_error(format!("Invalid queue {}: must be 0-7", queue)));
                 return Err(CoppOrchError::InvalidQueue(queue));
             }
         }
 
-        let callbacks = self.callbacks.as_ref().ok_or(CoppOrchError::SaiError("No callbacks".into()))?;
-        let trap_id = callbacks.create_trap(&key, &config)?;
+        let callbacks = self.callbacks.as_ref().ok_or_else(|| {
+            error_log!("CoppOrch", "Callbacks not configured");
+            CoppOrchError::NotInitialized
+        })?;
 
-        let mut entry = CoppTrapEntry::new(key.clone(), config);
+        let trap_id = callbacks.create_trap(&key, &config).map_err(|e| {
+            error_log!("CoppOrch", trap_id = %key.trap_id, error = %e, "SAI create_trap failed");
+            audit_log!(AuditRecord::new(
+                AuditCategory::SaiOperation,
+                "CoppOrch",
+                "create_trap"
+            )
+            .with_object_id(&key.trap_id)
+            .with_object_type("copp_trap")
+            .with_error(e.to_string()));
+            e
+        })?;
+
+        let mut entry = CoppTrapEntry::new(key.clone(), config.clone());
         entry.trap_oid = trap_id;
 
         self.traps.insert(key.clone(), entry);
@@ -80,35 +137,142 @@ impl<C: CoppOrchCallbacks> CoppOrch<C> {
 
         callbacks.on_trap_created(&key, trap_id);
 
+        info_log!("CoppOrch", trap_id = %key.trap_id, oid = trap_id, queue = ?config.queue, "CoPP trap created successfully");
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "CoppOrch",
+            "add_trap"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("0x{:x}", trap_id))
+        .with_object_type("copp_trap")
+        .with_details(serde_json::json!({
+            "trap_key": key.trap_id,
+            "queue": config.queue,
+            "action": format!("{:?}", config.trap_action)
+        })));
+
         Ok(trap_id)
     }
 
     pub fn remove_trap(&mut self, key: &CoppTrapKey) -> Result<()> {
-        let entry = self.traps.remove(key)
-            .ok_or_else(|| CoppOrchError::TrapNotFound(key.clone()))?;
+        debug_log!("CoppOrch", trap_id = %key.trap_id, "Removing CoPP trap");
 
-        let callbacks = self.callbacks.as_ref().ok_or(CoppOrchError::SaiError("No callbacks".into()))?;
-        callbacks.remove_trap(entry.trap_oid)?;
+        let entry = self.traps.remove(key).ok_or_else(|| {
+            warn_log!("CoppOrch", trap_id = %key.trap_id, "Trap not found for removal");
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "CoppOrch",
+                "remove_trap"
+            )
+            .with_object_id(&key.trap_id)
+            .with_object_type("copp_trap")
+            .with_error("Trap not found"));
+            CoppOrchError::TrapNotFound(key.clone())
+        })?;
+
+        let trap_oid = entry.trap_oid;
+        let callbacks = self.callbacks.as_ref().ok_or_else(|| {
+            error_log!("CoppOrch", "Callbacks not configured");
+            CoppOrchError::NotInitialized
+        })?;
+
+        callbacks.remove_trap(trap_oid).map_err(|e| {
+            error_log!("CoppOrch", trap_id = %key.trap_id, oid = trap_oid, error = %e, "SAI remove_trap failed");
+            // Re-insert the entry since removal failed
+            self.traps.insert(key.clone(), entry.clone());
+            audit_log!(AuditRecord::new(
+                AuditCategory::SaiOperation,
+                "CoppOrch",
+                "remove_trap"
+            )
+            .with_object_id(format!("0x{:x}", trap_oid))
+            .with_object_type("copp_trap")
+            .with_error(e.to_string()));
+            e
+        })?;
 
         self.stats.stats.traps_created = self.stats.stats.traps_created.saturating_sub(1);
         callbacks.on_trap_removed(key);
+
+        info_log!("CoppOrch", trap_id = %key.trap_id, oid = trap_oid, "CoPP trap removed successfully");
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "CoppOrch",
+            "remove_trap"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("0x{:x}", trap_oid))
+        .with_object_type("copp_trap")
+        .with_details(serde_json::json!({
+            "trap_key": key.trap_id
+        })));
 
         Ok(())
     }
 
     pub fn update_trap_rate(&mut self, key: &CoppTrapKey, cir: u64, cbs: u64) -> Result<()> {
+        debug_log!("CoppOrch", trap_id = %key.trap_id, cir = cir, cbs = cbs, "Updating CoPP trap rate");
+
         if cir == 0 || cbs == 0 {
+            error_log!("CoppOrch", trap_id = %key.trap_id, cir = cir, cbs = cbs, "Invalid rate limit values");
+            audit_log!(AuditRecord::new(
+                AuditCategory::ConfigurationChange,
+                "CoppOrch",
+                "update_trap_rate"
+            )
+            .with_object_id(&key.trap_id)
+            .with_object_type("copp_trap")
+            .with_error(format!("Invalid rate: CIR={}, CBS={} (must be non-zero)", cir, cbs)));
             return Err(CoppOrchError::InvalidRate(cir));
         }
 
-        let entry = self.traps.get_mut(key)
-            .ok_or_else(|| CoppOrchError::TrapNotFound(key.clone()))?;
+        let entry = self.traps.get_mut(key).ok_or_else(|| {
+            warn_log!("CoppOrch", trap_id = %key.trap_id, "Trap not found for rate update");
+            CoppOrchError::TrapNotFound(key.clone())
+        })?;
 
-        let callbacks = self.callbacks.as_ref().ok_or(CoppOrchError::SaiError("No callbacks".into()))?;
-        callbacks.update_trap_rate(entry.trap_oid, cir, cbs)?;
+        let trap_oid = entry.trap_oid;
+        let old_cir = entry.config.cir;
+        let old_cbs = entry.config.cbs;
+
+        let callbacks = self.callbacks.as_ref().ok_or_else(|| {
+            error_log!("CoppOrch", "Callbacks not configured");
+            CoppOrchError::NotInitialized
+        })?;
+
+        callbacks.update_trap_rate(trap_oid, cir, cbs).map_err(|e| {
+            error_log!("CoppOrch", trap_id = %key.trap_id, oid = trap_oid, error = %e, "SAI update_trap_rate failed");
+            audit_log!(AuditRecord::new(
+                AuditCategory::SaiOperation,
+                "CoppOrch",
+                "update_trap_rate"
+            )
+            .with_object_id(format!("0x{:x}", trap_oid))
+            .with_object_type("copp_trap")
+            .with_error(e.to_string()));
+            e
+        })?;
 
         entry.config.cir = Some(cir);
         entry.config.cbs = Some(cbs);
+
+        info_log!("CoppOrch", trap_id = %key.trap_id, oid = trap_oid, old_cir = ?old_cir, old_cbs = ?old_cbs, new_cir = cir, new_cbs = cbs, "CoPP trap rate updated successfully");
+        audit_log!(AuditRecord::new(
+            AuditCategory::ConfigurationChange,
+            "CoppOrch",
+            "update_trap_rate"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("0x{:x}", trap_oid))
+        .with_object_type("copp_trap")
+        .with_details(serde_json::json!({
+            "trap_key": key.trap_id,
+            "old_cir": old_cir,
+            "old_cbs": old_cbs,
+            "new_cir": cir,
+            "new_cbs": cbs
+        })));
 
         Ok(())
     }

@@ -27,6 +27,7 @@
 //! migration period, it coexists with the C++ orchagent via FFI bridges.
 
 pub mod acl;
+pub mod audit;
 pub mod bfd;
 pub mod buffer;
 pub mod chassis;
