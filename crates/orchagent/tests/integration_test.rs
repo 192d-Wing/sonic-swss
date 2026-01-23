@@ -269,6 +269,77 @@ mod integration_tests {
             assert_eq!(orch.stats().stats.ipv4_neighbors, 2);
             assert_eq!(orch.stats().stats.ipv6_neighbors, 1);
         }
+
+        #[test]
+        fn test_neigh_orch_ipv4_and_ipv6_neighbors_on_same_interface() {
+            let sai = MockSai::new();
+            let mut orch = NeighOrch::new(NeighOrchConfig::default());
+
+            // Add multiple IPv4 and IPv6 neighbors on the same interface
+            let (n1, _) = create_neighbor_with_sai("10.0.0.1", "Ethernet0", "00:11:22:33:44:01", &sai);
+            let (n2, _) = create_neighbor_with_sai("10.0.0.2", "Ethernet0", "00:11:22:33:44:02", &sai);
+            let (n3, _) = create_neighbor_with_sai("fe80::1", "Ethernet0", "00:11:22:33:44:03", &sai);
+            let (n4, _) = create_neighbor_with_sai("fe80::2", "Ethernet0", "00:11:22:33:44:04", &sai);
+
+            orch.add_neighbor(n1).unwrap();
+            orch.add_neighbor(n2).unwrap();
+            orch.add_neighbor(n3).unwrap();
+            orch.add_neighbor(n4).unwrap();
+
+            assert_eq!(orch.neighbor_count(), 4);
+            assert_eq!(sai.count_objects(SaiObjectType::Neighbor), 4);
+            assert_eq!(orch.stats().stats.ipv4_neighbors, 2);
+            assert_eq!(orch.stats().stats.ipv6_neighbors, 2);
+        }
+
+        #[test]
+        fn test_neigh_orch_add_duplicate_neighbor_different_mac() {
+            let sai = MockSai::new();
+            let mut orch = NeighOrch::new(NeighOrchConfig::default());
+
+            // Add neighbor
+            let (n1, _) = create_neighbor_with_sai("10.0.0.1", "Ethernet0", "00:11:22:33:44:55", &sai);
+            orch.add_neighbor(n1).unwrap();
+
+            assert_eq!(orch.neighbor_count(), 1);
+
+            // Update same neighbor with different MAC (simulates ARP update)
+            let (n2, _) = create_neighbor_with_sai("10.0.0.1", "Ethernet0", "AA:BB:CC:DD:EE:FF", &sai);
+            orch.add_neighbor(n2).unwrap();
+
+            // Should still have 1 neighbor (updated, not added)
+            assert_eq!(orch.neighbor_count(), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::Neighbor), 2); // SAI layer tracks both
+        }
+
+        #[test]
+        fn test_neigh_orch_bulk_add_and_remove() {
+            let sai = MockSai::new();
+            let mut orch = NeighOrch::new(NeighOrchConfig::default());
+
+            // Add 10 neighbors
+            let mut keys = Vec::new();
+            for i in 0..10 {
+                let ip = format!("10.0.0.{}", i + 1);
+                let mac = format!("00:11:22:33:44:{:02X}", i);
+                let (neighbor, _) = create_neighbor_with_sai(&ip, "Ethernet0", &mac, &sai);
+                let key = neighbor.key.clone();
+                orch.add_neighbor(neighbor).unwrap();
+                keys.push(key);
+            }
+
+            assert_eq!(orch.neighbor_count(), 10);
+            assert_eq!(sai.count_objects(SaiObjectType::Neighbor), 10);
+
+            // Remove all neighbors
+            for key in keys {
+                let removed = orch.remove_neighbor(&key).unwrap();
+                sai.remove_object(removed.neigh_oid).unwrap();
+            }
+
+            assert_eq!(orch.neighbor_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::Neighbor), 0);
+        }
     }
 
     // BufferOrch integration tests
@@ -386,7 +457,7 @@ mod integration_tests {
             let sai = MockSai::new();
             let mut orch = BufferOrch::new(BufferOrchConfig::default());
 
-            let (pool, oid) = create_pool_with_sai("ingress_lossless_pool", 10485760, &sai);
+            let (pool, _oid) = create_pool_with_sai("ingress_lossless_pool", 10485760, &sai);
             orch.add_pool(pool).unwrap();
 
             orch.increment_pool_ref("ingress_lossless_pool").unwrap();
@@ -397,6 +468,62 @@ mod integration_tests {
 
             assert_eq!(orch.pool_count(), 0);
             assert_eq!(sai.count_objects(SaiObjectType::BufferPool), 0);
+        }
+
+        #[test]
+        fn test_buffer_orch_multiple_pools_and_profiles() {
+            let sai = MockSai::new();
+            let mut orch = BufferOrch::new(BufferOrchConfig::default());
+
+            // Create two pools
+            let (pool1, _) = create_pool_with_sai("ingress_lossless_pool", 10485760, &sai);
+            let (pool2, _) = create_pool_with_sai("egress_lossy_pool", 20971520, &sai);
+            orch.add_pool(pool1).unwrap();
+            orch.add_pool(pool2).unwrap();
+
+            // Create profiles for each pool
+            let (profile1, _) = create_profile_with_sai("pg_lossless", "ingress_lossless_pool", 1024, &sai);
+            let (profile2, _) = create_profile_with_sai("pg_lossy", "egress_lossy_pool", 2048, &sai);
+            let (profile3, _) = create_profile_with_sai("queue_profile", "ingress_lossless_pool", 512, &sai);
+
+            orch.add_profile(profile1).unwrap();
+            orch.add_profile(profile2).unwrap();
+            orch.add_profile(profile3).unwrap();
+
+            assert_eq!(orch.pool_count(), 2);
+            assert_eq!(orch.profile_count(), 3);
+            assert_eq!(sai.count_objects(SaiObjectType::BufferPool), 2);
+            assert_eq!(sai.count_objects(SaiObjectType::BufferProfile), 3);
+        }
+
+        #[test]
+        fn test_buffer_orch_cascading_deletion() {
+            let sai = MockSai::new();
+            let mut orch = BufferOrch::new(BufferOrchConfig::default());
+
+            // Create pool and profile
+            let (pool, _pool_oid) = create_pool_with_sai("ingress_lossless_pool", 10485760, &sai);
+            orch.add_pool(pool).unwrap();
+
+            let (profile, profile_oid) = create_profile_with_sai("pg_lossless", "ingress_lossless_pool", 1024, &sai);
+            orch.add_profile(profile).unwrap();
+
+            assert_eq!(orch.pool_count(), 1);
+            assert_eq!(orch.profile_count(), 1);
+
+            // Remove profile first
+            let removed_profile = orch.remove_profile("pg_lossless").unwrap();
+            sai.remove_object(removed_profile.sai_oid).unwrap();
+
+            assert_eq!(orch.profile_count(), 0);
+
+            // Now can remove pool
+            let removed_pool = orch.remove_pool("ingress_lossless_pool").unwrap();
+            sai.remove_object(removed_pool.sai_oid).unwrap();
+
+            assert_eq!(orch.pool_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::BufferPool), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::BufferProfile), 0);
         }
     }
 
@@ -501,6 +628,71 @@ mod integration_tests {
 
             assert_eq!(orch.stats().stats.vrf_maps_created, 1);
             assert_eq!(orch.stats().stats.vlan_maps_created, 1);
+        }
+
+        #[test]
+        fn test_vxlan_orch_multiple_vrf_maps() {
+            let sai = MockSai::new();
+            let mut orch = VxlanOrch::new(VxlanOrchConfig::default());
+
+            // Add multiple VRF maps with different VNIs
+            let vrf1 = VxlanVrfMapEntry::new(VxlanVrfMapKey::new(1000, "Vrf1".to_string()));
+            let vrf2 = VxlanVrfMapEntry::new(VxlanVrfMapKey::new(2000, "Vrf2".to_string()));
+            let vrf3 = VxlanVrfMapEntry::new(VxlanVrfMapKey::new(3000, "Vrf3".to_string()));
+
+            orch.add_vrf_map(vrf1).unwrap();
+            orch.add_vrf_map(vrf2).unwrap();
+            orch.add_vrf_map(vrf3).unwrap();
+
+            assert_eq!(orch.stats().stats.vrf_maps_created, 3);
+        }
+
+        #[test]
+        fn test_vxlan_orch_multiple_vlan_maps() {
+            let sai = MockSai::new();
+            let mut orch = VxlanOrch::new(VxlanOrchConfig::default());
+
+            // Add multiple VLAN maps with different VNIs and VLAN IDs
+            let vlan1 = VxlanVlanMapEntry::new(VxlanVlanMapKey::new(1000, 100));
+            let vlan2 = VxlanVlanMapEntry::new(VxlanVlanMapKey::new(2000, 200));
+            let vlan3 = VxlanVlanMapEntry::new(VxlanVlanMapKey::new(3000, 300));
+            let vlan4 = VxlanVlanMapEntry::new(VxlanVlanMapKey::new(4000, 400));
+
+            orch.add_vlan_map(vlan1).unwrap();
+            orch.add_vlan_map(vlan2).unwrap();
+            orch.add_vlan_map(vlan3).unwrap();
+            orch.add_vlan_map(vlan4).unwrap();
+
+            assert_eq!(orch.stats().stats.vlan_maps_created, 4);
+        }
+
+        #[test]
+        fn test_vxlan_orch_full_topology() {
+            let sai = MockSai::new();
+            let mut orch = VxlanOrch::new(VxlanOrchConfig::default());
+
+            // Create multiple tunnels
+            let (t1, _) = create_tunnel_with_sai("vtep1", "10.0.0.1", "10.0.0.2", &sai);
+            let (t2, _) = create_tunnel_with_sai("vtep2", "10.0.0.1", "10.0.0.3", &sai);
+            orch.add_tunnel(t1).unwrap();
+            orch.add_tunnel(t2).unwrap();
+
+            // Add VRF and VLAN maps
+            let vrf1 = VxlanVrfMapEntry::new(VxlanVrfMapKey::new(1000, "Vrf1".to_string()));
+            let vrf2 = VxlanVrfMapEntry::new(VxlanVrfMapKey::new(2000, "Vrf2".to_string()));
+            let vlan1 = VxlanVlanMapEntry::new(VxlanVlanMapKey::new(3000, 100));
+            let vlan2 = VxlanVlanMapEntry::new(VxlanVlanMapKey::new(4000, 200));
+
+            orch.add_vrf_map(vrf1).unwrap();
+            orch.add_vrf_map(vrf2).unwrap();
+            orch.add_vlan_map(vlan1).unwrap();
+            orch.add_vlan_map(vlan2).unwrap();
+
+            // Verify complete topology
+            assert_eq!(orch.tunnel_count(), 2);
+            assert_eq!(orch.stats().stats.vrf_maps_created, 2);
+            assert_eq!(orch.stats().stats.vlan_maps_created, 2);
+            assert_eq!(sai.count_objects(SaiObjectType::Tunnel), 2);
         }
     }
 
