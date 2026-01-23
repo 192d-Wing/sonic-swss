@@ -5,14 +5,21 @@ use sonic_sai::types::RawSaiObjectId;
 use sonic_types::IpAddress;
 use std::collections::HashMap;
 use std::sync::Arc;
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum TunnelDecapOrchError {
+    #[error("Tunnel exists: {0}")]
     TunnelExists(String),
+    #[error("Tunnel not found: {0}")]
     TunnelNotFound(String),
+    #[error("Term entry exists: {0}")]
     TermEntryExists(String),
+    #[error("Term entry not found: {0}")]
     TermEntryNotFound(String),
+    #[error("Invalid config: {0}")]
     InvalidConfig(String),
+    #[error("SAI error: {0}")]
     SaiError(String),
 }
 
@@ -77,7 +84,17 @@ impl TunnelDecapOrch {
 
     pub fn create_tunnel(&mut self, config: TunnelDecapConfig) -> Result<(), TunnelDecapOrchError> {
         if self.tunnels.contains_key(&config.tunnel_name) {
-            return Err(TunnelDecapOrchError::TunnelExists(config.tunnel_name.clone()));
+            let error = TunnelDecapOrchError::TunnelExists(config.tunnel_name.clone());
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "TunnelDecapOrch",
+                "create_tunnel_term"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(config.tunnel_name.clone())
+            .with_object_type("tunnel_term")
+            .with_error(error.to_string()));
+            return Err(error);
         }
 
         let callbacks = Arc::clone(
@@ -89,8 +106,25 @@ impl TunnelDecapOrch {
             .map_err(TunnelDecapOrchError::SaiError)?;
 
         let entry = TunnelDecapEntry::from_config(config.clone(), tunnel_id);
-        self.tunnels.insert(config.tunnel_name, entry);
+        self.tunnels.insert(config.tunnel_name.clone(), entry);
         self.stats.tunnels_created += 1;
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "TunnelDecapOrch",
+            "create_tunnel_term"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(config.tunnel_name.clone())
+        .with_object_type("tunnel_term")
+        .with_details(serde_json::json!({
+            "tunnel_name": config.tunnel_name,
+            "tunnel_type": config.tunnel_type,
+            "tunnel_id": tunnel_id,
+            "stats": {
+                "tunnels_created": self.stats.tunnels_created
+            }
+        })));
 
         Ok(())
     }
@@ -100,9 +134,19 @@ impl TunnelDecapOrch {
             .ok_or_else(|| TunnelDecapOrchError::TunnelNotFound(tunnel_name.to_string()))?;
 
         if !entry.term_entries.is_empty() {
-            return Err(TunnelDecapOrchError::InvalidConfig(
+            let error = TunnelDecapOrchError::InvalidConfig(
                 format!("Tunnel {} has {} term entries, remove them first", tunnel_name, entry.term_entries.len())
-            ));
+            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "TunnelDecapOrch",
+                "remove_tunnel_term"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(tunnel_name.to_string())
+            .with_object_type("tunnel_term")
+            .with_error(error.to_string()));
+            return Err(error);
         }
 
         let entry = self.tunnels.remove(tunnel_name).unwrap();
@@ -114,6 +158,22 @@ impl TunnelDecapOrch {
             .map_err(TunnelDecapOrchError::SaiError)?;
 
         self.stats.tunnels_removed += 1;
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "TunnelDecapOrch",
+            "remove_tunnel_term"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(tunnel_name.to_string())
+        .with_object_type("tunnel_term")
+        .with_details(serde_json::json!({
+            "tunnel_name": tunnel_name,
+            "tunnel_id": entry.tunnel_id,
+            "stats": {
+                "tunnels_removed": self.stats.tunnels_removed
+            }
+        })));
 
         Ok(())
     }
@@ -130,7 +190,17 @@ impl TunnelDecapOrch {
             .ok_or_else(|| TunnelDecapOrchError::TunnelNotFound(tunnel_name.to_string()))?;
 
         if entry.term_entries.contains_key(&term_key) {
-            return Err(TunnelDecapOrchError::TermEntryExists(term_key));
+            let error = TunnelDecapOrchError::TermEntryExists(term_key.clone());
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "TunnelDecapOrch",
+                "add_decap_tunnel"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(term_key.clone())
+            .with_object_type("tunnel_term_entry")
+            .with_error(error.to_string()));
+            return Err(error);
         }
 
         let callbacks = Arc::clone(
@@ -141,8 +211,28 @@ impl TunnelDecapOrch {
         let term_entry_id = callbacks.create_tunnel_term_entry(entry.tunnel_id, term_type, src_ip, dst_ip)
             .map_err(TunnelDecapOrchError::SaiError)?;
 
-        entry.term_entries.insert(term_key, term_entry_id);
+        entry.term_entries.insert(term_key.clone(), term_entry_id);
         self.stats.term_entries_created += 1;
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "TunnelDecapOrch",
+            "add_decap_tunnel"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(term_key.clone())
+        .with_object_type("tunnel_term_entry")
+        .with_details(serde_json::json!({
+            "tunnel_name": tunnel_name,
+            "term_key": term_key,
+            "term_type": format!("{:?}", term_type),
+            "src_ip": src_ip.to_string(),
+            "dst_ip": dst_ip.to_string(),
+            "term_entry_id": term_entry_id,
+            "stats": {
+                "term_entries_created": self.stats.term_entries_created
+            }
+        })));
 
         Ok(())
     }
@@ -161,6 +251,23 @@ impl TunnelDecapOrch {
             .map_err(TunnelDecapOrchError::SaiError)?;
 
         self.stats.term_entries_removed += 1;
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "TunnelDecapOrch",
+            "remove_decap_tunnel"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(term_key.to_string())
+        .with_object_type("tunnel_term_entry")
+        .with_details(serde_json::json!({
+            "tunnel_name": tunnel_name,
+            "term_key": term_key,
+            "term_entry_id": term_entry_id,
+            "stats": {
+                "term_entries_removed": self.stats.term_entries_removed
+            }
+        })));
 
         Ok(())
     }

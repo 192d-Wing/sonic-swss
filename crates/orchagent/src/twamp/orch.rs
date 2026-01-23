@@ -4,13 +4,19 @@ use super::types::{TwampMode, TwampRole, TwampSessionConfig, TwampSessionEntry, 
 use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::Arc;
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum TwampOrchError {
+    #[error("Session exists: {0}")]
     SessionExists(String),
+    #[error("Session not found: {0}")]
     SessionNotFound(String),
+    #[error("Resource exhausted")]
     ResourceExhausted,
+    #[error("VRF not found: {0}")]
     VrfNotFound(String),
+    #[error("SAI error: {0}")]
     SaiError(String),
 }
 
@@ -66,7 +72,17 @@ impl TwampOrch {
 
     pub fn create_session(&mut self, config: TwampSessionConfig) -> Result<(), TwampOrchError> {
         if self.sessions.contains_key(&config.name) {
-            return Err(TwampOrchError::SessionExists(config.name.clone()));
+            let error = TwampOrchError::SessionExists(config.name.clone());
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "TwampOrch",
+                "create_session"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(config.name.clone())
+            .with_object_type("twamp_session")
+            .with_error(error.to_string()));
+            return Err(error);
         }
 
         let callbacks = Arc::clone(
@@ -78,8 +94,28 @@ impl TwampOrch {
             .map_err(TwampOrchError::SaiError)?;
 
         let entry = TwampSessionEntry::from_config(config.clone(), session_id);
-        self.sessions.insert(config.name, entry);
+        self.sessions.insert(config.name.clone(), entry);
         self.stats.sessions_created += 1;
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "TwampOrch",
+            "create_session"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(config.name.clone())
+        .with_object_type("twamp_session")
+        .with_details(serde_json::json!({
+            "session_name": config.name,
+            "mode": format!("{:?}", config.mode),
+            "role": format!("{:?}", config.role),
+            "src_ip": config.src_ip.to_string(),
+            "dst_ip": config.dst_ip.to_string(),
+            "session_id": session_id,
+            "stats": {
+                "sessions_created": self.stats.sessions_created
+            }
+        })));
 
         Ok(())
     }
@@ -95,6 +131,22 @@ impl TwampOrch {
             .map_err(TwampOrchError::SaiError)?;
 
         self.stats.sessions_removed += 1;
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "TwampOrch",
+            "remove_session"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(name.to_string())
+        .with_object_type("twamp_session")
+        .with_details(serde_json::json!({
+            "session_name": name,
+            "session_id": entry.session_id,
+            "stats": {
+                "sessions_removed": self.stats.sessions_removed
+            }
+        })));
 
         Ok(())
     }

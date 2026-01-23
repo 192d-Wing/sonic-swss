@@ -2,6 +2,7 @@
 
 use super::types::{QosMapEntry, QosStats, SchedulerEntry, WredProfile};
 use std::collections::HashMap;
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
 
 #[derive(Debug, Clone)]
 pub enum QosOrchError {
@@ -66,25 +67,66 @@ impl QosOrch {
         let name = entry.name.clone();
 
         if self.qos_maps.contains_key(&name) {
-            return Err(QosOrchError::SaiError("QoS map already exists".to_string()));
+            let error_msg = "QoS map already exists".to_string();
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "QosOrch", "add_map")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(&name)
+                    .with_object_type("qos_map")
+                    .with_error(&error_msg)
+            );
+            return Err(QosOrchError::SaiError(error_msg));
         }
 
         // Validate mappings (TC/Queue typically 0-7, DSCP 0-63)
         for (&from, &to) in &entry.mappings {
             if from > 63 || to > 63 {
+                let error_msg = format!("Invalid mapping: {} -> {}", from, to);
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceCreate, "QosOrch", "add_map")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(&name)
+                        .with_object_type("qos_map")
+                        .with_error(&error_msg)
+                );
                 return Err(QosOrchError::InvalidMapping(from, to));
             }
         }
 
         self.stats.stats.maps_created = self.stats.stats.maps_created.saturating_add(1);
-        self.qos_maps.insert(name, entry);
+        self.qos_maps.insert(name.clone(), entry);
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "QosOrch", "add_map")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(&name)
+                .with_object_type("qos_map")
+        );
 
         Ok(())
     }
 
     pub fn remove_map(&mut self, name: &str) -> Result<QosMapEntry, QosOrchError> {
         self.qos_maps.remove(name)
-            .ok_or_else(|| QosOrchError::MapNotFound(name.to_string()))
+            .ok_or_else(|| {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "QosOrch", "remove_map")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(name)
+                        .with_object_type("qos_map")
+                        .with_error(&format!("QoS map not found: {}", name))
+                );
+                QosOrchError::MapNotFound(name.to_string())
+            })
+            .map(|entry| {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "QosOrch", "remove_map")
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_id(name)
+                        .with_object_type("qos_map")
+                );
+                entry
+            })
     }
 
     pub fn update_map_mapping(&mut self, name: &str, from: u8, to: u8) -> Result<(), QosOrchError> {
@@ -107,23 +149,64 @@ impl QosOrch {
         let name = entry.name.clone();
 
         if self.schedulers.contains_key(&name) {
-            return Err(QosOrchError::SaiError("Scheduler already exists".to_string()));
+            let error_msg = "Scheduler already exists".to_string();
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "QosOrch", "add_scheduler")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(&name)
+                    .with_object_type("scheduler")
+                    .with_error(&error_msg)
+            );
+            return Err(QosOrchError::SaiError(error_msg));
         }
 
         // Validate weight (typically 1-100)
         if entry.config.weight == 0 {
+            let error_msg = format!("Invalid weight: {}", entry.config.weight);
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "QosOrch", "add_scheduler")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(&name)
+                    .with_object_type("scheduler")
+                    .with_error(&error_msg)
+            );
             return Err(QosOrchError::InvalidWeight(entry.config.weight));
         }
 
         self.stats.stats.schedulers_created = self.stats.stats.schedulers_created.saturating_add(1);
-        self.schedulers.insert(name, entry);
+        self.schedulers.insert(name.clone(), entry);
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "QosOrch", "add_scheduler")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(&name)
+                .with_object_type("scheduler")
+        );
 
         Ok(())
     }
 
     pub fn remove_scheduler(&mut self, name: &str) -> Result<SchedulerEntry, QosOrchError> {
         self.schedulers.remove(name)
-            .ok_or_else(|| QosOrchError::SchedulerNotFound(name.to_string()))
+            .ok_or_else(|| {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "QosOrch", "remove_scheduler")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(name)
+                        .with_object_type("scheduler")
+                        .with_error(&format!("Scheduler not found: {}", name))
+                );
+                QosOrchError::SchedulerNotFound(name.to_string())
+            })
+            .map(|entry| {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "QosOrch", "remove_scheduler")
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_id(name)
+                        .with_object_type("scheduler")
+                );
+                entry
+            })
     }
 
     pub fn get_wred_profile(&self, name: &str) -> Option<&WredProfile> {

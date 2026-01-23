@@ -6,43 +6,34 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::types::{L3VniEntry, Vni, VrfConfig, VrfEntry, VrfId, VrfName, VrfVlanId};
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
 
 /// Error type for VRF operations.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum VrfOrchError {
     /// VRF not found.
+    #[error("VRF not found: {0}")]
     VrfNotFound(String),
     /// VRF already exists.
+    #[error("VRF already exists: {0}")]
     VrfAlreadyExists(String),
     /// VRF is still in use (has references).
+    #[error("VRF in use: {0} (ref_count={1})")]
     VrfInUse(String, i32),
     /// SAI operation failed.
+    #[error("SAI error: {0}")]
     SaiError(String),
     /// VNI not found.
+    #[error("VNI not found: {0}")]
     VniNotFound(u32),
     /// Invalid configuration.
+    #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
     /// Callback error.
+    #[error("Callback error: {0}")]
     CallbackError(String),
 }
 
-impl std::fmt::Display for VrfOrchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::VrfNotFound(name) => write!(f, "VRF not found: {}", name),
-            Self::VrfAlreadyExists(name) => write!(f, "VRF already exists: {}", name),
-            Self::VrfInUse(name, refs) => {
-                write!(f, "VRF '{}' is in use (ref_count={})", name, refs)
-            }
-            Self::SaiError(msg) => write!(f, "SAI error: {}", msg),
-            Self::VniNotFound(vni) => write!(f, "VNI not found: {}", vni),
-            Self::InvalidConfig(msg) => write!(f, "Invalid configuration: {}", msg),
-            Self::CallbackError(msg) => write!(f, "Callback error: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for VrfOrchError {}
 
 /// Callbacks for VRF operations.
 ///
@@ -369,6 +360,25 @@ impl VrfOrch {
 
         self.stats.vrfs_created += 1;
 
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "VrfOrch",
+            "create_vrf"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(name.clone())
+        .with_object_type("vrf")
+        .with_details(serde_json::json!({
+            "vrf_name": name,
+            "vrf_id": vrf_id,
+            "v4_enabled": entry.admin_v4_state,
+            "v6_enabled": entry.admin_v6_state,
+            "vni": config.vni,
+            "stats": {
+                "vrfs_created": self.stats.vrfs_created
+            }
+        })));
+
         Ok(vrf_id)
     }
 
@@ -426,7 +436,17 @@ impl VrfOrch {
             .ok_or_else(|| VrfOrchError::VrfNotFound(name.to_string()))?;
 
         if entry.is_in_use() {
-            return Err(VrfOrchError::VrfInUse(name.to_string(), entry.ref_count));
+            let error = VrfOrchError::VrfInUse(name.to_string(), entry.ref_count);
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "VrfOrch",
+                "remove_vrf"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(name.to_string())
+            .with_object_type("vrf")
+            .with_error(error.to_string()));
+            return Err(error);
         }
 
         let vrf_id = entry.vrf_id;
@@ -445,6 +465,22 @@ impl VrfOrch {
         }
 
         self.stats.vrfs_removed += 1;
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "VrfOrch",
+            "remove_vrf"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(name.to_string())
+        .with_object_type("vrf")
+        .with_details(serde_json::json!({
+            "vrf_name": name,
+            "vrf_id": vrf_id,
+            "stats": {
+                "vrfs_removed": self.stats.vrfs_removed
+            }
+        })));
 
         Ok(())
     }
@@ -492,6 +528,22 @@ impl VrfOrch {
 
         self.stats.vni_mappings_created += 1;
 
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "VrfOrch",
+            "add_l3_vni"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("vrf_vni_{}_{}",vrf_name, vni))
+        .with_object_type("l3_vni")
+        .with_details(serde_json::json!({
+            "vrf_name": vrf_name,
+            "vni": vni,
+            "stats": {
+                "vni_mappings_created": self.stats.vni_mappings_created
+            }
+        })));
+
         Ok(())
     }
 
@@ -520,6 +572,22 @@ impl VrfOrch {
         self.vrf_vni_map.remove(vrf_name);
 
         self.stats.vni_mappings_removed += 1;
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "VrfOrch",
+            "remove_l3_vni"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("vrf_vni_{}_{}",vrf_name, vni))
+        .with_object_type("l3_vni")
+        .with_details(serde_json::json!({
+            "vrf_name": vrf_name,
+            "vni": vni,
+            "stats": {
+                "vni_mappings_removed": self.stats.vni_mappings_removed
+            }
+        })));
 
         Ok(())
     }

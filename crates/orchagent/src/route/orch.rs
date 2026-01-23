@@ -14,6 +14,7 @@ use std::sync::Arc;
 use super::nexthop::NextHopKey;
 use super::nhg::{NextHopGroupEntry, NextHopGroupKey, NextHopGroupTable};
 use super::types::{RouteEntry, RouteNhg, RouteTables};
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
 
 /// Error type for RouteOrch operations.
 #[derive(Debug, thiserror::Error)]
@@ -316,11 +317,27 @@ impl RouteOrch {
     pub async fn add_nhg(&mut self, key: NextHopGroupKey) -> Result<RawSaiObjectId> {
         // Check if already exists
         if self.synced_nhgs.contains_key(&key) {
+            let error_msg = format!("NHG already exists: {}", key);
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "RouteOrch", "add_nhg")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(&key.to_string())
+                    .with_object_type("nhg")
+                    .with_error(&error_msg)
+            );
             return Err(RouteError::NhgAlreadyExists(key.to_string()));
         }
 
         // Check capacity
         if self.nhg_count >= self.config.max_nhg_count {
+            let error_msg = format!("Max NHG count reached: {}", self.config.max_nhg_count);
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "RouteOrch", "add_nhg")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(&key.to_string())
+                    .with_object_type("nhg")
+                    .with_error(&error_msg)
+            );
             return Err(RouteError::MaxNhgReached(self.config.max_nhg_count));
         }
 
@@ -336,6 +353,16 @@ impl RouteOrch {
         self.synced_nhgs.insert(key.clone(), entry);
         self.nhg_count += 1;
 
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "RouteOrch", "add_nhg")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(&key.to_string())
+                .with_object_type("nhg")
+                .with_details(serde_json::json!({
+                    "sai_id": format!("0x{:x}", nhg_id)
+                }))
+        );
+
         info!("RouteOrch: Created NHG {} with SAI ID {:x}", key, nhg_id);
 
         Ok(nhg_id)
@@ -347,15 +374,30 @@ impl RouteOrch {
     pub async fn remove_nhg(&mut self, key: &NextHopGroupKey) -> Result<()> {
         // Get the entry and check ref count
         let entry = self.synced_nhgs.get(key).ok_or_else(|| {
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceDelete, "RouteOrch", "remove_nhg")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(&key.to_string())
+                    .with_object_type("nhg")
+                    .with_error(&format!("NHG not found: {}", key))
+            );
             RouteError::NhgNotFound(key.to_string())
         })?;
 
         if !entry.is_ref_count_zero() {
-            return Err(RouteError::RefCountError(format!(
+            let error_msg = format!(
                 "Cannot remove NHG {} with ref_count {}",
                 key,
                 entry.ref_count()
-            )));
+            );
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceDelete, "RouteOrch", "remove_nhg")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(&key.to_string())
+                    .with_object_type("nhg")
+                    .with_error(&error_msg)
+            );
+            return Err(RouteError::RefCountError(error_msg));
         }
 
         let nhg_id = entry.sai_id();
@@ -371,6 +413,13 @@ impl RouteOrch {
         self.synced_nhgs.remove(key);
         self.nhg_count -= 1;
         self.pending_nhg_removals.remove(key);
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceDelete, "RouteOrch", "remove_nhg")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(&key.to_string())
+                .with_object_type("nhg")
+        );
 
         info!("RouteOrch: Removed NHG {}", key);
 
@@ -474,8 +523,20 @@ impl RouteOrch {
             // Update our table
             let table = self.synced_routes.entry(vrf_id).or_default();
             if let Some(entry) = table.get_mut(&prefix) {
-                entry.nhg = RouteNhg::new(nhg_key);
+                entry.nhg = RouteNhg::new(nhg_key.clone());
             }
+
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceModify, "RouteOrch", "add_route")
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_id(&prefix.to_string())
+                    .with_object_type("route")
+                    .with_details(serde_json::json!({
+                        "vrf_id": format!("0x{:x}", vrf_id),
+                        "nhg_id": nhg_id.map(|id| format!("0x{:x}", id)),
+                        "blackhole": blackhole
+                    }))
+            );
 
             debug!("RouteOrch: Updated route {}/{}", vrf_id, prefix);
         } else {
@@ -492,7 +553,19 @@ impl RouteOrch {
 
             // Add to our table
             let table = self.synced_routes.entry(vrf_id).or_default();
-            table.insert(prefix.clone(), RouteEntry::new(RouteNhg::new(nhg_key)));
+            table.insert(prefix.clone(), RouteEntry::new(RouteNhg::new(nhg_key.clone())));
+
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "RouteOrch", "add_route")
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_id(&prefix.to_string())
+                    .with_object_type("route")
+                    .with_details(serde_json::json!({
+                        "vrf_id": format!("0x{:x}", vrf_id),
+                        "nhg_id": nhg_id.map(|id| format!("0x{:x}", id)),
+                        "blackhole": blackhole
+                    }))
+            );
 
             info!("RouteOrch: Added route {}/{}", vrf_id, prefix);
         }
@@ -512,7 +585,16 @@ impl RouteOrch {
             .synced_routes
             .get(&vrf_id)
             .and_then(|table| table.get(prefix))
-            .ok_or_else(|| RouteError::RouteNotFound(format!("{}/{}", vrf_id, prefix)))?;
+            .ok_or_else(|| {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "RouteOrch", "remove_route")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(&prefix.to_string())
+                        .with_object_type("route")
+                        .with_error(&format!("Route not found: {}/{}", vrf_id, prefix))
+                );
+                RouteError::RouteNotFound(format!("{}/{}", vrf_id, prefix))
+            })?;
 
         let nhg_key = entry.nhg.nhg_key.clone();
 
@@ -531,6 +613,17 @@ impl RouteOrch {
                 let old_nhg_key = std::mem::take(&mut entry.nhg.nhg_key);
                 self.decrease_nhg_ref_count(&old_nhg_key)?;
             }
+
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceModify, "RouteOrch", "remove_route")
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_id(&prefix.to_string())
+                    .with_object_type("route")
+                    .with_details(serde_json::json!({
+                        "action": "set_to_drop",
+                        "vrf_id": format!("0x{:x}", vrf_id)
+                    }))
+            );
 
             debug!(
                 "RouteOrch: Set default route {} to DROP",
@@ -554,6 +647,16 @@ impl RouteOrch {
             if table.is_empty() && vrf_id != 0 {
                 self.synced_routes.remove(&vrf_id);
             }
+
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceDelete, "RouteOrch", "remove_route")
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_id(&prefix.to_string())
+                    .with_object_type("route")
+                    .with_details(serde_json::json!({
+                        "vrf_id": format!("0x{:x}", vrf_id)
+                    }))
+            );
 
             info!("RouteOrch: Removed route {}/{}", vrf_id, prefix);
         }

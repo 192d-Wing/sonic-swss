@@ -6,6 +6,7 @@ use std::sync::Arc;
 use sonic_sai::types::RawSaiObjectId;
 
 use super::types::{PolicerConfig, PolicerEntry, StormType};
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
 
 /// Policer orchestrator error type.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -196,26 +197,71 @@ impl PolicerOrch {
             // Update existing policer
             // Only rate/burst parameters can be updated
             if !existing.config.is_rate_burst_update(&config) {
-                return Err(PolicerOrchError::InvalidConfig(
-                    "Cannot update policer mode/type/actions".to_string(),
-                ));
+                let error_msg = "Cannot update policer mode/type/actions".to_string();
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_policer")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(&name)
+                        .with_object_type("policer")
+                        .with_error(&error_msg)
+                );
+                return Err(PolicerOrchError::InvalidConfig(error_msg));
             }
 
             callbacks
                 .update_policer(existing.sai_oid, &config)
-                .map_err(PolicerOrchError::SaiError)?;
+                .map_err(|e| {
+                    audit_log!(
+                        AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_policer")
+                            .with_outcome(AuditOutcome::Failure)
+                            .with_object_id(&name)
+                            .with_object_type("policer")
+                            .with_error(&e)
+                    );
+                    PolicerOrchError::SaiError(e)
+                })?;
 
             existing.config = config;
             self.stats.policers_updated += 1;
+
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_policer")
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_id(&name)
+                    .with_object_type("policer")
+                    .with_details(serde_json::json!({
+                        "operation": "update",
+                        "mode": "rate_burst_update"
+                    }))
+            );
         } else {
             // Create new policer
             let sai_oid = callbacks
                 .create_policer(&config)
-                .map_err(PolicerOrchError::SaiError)?;
+                .map_err(|e| {
+                    audit_log!(
+                        AuditRecord::new(AuditCategory::ResourceCreate, "PolicerOrch", "set_policer")
+                            .with_outcome(AuditOutcome::Failure)
+                            .with_object_id(&name)
+                            .with_object_type("policer")
+                            .with_error(&e)
+                    );
+                    PolicerOrchError::SaiError(e)
+                })?;
 
             let entry = PolicerEntry::new(sai_oid, config);
-            self.policers.insert(name, entry);
+            self.policers.insert(name.clone(), entry);
             self.stats.policers_created += 1;
+
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "PolicerOrch", "set_policer")
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_id(&name)
+                    .with_object_type("policer")
+                    .with_details(serde_json::json!({
+                        "sai_oid": format!("0x{:x}", sai_oid)
+                    }))
+            );
         }
 
         Ok(())
@@ -231,24 +277,57 @@ impl PolicerOrch {
         let entry = self
             .policers
             .get(name)
-            .ok_or_else(|| PolicerOrchError::PolicerNotFound(name.to_string()))?;
+            .ok_or_else(|| {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "PolicerOrch", "remove_policer")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(name)
+                        .with_object_type("policer")
+                        .with_error(&format!("Policer not found: {}", name))
+                );
+                PolicerOrchError::PolicerNotFound(name.to_string())
+            })?;
 
         // Check if policer is still in use
         if entry.ref_count > 0 {
-            return Err(PolicerOrchError::InvalidConfig(format!(
+            let error_msg = format!(
                 "Policer {} is still in use (ref_count={})",
                 name, entry.ref_count
-            )));
+            );
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceDelete, "PolicerOrch", "remove_policer")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(name)
+                    .with_object_type("policer")
+                    .with_error(&error_msg)
+            );
+            return Err(PolicerOrchError::InvalidConfig(error_msg));
         }
 
         let sai_oid = entry.sai_oid;
 
         callbacks
             .remove_policer(sai_oid)
-            .map_err(PolicerOrchError::SaiError)?;
+            .map_err(|e| {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "PolicerOrch", "remove_policer")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(name)
+                        .with_object_type("policer")
+                        .with_error(&e)
+                );
+                PolicerOrchError::SaiError(e)
+            })?;
 
         self.policers.remove(name);
         self.stats.policers_removed += 1;
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceDelete, "PolicerOrch", "remove_policer")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(name)
+                .with_object_type("policer")
+        );
 
         Ok(())
     }
@@ -268,21 +347,45 @@ impl PolicerOrch {
 
         // Check if ports are ready
         if !callbacks.all_ports_ready() {
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_port_storm_control")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(port_name)
+                    .with_object_type("port")
+                    .with_error("Ports not ready")
+            );
             return Err(PolicerOrchError::PortNotReady);
         }
 
         // Validate interface is Ethernet
         if !port_name.starts_with("Ethernet") {
-            return Err(PolicerOrchError::InvalidConfig(format!(
+            let error_msg = format!(
                 "Storm control only supported on Ethernet interfaces: {}",
                 port_name
-            )));
+            );
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_port_storm_control")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(port_name)
+                    .with_object_type("port")
+                    .with_error(&error_msg)
+            );
+            return Err(PolicerOrchError::InvalidConfig(error_msg));
         }
 
         // Get port ID
         let port_id = callbacks
             .get_port_id(port_name)
-            .ok_or_else(|| PolicerOrchError::PortNotFound(port_name.to_string()))?;
+            .ok_or_else(|| {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_port_storm_control")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(port_name)
+                        .with_object_type("port")
+                        .with_error(&format!("Port not found: {}", port_name))
+                );
+                PolicerOrchError::PortNotFound(port_name.to_string())
+            })?;
 
         // Generate policer name: "_<port>_<storm_type>"
         let policer_name = format!("_{}_{}", port_name, storm_type.as_str());
@@ -296,14 +399,44 @@ impl PolicerOrch {
         // Get the policer OID
         let policer_oid = self
             .get_policer_oid(&policer_name)
-            .ok_or_else(|| PolicerOrchError::PolicerNotFound(policer_name.clone()))?;
+            .ok_or_else(|| {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_port_storm_control")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(port_name)
+                        .with_object_type("port")
+                        .with_error(&format!("Policer not found: {}", policer_name))
+                );
+                PolicerOrchError::PolicerNotFound(policer_name.clone())
+            })?;
 
         // Apply to port
         callbacks
             .set_port_storm_policer(port_id, storm_type, Some(policer_oid))
-            .map_err(PolicerOrchError::SaiError)?;
+            .map_err(|e| {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_port_storm_control")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(port_name)
+                        .with_object_type("port")
+                        .with_error(&e)
+                );
+                PolicerOrchError::SaiError(e)
+            })?;
 
         self.stats.storm_control_applied += 1;
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_port_storm_control")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(port_name)
+                .with_object_type("port")
+                .with_details(serde_json::json!({
+                    "storm_type": storm_type.as_str(),
+                    "kbps": kbps,
+                    "policer_oid": format!("0x{:x}", policer_oid)
+                }))
+        );
 
         Ok(())
     }

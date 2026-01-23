@@ -2,6 +2,7 @@
 
 use super::types::{Srv6LocalSidEntry, Srv6Sid, Srv6SidListEntry, Srv6Stats};
 use std::collections::HashMap;
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
 
 #[derive(Debug, Clone)]
 pub enum Srv6OrchError {
@@ -56,18 +57,54 @@ impl Srv6Orch {
         let sid = entry.config.sid.clone();
 
         if self.local_sids.contains_key(&sid) {
-            return Err(Srv6OrchError::SaiError("Local SID already exists".to_string()));
+            let error_msg = "Local SID already exists".to_string();
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "Srv6Orch", "add_local_sid")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(&sid.to_string())
+                    .with_object_type("local_sid")
+                    .with_error(&error_msg)
+            );
+            return Err(Srv6OrchError::SaiError(error_msg));
         }
 
         self.stats.stats.local_sids_created = self.stats.stats.local_sids_created.saturating_add(1);
-        self.local_sids.insert(sid, entry);
+        self.local_sids.insert(sid.clone(), entry);
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "Srv6Orch", "add_local_sid")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(&sid.to_string())
+                .with_object_type("local_sid")
+                .with_details(serde_json::json!({
+                    "endpoint_behavior": format!("{:?}", entry.config.endpoint_behavior)
+                }))
+        );
 
         Ok(())
     }
 
     pub fn remove_local_sid(&mut self, sid: &Srv6Sid) -> Result<Srv6LocalSidEntry, Srv6OrchError> {
         self.local_sids.remove(sid)
-            .ok_or_else(|| Srv6OrchError::LocalSidNotFound(sid.clone()))
+            .ok_or_else(|| {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "Srv6Orch", "remove_local_sid")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(&sid.to_string())
+                        .with_object_type("local_sid")
+                        .with_error(&format!("Local SID not found: {}", sid))
+                );
+                Srv6OrchError::LocalSidNotFound(sid.clone())
+            })
+            .map(|entry| {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "Srv6Orch", "remove_local_sid")
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_id(&sid.to_string())
+                        .with_object_type("local_sid")
+                );
+                entry
+            })
     }
 
     pub fn get_sidlist(&self, name: &str) -> Option<&Srv6SidListEntry> {
@@ -78,25 +115,71 @@ impl Srv6Orch {
         let name = entry.config.name.clone();
 
         if self.sidlists.contains_key(&name) {
-            return Err(Srv6OrchError::SaiError("SID list already exists".to_string()));
+            let error_msg = "SID list already exists".to_string();
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "Srv6Orch", "add_sidlist")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(&name)
+                    .with_object_type("sid_list")
+                    .with_error(&error_msg)
+            );
+            return Err(Srv6OrchError::SaiError(error_msg));
         }
 
         // Validate SIDs in the list
         for sid in &entry.config.sids {
             if let Err(e) = Srv6Sid::from_str(sid.as_str()) {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceCreate, "Srv6Orch", "add_sidlist")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(&name)
+                        .with_object_type("sid_list")
+                        .with_error(&format!("Invalid SID in list: {}", e))
+                );
                 return Err(Srv6OrchError::InvalidSid(e));
             }
         }
 
         self.stats.stats.sidlists_created = self.stats.stats.sidlists_created.saturating_add(1);
-        self.sidlists.insert(name, entry);
+        self.sidlists.insert(name.clone(), entry);
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "Srv6Orch", "add_sidlist")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(&name)
+                .with_object_type("sid_list")
+                .with_details(serde_json::json!({
+                    "sid_count": entry.config.sids.len()
+                }))
+        );
 
         Ok(())
     }
 
     pub fn remove_sidlist(&mut self, name: &str) -> Result<Srv6SidListEntry, Srv6OrchError> {
         self.sidlists.remove(name)
-            .ok_or_else(|| Srv6OrchError::SidListNotFound(name.to_string()))
+            .ok_or_else(|| {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "Srv6Orch", "remove_sidlist")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(name)
+                        .with_object_type("sid_list")
+                        .with_error(&format!("SID list not found: {}", name))
+                );
+                Srv6OrchError::SidListNotFound(name.to_string())
+            })
+            .map(|entry| {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "Srv6Orch", "remove_sidlist")
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_id(name)
+                        .with_object_type("sid_list")
+                        .with_details(serde_json::json!({
+                            "sid_count": entry.config.sids.len()
+                        }))
+                );
+                entry
+            })
     }
 
     pub fn get_sidlists_using_sid(&self, sid: &Srv6Sid) -> Vec<&Srv6SidListEntry> {

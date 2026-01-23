@@ -2,15 +2,23 @@
 
 use super::types::{VnetEntry, VnetKey, VnetRouteEntry, VnetRouteKey, VnetStats};
 use std::collections::HashMap;
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum VnetOrchError {
+    #[error("VNET not found: {0:?}")]
     VnetNotFound(VnetKey),
+    #[error("Route not found: {0:?}")]
     RouteNotFound(VnetRouteKey),
+    #[error("Invalid prefix: {0}")]
     InvalidPrefix(String),
+    #[error("Invalid endpoint: {0}")]
     InvalidEndpoint(String),
+    #[error("VNI not found: {0}")]
     VniNotFound(u32),
+    #[error("Tunnel not found: {0}")]
     TunnelNotFound(String),
+    #[error("SAI error: {0}")]
     SaiError(String),
 }
 
@@ -58,11 +66,38 @@ impl VnetOrch {
         let key = entry.key.clone();
 
         if self.vnets.contains_key(&key) {
-            return Err(VnetOrchError::SaiError("VNET already exists".to_string()));
+            let error = VnetOrchError::SaiError("VNET already exists".to_string());
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "VnetOrch",
+                "add_vnet"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(entry.config.vnet_name.clone())
+            .with_object_type("vnet")
+            .with_error(error.to_string()));
+            return Err(error);
         }
 
         self.stats.stats.vnets_created = self.stats.stats.vnets_created.saturating_add(1);
-        self.vnets.insert(key, entry);
+        self.vnets.insert(key, entry.clone());
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "VnetOrch",
+            "add_vnet"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(entry.config.vnet_name.clone())
+        .with_object_type("vnet")
+        .with_details(serde_json::json!({
+            "vnet_name": entry.config.vnet_name,
+            "vni": entry.config.vni,
+            "vxlan_tunnel": entry.config.vxlan_tunnel,
+            "stats": {
+                "vnets_created": self.stats.stats.vnets_created
+            }
+        })));
 
         Ok(())
     }
@@ -74,13 +109,38 @@ impl VnetOrch {
             .any(|route_key| route_key.vnet_name == key.vnet_name);
 
         if has_routes {
-            return Err(VnetOrchError::SaiError(
+            let error = VnetOrchError::SaiError(
                 format!("VNET {} still has routes", key.vnet_name)
-            ));
+            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "VnetOrch",
+                "remove_vnet"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(key.vnet_name.clone())
+            .with_object_type("vnet")
+            .with_error(error.to_string()));
+            return Err(error);
         }
 
-        self.vnets.remove(key)
-            .ok_or_else(|| VnetOrchError::VnetNotFound(key.clone()))
+        let entry = self.vnets.remove(key)
+            .ok_or_else(|| VnetOrchError::VnetNotFound(key.clone()))?;
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "VnetOrch",
+            "remove_vnet"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(key.vnet_name.clone())
+        .with_object_type("vnet")
+        .with_details(serde_json::json!({
+            "vnet_name": key.vnet_name,
+            "vni": entry.config.vni
+        })));
+
+        Ok(entry)
     }
 
     pub fn get_route(&self, key: &VnetRouteKey) -> Option<&VnetRouteEntry> {
@@ -97,18 +157,61 @@ impl VnetOrch {
         }
 
         if self.routes.contains_key(&key) {
-            return Err(VnetOrchError::SaiError("Route already exists".to_string()));
+            let error = VnetOrchError::SaiError("Route already exists".to_string());
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "VnetOrch",
+                "add_vnet_route"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(format!("{}/{}", key.vnet_name, key.prefix))
+            .with_object_type("vnet_route")
+            .with_error(error.to_string()));
+            return Err(error);
         }
 
         self.stats.stats.routes_created = self.stats.stats.routes_created.saturating_add(1);
-        self.routes.insert(key, entry);
+        self.routes.insert(key, entry.clone());
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "VnetOrch",
+            "add_vnet_route"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("{}/{}", entry.key.vnet_name, entry.key.prefix))
+        .with_object_type("vnet_route")
+        .with_details(serde_json::json!({
+            "vnet_name": entry.key.vnet_name,
+            "prefix": entry.key.prefix,
+            "route_type": format!("{:?}", entry.config.route_type),
+            "stats": {
+                "routes_created": self.stats.stats.routes_created
+            }
+        })));
 
         Ok(())
     }
 
     pub fn remove_route(&mut self, key: &VnetRouteKey) -> Result<VnetRouteEntry, VnetOrchError> {
-        self.routes.remove(key)
-            .ok_or_else(|| VnetOrchError::RouteNotFound(key.clone()))
+        let entry = self.routes.remove(key)
+            .ok_or_else(|| VnetOrchError::RouteNotFound(key.clone()))?;
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "VnetOrch",
+            "remove_vnet_route"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("{}/{}", key.vnet_name, key.prefix))
+        .with_object_type("vnet_route")
+        .with_details(serde_json::json!({
+            "vnet_name": key.vnet_name,
+            "prefix": key.prefix,
+            "route_type": format!("{:?}", entry.config.route_type)
+        })));
+
+        Ok(entry)
     }
 
     pub fn get_routes_for_vnet(&self, vnet_name: &str) -> Vec<&VnetRouteEntry> {

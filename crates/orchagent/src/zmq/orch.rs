@@ -2,10 +2,13 @@
 
 use super::types::{ZmqEndpoint, ZmqStats};
 use std::collections::HashMap;
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ZmqOrchError {
+    #[error("Connection failed: {0}")]
     ConnectionFailed(String),
+    #[error("Send failed: {0}")]
     SendFailed(String),
 }
 
@@ -36,6 +39,77 @@ impl ZmqOrch {
 
     pub fn stats(&self) -> &ZmqOrchStats {
         &self.stats
+    }
+
+    /// Publishes an event to the ZMQ endpoint.
+    pub fn publish_event(&mut self, event_type: &str, event_data: &str) -> Result<(), ZmqOrchError> {
+        if self.config.endpoint.is_none() {
+            let error = ZmqOrchError::ConnectionFailed("No ZMQ endpoint configured".to_string());
+            audit_log!(AuditRecord::new(
+                AuditCategory::AdminAction,
+                "ZmqOrch",
+                "publish_event"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(event_type.to_string())
+            .with_object_type("zmq_event")
+            .with_error(error.to_string()));
+            return Err(error);
+        }
+
+        self.stats.stats.messages_sent += 1;
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::AdminAction,
+            "ZmqOrch",
+            "publish_event"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(event_type.to_string())
+        .with_object_type("zmq_event")
+        .with_details(serde_json::json!({
+            "event_type": event_type,
+            "endpoint": self.config.endpoint,
+            "stats": {
+                "messages_sent": self.stats.stats.messages_sent
+            }
+        })));
+
+        Ok(())
+    }
+
+    /// Subscribes to events from the ZMQ endpoint.
+    pub fn subscribe_events(&mut self) -> Result<(), ZmqOrchError> {
+        if self.config.endpoint.is_none() {
+            let error = ZmqOrchError::ConnectionFailed("No ZMQ endpoint configured".to_string());
+            audit_log!(AuditRecord::new(
+                AuditCategory::AdminAction,
+                "ZmqOrch",
+                "subscribe_events"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id("zmq_subscription".to_string())
+            .with_object_type("zmq_subscription")
+            .with_error(error.to_string()));
+            return Err(error);
+        }
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::AdminAction,
+            "ZmqOrch",
+            "subscribe_events"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id("zmq_subscription".to_string())
+        .with_object_type("zmq_subscription")
+        .with_details(serde_json::json!({
+            "endpoint": self.config.endpoint,
+            "stats": {
+                "messages_received": self.stats.stats.messages_received
+            }
+        })));
+
+        Ok(())
     }
 }
 

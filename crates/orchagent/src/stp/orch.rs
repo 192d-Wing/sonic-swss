@@ -4,18 +4,28 @@ use super::types::{SaiStpPortState, StpInstanceEntry, StpPortIds, StpState};
 use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::Arc;
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
 
 /// STP orchestrator error types.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum StpOrchError {
+    #[error("Invalid instance: {0}")]
     InvalidInstance(String),
+    #[error("Invalid state: {0}")]
     InvalidState(String),
+    #[error("Invalid port: {0}")]
     InvalidPort(String),
+    #[error("Port not ready")]
     PortNotReady,
+    #[error("VLAN not found: {0}")]
     VlanNotFound(String),
+    #[error("SAI error: {0}")]
     SaiError(String),
+    #[error("Instance not found: {0}")]
     InstanceNotFound(u16),
+    #[error("STP port not found: {0}")]
     StpPortNotFound(u16),
+    #[error("Parse error: {0}")]
     ParseError(String),
 }
 
@@ -100,10 +110,20 @@ impl StpOrch {
     /// Adds STP instance.
     pub fn add_instance(&mut self, instance: u16) -> Result<RawSaiObjectId, StpOrchError> {
         if instance >= self.max_stp_instance {
-            return Err(StpOrchError::InvalidInstance(format!(
+            let error = StpOrchError::InvalidInstance(format!(
                 "Instance {} exceeds max {}",
                 instance, self.max_stp_instance
-            )));
+            ));
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "StpOrch",
+                "create_stp_instance"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(format!("stp_{}", instance))
+            .with_object_type("stp_instance")
+            .with_error(error.to_string()));
+            return Err(error);
         }
 
         if let Some(oid) = self.stp_inst_to_oid.get(&instance) {
@@ -118,6 +138,22 @@ impl StpOrch {
 
         self.stp_inst_to_oid.insert(instance, stp_oid);
         self.stats.instances_created += 1;
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "StpOrch",
+            "create_stp_instance"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("stp_{}", instance))
+        .with_object_type("stp_instance")
+        .with_details(serde_json::json!({
+            "instance": instance,
+            "oid": stp_oid,
+            "stats": {
+                "instances_created": self.stats.instances_created
+            }
+        })));
 
         Ok(stp_oid)
     }
@@ -137,6 +173,22 @@ impl StpOrch {
         self.stp_inst_to_oid.remove(&instance);
         self.vlan_to_instance_map.remove(&instance);
         self.stats.instances_removed += 1;
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "StpOrch",
+            "remove_stp_instance"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("stp_{}", instance))
+        .with_object_type("stp_instance")
+        .with_details(serde_json::json!({
+            "instance": instance,
+            "oid": stp_oid,
+            "stats": {
+                "instances_removed": self.stats.instances_removed
+            }
+        })));
 
         Ok(())
     }
@@ -263,6 +315,24 @@ impl StpOrch {
             .map_err(StpOrchError::SaiError)?;
 
         self.stats.state_updates += 1;
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceModify,
+            "StpOrch",
+            "update_port_state"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(port_alias.to_string())
+        .with_object_type("stp_port")
+        .with_details(serde_json::json!({
+            "port": port_alias,
+            "instance": instance,
+            "state": format!("{:?}", state),
+            "oid": stp_port_oid,
+            "stats": {
+                "state_updates": self.stats.state_updates
+            }
+        })));
 
         Ok(())
     }

@@ -6,6 +6,7 @@ use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
 
 use super::types::{
     ClearRequest, QueueIds, QueueType, WatermarkConfig, WatermarkGroup, WatermarkStatus,
@@ -300,6 +301,23 @@ impl WatermarkOrch {
         }
 
         self.stats.clears_processed += 1;
+
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceModify,
+            "WatermarkOrch",
+            "clear_watermarks"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("watermark_{:?}", request))
+        .with_object_type("watermark")
+        .with_details(serde_json::json!({
+            "request": format!("{:?}", request),
+            "table": format!("{:?}", table),
+            "stat_name": stat_name,
+            "stats": {
+                "clears_processed": self.stats.clears_processed
+            }
+        })));
 
         Ok(())
     }
