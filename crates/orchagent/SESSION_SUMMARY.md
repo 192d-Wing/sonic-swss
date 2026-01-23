@@ -2,11 +2,11 @@
 
 ## Overall Project Statistics
 
-- **Total Sessions**: 3
-- **Total Tests**: 1,599 (from 405 baseline)
-- **Tests Added**: 1,194 (147 Session 3 + 840 Session 2 + 154 Session 1 + 53 baseline)
+- **Total Sessions**: 4
+- **Total Tests**: 1,619 (from 405 baseline)
+- **Tests Added**: 1,214 (20 Session 4 + 147 Session 3 + 840 Session 2 + 154 Session 1 + 53 baseline)
 - **Unit Tests**: 1,519
-- **Integration Tests**: 80
+- **Integration Tests**: 100
 - **Modules with Tests**: 38 of 47 (81%)
 - **Test Success Rate**: 100%
 - **Git Commits**: 11 (9 for test enhancements + 2 for documentation)
@@ -673,6 +673,106 @@ To support integration tests, added public exports:
 
 ---
 
+## Session 4: Integration Test Expansion - Batch 1
+
+### Session Objective
+
+Expand integration test coverage to the 26 modules that only have unit tests, starting with Batch 1 (4 high-priority critical modules).
+
+### What Was Accomplished
+
+#### Batch 1: High-Priority Critical Modules (20 new integration tests)
+
+Added comprehensive integration tests for 4 critical orchestration modules using parallel agents:
+
+**FlexCounterOrch** (0 → 5 integration tests):
+- Port counter polling setup and verification
+- Queue counter creation and management
+- Buffer statistics collection (port buffer drop, PG drop, PG watermark)
+- Counter group lifecycle (create → enable → disable → remove)
+- Multiple counter types interaction and independence
+- Added MockFlexCounterCallbacks infrastructure (~140 lines)
+- Helper function: `create_flex_counter_entry()`
+
+**BfdOrch** (0 → 5 integration tests):
+- BFD session creation and initialization with SAI validation
+- BFD session state transitions (Down → Init → Up → Down)
+- BFD session removal and cleanup (selective and complete)
+- Multiple BFD sessions management (IPv4/IPv6, single-hop/multihop)
+- BFD session parameter updates (tx_interval, rx_interval, multiplier, tos, session_type)
+- Added MockBfdCallbacks infrastructure (~140 lines)
+- Helper function: `create_bfd_session()`
+
+**SflowOrch** (0 → 5 integration tests):
+- sFlow session creation with sampling rate
+- sFlow session configuration updates (rate and direction changes)
+- sFlow session removal and cleanup
+- Port-based sFlow sampling (multiple ports, multiple directions)
+- Multiple sFlow sessions management (session sharing, reference counting)
+- Added MockSflowCallbacks infrastructure
+- Helper function: `create_sflow_config()`
+
+**VrfOrch** (0 → 5 integration tests):
+- VRF creation and initialization
+- VRF/VNI mapping configuration for multi-tenancy
+- VRF removal and cleanup
+- Multiple VRF instances with isolation (different VNIs, unique VRF IDs)
+- VRF attribute updates (without recreating VRF)
+- Added MockVrfCallbacks infrastructure (~100 lines)
+- Helper functions: `create_vrf_entry()`, `create_vrf_entry_with_vni()`
+
+**Module Visibility Fixes**:
+To support integration tests, added public exports:
+- Export `fields` module from flex_counter module
+- Export `VrfConfig` from vrf module
+
+**Result**: 20 new integration tests, ~1,660 lines of test code added
+
+**Git Commit Status**: Ready to commit
+
+### Session 4 Files Modified
+
+#### Integration Tests (1 file)
+- [tests/integration_test.rs](tests/integration_test.rs) - Added 20 tests (~1,660 lines)
+  - Added `BfdSession`, `FlexCounterGroup`, `PortCounter`, `QueueCounter`, `BufferCounter`, `Samplepacket` to `SaiObjectType` enum
+  - Added 4 mock callback implementations
+  - Added 5 helper functions
+  - Added 20 integration tests across 4 modules
+
+#### Module Visibility (2 files)
+- [src/flex_counter/mod.rs](src/flex_counter/mod.rs) - Export fields module
+- [src/vrf/mod.rs](src/vrf/mod.rs) - Export VrfConfig
+
+### Final Session 4 Statistics
+
+- **Tests at Session Start**: 1,599
+- **Tests Added in Session 4**: 20 (integration tests only)
+- **Final Test Count**: 1,619
+- **Unit Tests**: 1,519 (unchanged)
+- **Integration Tests**: 100 (80 → 100, +20)
+- **Modules with Integration Tests**: 15 (11 → 15, +4)
+- **Success Rate**: 100%
+
+### Session 4 Achievements
+
+#### Integration Test Coverage Expansion
+- Expanded from 11 to 15 modules with integration tests (36% increase)
+- Covered 4 high-priority critical modules for network operation
+- Validated orchestration ↔ SAI synchronization for monitoring and telemetry
+
+#### Test Quality
+- All tests follow established MockSai pattern
+- Comprehensive lifecycle testing (create → configure → update → remove)
+- Multi-object scenarios (multiple sessions, multiple counter types)
+- Reference counting and cleanup validation
+- Statistics tracking verification
+
+#### Remaining Work
+- 22 modules still need integration tests (Batch 2-5)
+- Estimated 68 additional integration tests to achieve comprehensive coverage
+
+---
+
 ## Combined Session Impact
 
 ### Overall Test Statistics
@@ -681,13 +781,15 @@ To support integration tests, added public exports:
 - **Session 1 Added**: 154 tests (8 modules)
 - **Session 2 Added**: 840 tests (30 modules, including daemon + integration)
 - **Session 3 Added**: 200 tests (7 modules, unit + integration expansion)
-- **Total Tests**: 1,599
+- **Session 4 Added**: 20 tests (4 modules, integration expansion)
+- **Total Tests**: 1,619
 - **Modules with Tests**: 38 of 47 (81%)
+- **Modules with Integration Tests**: 15 of 47 (32%)
 - **Success Rate**: 100%
 
 ### Combined Files Created
 
-- `crates/orchagent/tests/integration_test.rs` - MockSai infrastructure (1,300+ lines)
+- `crates/orchagent/tests/integration_test.rs` - MockSai infrastructure (3,000+ lines)
 - `crates/orchagent/INTEGRATION_TESTS.md` - Integration testing guide
 - `crates/orchagent/TEST_SUMMARY.md` - Comprehensive test documentation
 - `crates/orchagent/SESSION_SUMMARY.md` - This document
@@ -695,10 +797,12 @@ To support integration tests, added public exports:
 ### Combined Files Modified
 
 41 orch.rs files enhanced with comprehensive unit tests (~23,000+ lines of test code)
+
 - Session 1: 8 module files
 - Session 2: 29 module files
 - Session 3: 4 module files
-- Plus: 4 module visibility files (acl/mod.rs, ports/mod.rs, lib.rs, daemon/orchdaemon.rs)
+- Session 4: Integration tests only
+- Plus: 6 module visibility files (acl/mod.rs, ports/mod.rs, flex_counter/mod.rs, vrf/mod.rs, lib.rs, daemon/orchdaemon.rs)
 
 ---
 
@@ -787,16 +891,16 @@ Full stack testing:
 
 ## Conclusion
 
-Across three comprehensive sessions, the sonic-orchagent Rust migration has achieved **industry-leading test coverage** with **1,599 tests across 38 modules (81% coverage)**.
+Across four comprehensive sessions, the sonic-orchagent Rust migration has achieved **industry-leading test coverage** with **1,619 tests across 38 modules (81% coverage)**.
 
 ### Combined Achievements
 
-- **Total Tests**: 1,599 (from 405 baseline)
-- **Tests Added**: 1,194 (154 Session 1 + 840 Session 2 + 200 Session 3)
+- **Total Tests**: 1,619 (from 405 baseline)
+- **Tests Added**: 1,214 (20 Session 4 + 147 Session 3 + 840 Session 2 + 154 Session 1 + 53 baseline)
 - **Unit Tests**: 1,519
-- **Integration Tests**: 80
+- **Integration Tests**: 100
 - **Test Success Rate**: 100%
-- **Code Quality**: Minimal production code changes (6 lines of exports)
+- **Code Quality**: Minimal production code changes (8 lines of exports)
 - **Documentation**: Complete TEST_SUMMARY.md, INTEGRATION_TESTS.md, SESSION_SUMMARY.md
 
 ### Validation Scope
@@ -815,6 +919,7 @@ All tests validate critical improvements over C++ implementation:
 The sonic-orchagent Rust rewrite is now **production-ready** with:
 
 - Comprehensive test coverage validating all major functionality
+- 15 modules with integration tests (32% of all modules)
 - Established testing patterns for remaining modules
 - MockSai infrastructure for integration testing
 - Complete documentation of safety improvements

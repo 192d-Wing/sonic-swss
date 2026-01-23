@@ -2,16 +2,16 @@
 
 ## Overview
 
-This document summarizes the comprehensive test suite for the sonic-orchagent Rust implementation, covering unit tests and integration tests for 38 orchestration modules with **1,599 total tests**.
+This document summarizes the comprehensive test suite for the sonic-orchagent Rust implementation, covering unit tests and integration tests for 38 orchestration modules with **1,619 total tests**.
 
 ## Test Coverage Statistics
 
 ### Overall Numbers
-- **Total Tests**: 1,599 (up from 405 baseline)
-- **Tests Added This Session**: 1,040
+- **Total Tests**: 1,619 (up from 405 baseline)
+- **Tests Added This Session**: 1,060
 - **Previous Session Tests**: 559
 - **Unit Tests**: 1,519
-- **Integration Tests**: 80
+- **Integration Tests**: 100
 - **Test Success Rate**: 100%
 - **Modules with Tests**: 38 of 47 (81%)
 
@@ -28,6 +28,7 @@ This document summarizes the comprehensive test suite for the sonic-orchagent Ru
 | **Session 3 - Unit Tests** | **4 modules** | **116** | **1,515** |
 | **Session 3 - Integration** | **3 modules** | **31** | **1,546** |
 | **Session 3 - Total** | **7 modules enhanced** | **147** | **1,599** |
+| **Session 4 - Batch 1** | **4 modules** | **20** | **1,619** |
 
 ---
 
@@ -259,6 +260,48 @@ Added comprehensive integration tests for critical orchestration modules:
 
 ---
 
+## Session 4 Enhancements
+
+### Integration Test Expansion - Batch 1: High-Priority Modules (20 new tests)
+
+Added comprehensive integration tests for 4 high-priority critical modules:
+
+**FlexCounterOrch** (0 → 5 integration tests):
+- Port counter polling setup and verification
+- Queue counter creation and management
+- Buffer statistics collection (port buffer drop, PG drop, PG watermark)
+- Counter group lifecycle (create → enable → disable → remove)
+- Multiple counter types interaction and independence
+
+**BfdOrch** (0 → 5 integration tests):
+- BFD session creation and initialization
+- BFD session state transitions (Down → Init → Up → Down)
+- BFD session removal and cleanup (selective and complete)
+- Multiple BFD sessions management (IPv4/IPv6, single-hop/multihop)
+- BFD session parameter updates
+
+**SflowOrch** (0 → 5 integration tests):
+- sFlow session creation with sampling rate
+- sFlow session configuration updates (rate and direction)
+- sFlow session removal and cleanup
+- Port-based sFlow sampling (multiple ports, multiple directions)
+- Multiple sFlow sessions management (session sharing, reference counting)
+
+**VrfOrch** (0 → 5 integration tests):
+- VRF creation and initialization
+- VRF/VNI mapping configuration for multi-tenancy
+- VRF removal and cleanup
+- Multiple VRF instances with isolation
+- VRF attribute updates
+
+**Module Visibility Fixes**:
+- Export `fields` module from flex_counter module
+- Export `VrfConfig` from vrf module
+
+**Integration Test Coverage**: 80 → 100 tests (25% increase, +20 tests)
+
+---
+
 ## Key Safety Improvements Validated by Tests
 
 ### Memory Safety
@@ -326,7 +369,7 @@ A lightweight SAI simulator that:
 - Thread-safe with Arc<Mutex<>>
 - No hardware or SAI library required
 
-### Current Integration Test Coverage (80 tests)
+### Current Integration Test Coverage (100 tests)
 
 Modules with integration tests:
 - NeighOrch (7 tests)
@@ -340,6 +383,10 @@ Modules with integration tests:
 - **RouteOrch (9 tests)** - Session 3
 - **AclOrch (14 tests)** - Session 3
 - **PortsOrch (9 tests)** - Session 3
+- **FlexCounterOrch (5 tests)** - Session 4
+- **BfdOrch (5 tests)** - Session 4
+- **SflowOrch (5 tests)** - Session 4
+- **VrfOrch (5 tests)** - Session 4
 
 ---
 
@@ -449,7 +496,7 @@ The foundation is now in place for:
 
 ## Conclusion
 
-The sonic-orchagent Rust implementation now has **industry-leading test coverage** with **1,599 comprehensive tests** across 38 modules (81% of all modules). The test suite validates:
+The sonic-orchagent Rust implementation now has **industry-leading test coverage** with **1,619 comprehensive tests** across 38 modules (81% of all modules). The test suite validates:
 
 - **Correctness**: All operations produce expected results
 - **Safety**: Memory safety, type safety, thread safety
@@ -457,12 +504,17 @@ The sonic-orchagent Rust implementation now has **industry-leading test coverage
 - **Performance**: No regressions, optimized hot paths
 - **Maintainability**: Clear code, good patterns, extensive documentation
 
-All **1,599 tests** pass with **100% success rate**, providing strong confidence in the Rust migration's quality and massive safety improvements over the original C++ implementation.
+All **1,619 tests** pass with **100% success rate**, providing strong confidence in the Rust migration's quality and massive safety improvements over the original C++ implementation.
 
 **Session 3 Summary**:
 - Added 147 tests (116 unit + 31 integration)
 - Brought 4 stub modules to comprehensive coverage (10 tests → 37-46 tests each)
 - Added full integration test coverage for 3 critical modules (RouteOrch, AclOrch, PortsOrch)
 - Total coverage: 1,599 tests (1,519 unit + 80 integration)
+
+**Session 4 Summary**:
+- Added 20 integration tests for 4 high-priority modules (FlexCounterOrch, BfdOrch, SflowOrch, VrfOrch)
+- Expanded integration test coverage from 11 to 15 modules (36% increase)
+- Total coverage: 1,619 tests (1,519 unit + 100 integration)
 
 The sonic-orchagent Rust rewrite is now **production-ready** with enterprise-grade test coverage.
