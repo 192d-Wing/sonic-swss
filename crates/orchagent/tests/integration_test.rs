@@ -65,6 +65,19 @@ pub enum SaiObjectType {
     CoppTrapGroup,
     MplsRoute,
     IcmpEchoSession,
+    // New types for remaining modules
+    DtelEvent,
+    DtelIntSession,
+    FdbEntry,
+    FgNhg,
+    FgNhgMember,
+    RouterInterface,
+    MirrorSession,
+    MuxTunnel,
+    MuxAcl,
+    PbhHash,
+    PbhTable,
+    PbhRule,
 }
 
 impl MockSai {
@@ -10983,6 +10996,1229 @@ mod integration_tests {
             // Clear and verify clean state
             sai.clear();
             assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 0);
+        }
+    }
+
+    // ==================== DTel Integration Tests ====================
+
+    /// Helper function to create a DTel event with SAI
+    fn create_dtel_event_with_sai(
+        event_type: &str,
+        dscp_value: u8,
+        sai: &MockSai,
+    ) -> (u64, String) {
+        let oid = sai
+            .create_object(
+                SaiObjectType::DtelEvent,
+                vec![
+                    ("event_type".to_string(), event_type.to_string()),
+                    ("dscp_value".to_string(), dscp_value.to_string()),
+                ],
+            )
+            .unwrap();
+        (oid, event_type.to_string())
+    }
+
+    /// Helper function to create a DTel INT session with SAI
+    fn create_dtel_int_session_with_sai(
+        session_id: u32,
+        max_hop_count: u8,
+        collect_switch_id: bool,
+        sai: &MockSai,
+    ) -> (u64, u32) {
+        let oid = sai
+            .create_object(
+                SaiObjectType::DtelIntSession,
+                vec![
+                    ("session_id".to_string(), session_id.to_string()),
+                    ("max_hop_count".to_string(), max_hop_count.to_string()),
+                    ("collect_switch_id".to_string(), collect_switch_id.to_string()),
+                ],
+            )
+            .unwrap();
+        (oid, session_id)
+    }
+
+    mod test_dtel_integration {
+        use super::*;
+
+        /// Test DTel event creation with SAI validation
+        #[test]
+        fn test_dtel_event_creation_integration() {
+            let sai = MockSai::new();
+
+            // Create a queue report event
+            let (oid, event_type) = create_dtel_event_with_sai("QUEUE_REPORT", 8, &sai);
+
+            // Verify SAI object was created
+            assert_eq!(sai.count_objects(SaiObjectType::DtelEvent), 1);
+
+            // Verify object attributes
+            let obj = sai.get_object(oid).unwrap();
+            assert_eq!(obj.object_type, SaiObjectType::DtelEvent);
+
+            let type_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "event_type")
+                .map(|(_, v)| v.clone());
+            assert_eq!(type_attr, Some("QUEUE_REPORT".to_string()));
+
+            let dscp_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "dscp_value")
+                .map(|(_, v)| v.clone());
+            assert_eq!(dscp_attr, Some("8".to_string()));
+
+            sai.clear();
+        }
+
+        /// Test DTel INT session configuration
+        #[test]
+        fn test_dtel_int_session_configuration_integration() {
+            let sai = MockSai::new();
+
+            // Create INT session with specific configuration
+            let (oid, session_id) = create_dtel_int_session_with_sai(1, 32, true, &sai);
+
+            // Verify SAI object was created
+            assert_eq!(sai.count_objects(SaiObjectType::DtelIntSession), 1);
+
+            // Verify session attributes
+            let obj = sai.get_object(oid).unwrap();
+            assert_eq!(obj.object_type, SaiObjectType::DtelIntSession);
+
+            let hop_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "max_hop_count")
+                .map(|(_, v)| v.clone());
+            assert_eq!(hop_attr, Some("32".to_string()));
+
+            let switch_id_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "collect_switch_id")
+                .map(|(_, v)| v.clone());
+            assert_eq!(switch_id_attr, Some("true".to_string()));
+
+            sai.clear();
+        }
+
+        /// Test multiple DTel events management
+        #[test]
+        fn test_multiple_dtel_events_management_integration() {
+            let sai = MockSai::new();
+
+            // Create multiple event types
+            let event_types = vec![
+                ("QUEUE_REPORT", 8),
+                ("FLOW_STATE", 16),
+                ("FLOW_REPORT", 24),
+                ("DROP_REPORT", 32),
+            ];
+
+            let mut event_oids = Vec::new();
+            for (event_type, dscp) in &event_types {
+                let (oid, _) = create_dtel_event_with_sai(event_type, *dscp, &sai);
+                event_oids.push(oid);
+            }
+
+            // Verify all events were created
+            assert_eq!(sai.count_objects(SaiObjectType::DtelEvent), 4);
+
+            // Verify each event has correct attributes
+            for (idx, oid) in event_oids.iter().enumerate() {
+                let obj = sai.get_object(*oid).unwrap();
+                let type_attr = obj.attributes.iter()
+                    .find(|(k, _)| k == "event_type")
+                    .map(|(_, v)| v.clone());
+                assert_eq!(type_attr, Some(event_types[idx].0.to_string()));
+            }
+
+            sai.clear();
+        }
+
+        /// Test DTel event removal and cleanup
+        #[test]
+        fn test_dtel_event_removal_and_cleanup_integration() {
+            let sai = MockSai::new();
+
+            // Create events
+            let (oid1, _) = create_dtel_event_with_sai("QUEUE_REPORT", 8, &sai);
+            let (oid2, _) = create_dtel_event_with_sai("FLOW_STATE", 16, &sai);
+            let (session_oid, _) = create_dtel_int_session_with_sai(1, 32, true, &sai);
+
+            assert_eq!(sai.count_objects(SaiObjectType::DtelEvent), 2);
+            assert_eq!(sai.count_objects(SaiObjectType::DtelIntSession), 1);
+
+            // Remove first event
+            sai.remove_object(oid1).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::DtelEvent), 1);
+
+            // Remove session
+            sai.remove_object(session_oid).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::DtelIntSession), 0);
+
+            // Remove remaining event
+            sai.remove_object(oid2).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::DtelEvent), 0);
+
+            sai.clear();
+        }
+    }
+
+    // ==================== FDB Integration Tests ====================
+
+    /// Helper function to create an FDB entry with SAI
+    fn create_fdb_entry_with_sai(
+        mac: &str,
+        vlan_id: u16,
+        port: &str,
+        entry_type: &str,
+        sai: &MockSai,
+    ) -> (u64, String) {
+        let key = format!("{}:{}", mac, vlan_id);
+        let oid = sai
+            .create_object(
+                SaiObjectType::FdbEntry,
+                vec![
+                    ("mac".to_string(), mac.to_string()),
+                    ("vlan_id".to_string(), vlan_id.to_string()),
+                    ("port".to_string(), port.to_string()),
+                    ("entry_type".to_string(), entry_type.to_string()),
+                ],
+            )
+            .unwrap();
+        (oid, key)
+    }
+
+    mod test_fdb_integration {
+        use super::*;
+
+        /// Test FDB entry creation with SAI validation
+        #[test]
+        fn test_fdb_entry_creation_integration() {
+            let sai = MockSai::new();
+
+            // Create FDB entry
+            let (oid, key) = create_fdb_entry_with_sai(
+                "00:11:22:33:44:55",
+                100,
+                "Ethernet0",
+                "static",
+                &sai,
+            );
+
+            // Verify SAI object was created
+            assert_eq!(sai.count_objects(SaiObjectType::FdbEntry), 1);
+
+            // Verify object attributes
+            let obj = sai.get_object(oid).unwrap();
+            assert_eq!(obj.object_type, SaiObjectType::FdbEntry);
+
+            let mac_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "mac")
+                .map(|(_, v)| v.clone());
+            assert_eq!(mac_attr, Some("00:11:22:33:44:55".to_string()));
+
+            let vlan_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "vlan_id")
+                .map(|(_, v)| v.clone());
+            assert_eq!(vlan_attr, Some("100".to_string()));
+
+            sai.clear();
+        }
+
+        /// Test FDB entry MAC update
+        #[test]
+        fn test_fdb_entry_mac_update_integration() {
+            let sai = MockSai::new();
+
+            // Create initial entry
+            let (oid1, _) = create_fdb_entry_with_sai(
+                "00:11:22:33:44:55",
+                100,
+                "Ethernet0",
+                "dynamic",
+                &sai,
+            );
+
+            // Simulate MAC move - create new entry with same MAC on different port
+            let (oid2, _) = create_fdb_entry_with_sai(
+                "00:11:22:33:44:55",
+                100,
+                "Ethernet4",
+                "dynamic",
+                &sai,
+            );
+
+            // In real scenario, old entry would be removed first
+            // Here we verify both exist (before cleanup)
+            assert_eq!(sai.count_objects(SaiObjectType::FdbEntry), 2);
+
+            // Remove old entry (simulating MAC move)
+            sai.remove_object(oid1).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::FdbEntry), 1);
+
+            // Verify new entry has correct port
+            let obj = sai.get_object(oid2).unwrap();
+            let port_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "port")
+                .map(|(_, v)| v.clone());
+            assert_eq!(port_attr, Some("Ethernet4".to_string()));
+
+            sai.clear();
+        }
+
+        /// Test multiple FDB entries across VLANs
+        #[test]
+        fn test_multiple_fdb_entries_management_integration() {
+            let sai = MockSai::new();
+
+            // Create entries across multiple VLANs
+            let entries = vec![
+                ("00:11:22:33:44:55", 100, "Ethernet0"),
+                ("00:11:22:33:44:66", 100, "Ethernet4"),
+                ("00:11:22:33:44:77", 200, "Ethernet8"),
+                ("00:11:22:33:44:88", 200, "Ethernet12"),
+                ("00:11:22:33:44:99", 300, "Ethernet16"),
+            ];
+
+            let mut entry_oids = Vec::new();
+            for (mac, vlan, port) in &entries {
+                let (oid, _) = create_fdb_entry_with_sai(mac, *vlan, port, "static", &sai);
+                entry_oids.push(oid);
+            }
+
+            // Verify all entries were created
+            assert_eq!(sai.count_objects(SaiObjectType::FdbEntry), 5);
+
+            // Verify entries have correct VLANs
+            for (idx, oid) in entry_oids.iter().enumerate() {
+                let obj = sai.get_object(*oid).unwrap();
+                let vlan_attr = obj.attributes.iter()
+                    .find(|(k, _)| k == "vlan_id")
+                    .map(|(_, v)| v.clone());
+                assert_eq!(vlan_attr, Some(entries[idx].1.to_string()));
+            }
+
+            sai.clear();
+        }
+
+        /// Test FDB entry removal and cleanup
+        #[test]
+        fn test_fdb_entry_removal_and_cleanup_integration() {
+            let sai = MockSai::new();
+
+            // Create entries
+            let (oid1, _) = create_fdb_entry_with_sai("00:11:22:33:44:55", 100, "Ethernet0", "static", &sai);
+            let (oid2, _) = create_fdb_entry_with_sai("00:11:22:33:44:66", 100, "Ethernet4", "dynamic", &sai);
+            let (oid3, _) = create_fdb_entry_with_sai("00:11:22:33:44:77", 200, "Ethernet8", "static", &sai);
+
+            assert_eq!(sai.count_objects(SaiObjectType::FdbEntry), 3);
+
+            // Remove entries one by one
+            sai.remove_object(oid1).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::FdbEntry), 2);
+
+            sai.remove_object(oid2).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::FdbEntry), 1);
+
+            sai.remove_object(oid3).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::FdbEntry), 0);
+
+            // Verify all removed
+            assert!(sai.get_object(oid1).is_none());
+            assert!(sai.get_object(oid2).is_none());
+            assert!(sai.get_object(oid3).is_none());
+
+            sai.clear();
+        }
+    }
+
+    // ==================== FG-NHG Integration Tests ====================
+
+    /// Helper function to create a fine-grained NHG with SAI
+    fn create_fg_nhg_with_sai(
+        prefix: &str,
+        bucket_size: u32,
+        sai: &MockSai,
+    ) -> (u64, String) {
+        let oid = sai
+            .create_object(
+                SaiObjectType::FgNhg,
+                vec![
+                    ("prefix".to_string(), prefix.to_string()),
+                    ("bucket_size".to_string(), bucket_size.to_string()),
+                ],
+            )
+            .unwrap();
+        (oid, prefix.to_string())
+    }
+
+    /// Helper function to create a fine-grained NHG member with SAI
+    fn create_fg_nhg_member_with_sai(
+        nhg_oid: u64,
+        next_hop_ip: &str,
+        bucket_index: u32,
+        sai: &MockSai,
+    ) -> u64 {
+        sai.create_object(
+            SaiObjectType::FgNhgMember,
+            vec![
+                ("nhg_oid".to_string(), nhg_oid.to_string()),
+                ("next_hop_ip".to_string(), next_hop_ip.to_string()),
+                ("bucket_index".to_string(), bucket_index.to_string()),
+            ],
+        )
+        .unwrap()
+    }
+
+    mod test_fg_nhg_integration {
+        use super::*;
+
+        /// Test fine-grained NHG creation with SAI validation
+        #[test]
+        fn test_fg_nhg_creation_integration() {
+            let sai = MockSai::new();
+
+            // Create FG-NHG
+            let (oid, prefix) = create_fg_nhg_with_sai("10.0.0.0/24", 64, &sai);
+
+            // Verify SAI object was created
+            assert_eq!(sai.count_objects(SaiObjectType::FgNhg), 1);
+
+            // Verify object attributes
+            let obj = sai.get_object(oid).unwrap();
+            assert_eq!(obj.object_type, SaiObjectType::FgNhg);
+
+            let prefix_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "prefix")
+                .map(|(_, v)| v.clone());
+            assert_eq!(prefix_attr, Some("10.0.0.0/24".to_string()));
+
+            let bucket_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "bucket_size")
+                .map(|(_, v)| v.clone());
+            assert_eq!(bucket_attr, Some("64".to_string()));
+
+            sai.clear();
+        }
+
+        /// Test FG-NHG member operations
+        #[test]
+        fn test_fg_nhg_member_operations_integration() {
+            let sai = MockSai::new();
+
+            // Create NHG first
+            let (nhg_oid, _) = create_fg_nhg_with_sai("10.0.0.0/24", 64, &sai);
+
+            // Add members to different buckets
+            let member1_oid = create_fg_nhg_member_with_sai(nhg_oid, "192.168.1.1", 0, &sai);
+            let member2_oid = create_fg_nhg_member_with_sai(nhg_oid, "192.168.1.2", 16, &sai);
+            let member3_oid = create_fg_nhg_member_with_sai(nhg_oid, "192.168.1.3", 32, &sai);
+            let member4_oid = create_fg_nhg_member_with_sai(nhg_oid, "192.168.1.4", 48, &sai);
+
+            // Verify members were created
+            assert_eq!(sai.count_objects(SaiObjectType::FgNhgMember), 4);
+
+            // Verify member attributes
+            let member1 = sai.get_object(member1_oid).unwrap();
+            let bucket_attr = member1.attributes.iter()
+                .find(|(k, _)| k == "bucket_index")
+                .map(|(_, v)| v.clone());
+            assert_eq!(bucket_attr, Some("0".to_string()));
+
+            // Remove a member
+            sai.remove_object(member2_oid).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::FgNhgMember), 3);
+
+            sai.clear();
+        }
+
+        /// Test multiple FG-NHGs management
+        #[test]
+        fn test_multiple_fg_nhgs_management_integration() {
+            let sai = MockSai::new();
+
+            // Create multiple NHGs with different prefixes
+            let prefixes = vec![
+                ("10.0.0.0/24", 64),
+                ("10.1.0.0/24", 128),
+                ("10.2.0.0/24", 256),
+            ];
+
+            let mut nhg_oids = Vec::new();
+            for (prefix, bucket_size) in &prefixes {
+                let (oid, _) = create_fg_nhg_with_sai(prefix, *bucket_size, &sai);
+                nhg_oids.push(oid);
+
+                // Add members to each NHG
+                create_fg_nhg_member_with_sai(oid, "192.168.1.1", 0, &sai);
+                create_fg_nhg_member_with_sai(oid, "192.168.1.2", 1, &sai);
+            }
+
+            // Verify all NHGs and members were created
+            assert_eq!(sai.count_objects(SaiObjectType::FgNhg), 3);
+            assert_eq!(sai.count_objects(SaiObjectType::FgNhgMember), 6);
+
+            sai.clear();
+        }
+
+        /// Test FG-NHG removal and cleanup
+        #[test]
+        fn test_fg_nhg_removal_and_cleanup_integration() {
+            let sai = MockSai::new();
+
+            // Create NHG with members
+            let (nhg_oid, _) = create_fg_nhg_with_sai("10.0.0.0/24", 64, &sai);
+            let member1_oid = create_fg_nhg_member_with_sai(nhg_oid, "192.168.1.1", 0, &sai);
+            let member2_oid = create_fg_nhg_member_with_sai(nhg_oid, "192.168.1.2", 16, &sai);
+
+            assert_eq!(sai.count_objects(SaiObjectType::FgNhg), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::FgNhgMember), 2);
+
+            // Remove members first (proper cleanup order)
+            sai.remove_object(member1_oid).unwrap();
+            sai.remove_object(member2_oid).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::FgNhgMember), 0);
+
+            // Remove NHG
+            sai.remove_object(nhg_oid).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::FgNhg), 0);
+
+            sai.clear();
+        }
+    }
+
+    // ==================== Intfs Integration Tests ====================
+
+    /// Helper function to create a router interface with SAI
+    fn create_router_interface_with_sai(
+        name: &str,
+        vrf_name: &str,
+        mac: &str,
+        sai: &MockSai,
+    ) -> (u64, String) {
+        let oid = sai
+            .create_object(
+                SaiObjectType::RouterInterface,
+                vec![
+                    ("name".to_string(), name.to_string()),
+                    ("vrf".to_string(), vrf_name.to_string()),
+                    ("mac".to_string(), mac.to_string()),
+                ],
+            )
+            .unwrap();
+        (oid, name.to_string())
+    }
+
+    mod test_intfs_integration {
+        use super::*;
+
+        /// Test router interface creation with SAI validation
+        #[test]
+        fn test_intfs_router_interface_creation_integration() {
+            let sai = MockSai::new();
+
+            // Create router interface
+            let (oid, name) = create_router_interface_with_sai(
+                "Ethernet0",
+                "default",
+                "00:11:22:33:44:55",
+                &sai,
+            );
+
+            // Verify SAI object was created
+            assert_eq!(sai.count_objects(SaiObjectType::RouterInterface), 1);
+
+            // Verify object attributes
+            let obj = sai.get_object(oid).unwrap();
+            assert_eq!(obj.object_type, SaiObjectType::RouterInterface);
+
+            let name_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "name")
+                .map(|(_, v)| v.clone());
+            assert_eq!(name_attr, Some("Ethernet0".to_string()));
+
+            let vrf_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "vrf")
+                .map(|(_, v)| v.clone());
+            assert_eq!(vrf_attr, Some("default".to_string()));
+
+            sai.clear();
+        }
+
+        /// Test interface IP address configuration
+        #[test]
+        fn test_intfs_ip_address_configuration_integration() {
+            let sai = MockSai::new();
+
+            // Create router interface with VRF
+            let (oid, _) = create_router_interface_with_sai(
+                "Ethernet0",
+                "Vrf_RED",
+                "00:11:22:33:44:55",
+                &sai,
+            );
+
+            // Verify interface in VRF
+            let obj = sai.get_object(oid).unwrap();
+            let vrf_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "vrf")
+                .map(|(_, v)| v.clone());
+            assert_eq!(vrf_attr, Some("Vrf_RED".to_string()));
+
+            // Create another interface in same VRF
+            let (oid2, _) = create_router_interface_with_sai(
+                "Ethernet4",
+                "Vrf_RED",
+                "00:11:22:33:44:66",
+                &sai,
+            );
+
+            assert_eq!(sai.count_objects(SaiObjectType::RouterInterface), 2);
+
+            sai.clear();
+        }
+
+        /// Test multiple interfaces management
+        #[test]
+        fn test_multiple_interfaces_management_integration() {
+            let sai = MockSai::new();
+
+            // Create interfaces on multiple ports in different VRFs
+            let interfaces = vec![
+                ("Ethernet0", "default", "00:11:22:33:44:01"),
+                ("Ethernet4", "default", "00:11:22:33:44:02"),
+                ("Ethernet8", "Vrf_RED", "00:11:22:33:44:03"),
+                ("Ethernet12", "Vrf_RED", "00:11:22:33:44:04"),
+                ("Ethernet16", "Vrf_BLUE", "00:11:22:33:44:05"),
+            ];
+
+            let mut intf_oids = Vec::new();
+            for (name, vrf, mac) in &interfaces {
+                let (oid, _) = create_router_interface_with_sai(name, vrf, mac, &sai);
+                intf_oids.push(oid);
+            }
+
+            // Verify all interfaces were created
+            assert_eq!(sai.count_objects(SaiObjectType::RouterInterface), 5);
+
+            // Verify each interface has correct attributes
+            for (idx, oid) in intf_oids.iter().enumerate() {
+                let obj = sai.get_object(*oid).unwrap();
+                let name_attr = obj.attributes.iter()
+                    .find(|(k, _)| k == "name")
+                    .map(|(_, v)| v.clone());
+                assert_eq!(name_attr, Some(interfaces[idx].0.to_string()));
+            }
+
+            sai.clear();
+        }
+
+        /// Test interface removal and cleanup
+        #[test]
+        fn test_intfs_removal_and_cleanup_integration() {
+            let sai = MockSai::new();
+
+            // Create interfaces
+            let (oid1, _) = create_router_interface_with_sai("Ethernet0", "default", "00:11:22:33:44:01", &sai);
+            let (oid2, _) = create_router_interface_with_sai("Ethernet4", "default", "00:11:22:33:44:02", &sai);
+            let (oid3, _) = create_router_interface_with_sai("Ethernet8", "Vrf_RED", "00:11:22:33:44:03", &sai);
+
+            assert_eq!(sai.count_objects(SaiObjectType::RouterInterface), 3);
+
+            // Remove interfaces
+            sai.remove_object(oid1).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::RouterInterface), 2);
+
+            sai.remove_object(oid2).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::RouterInterface), 1);
+
+            sai.remove_object(oid3).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::RouterInterface), 0);
+
+            // Verify all removed
+            assert!(sai.get_object(oid1).is_none());
+            assert!(sai.get_object(oid2).is_none());
+            assert!(sai.get_object(oid3).is_none());
+
+            sai.clear();
+        }
+    }
+
+    // ==================== Mirror Integration Tests ====================
+
+    /// Helper function to create a mirror session with SAI
+    fn create_mirror_session_with_sai(
+        name: &str,
+        session_type: &str,
+        direction: &str,
+        dst_port: &str,
+        sai: &MockSai,
+    ) -> (u64, String) {
+        let oid = sai
+            .create_object(
+                SaiObjectType::MirrorSession,
+                vec![
+                    ("name".to_string(), name.to_string()),
+                    ("session_type".to_string(), session_type.to_string()),
+                    ("direction".to_string(), direction.to_string()),
+                    ("dst_port".to_string(), dst_port.to_string()),
+                ],
+            )
+            .unwrap();
+        (oid, name.to_string())
+    }
+
+    /// Helper function to create an ERSPAN session with SAI
+    fn create_erspan_session_with_sai(
+        name: &str,
+        direction: &str,
+        src_ip: &str,
+        dst_ip: &str,
+        gre_type: u16,
+        sai: &MockSai,
+    ) -> (u64, String) {
+        let oid = sai
+            .create_object(
+                SaiObjectType::MirrorSession,
+                vec![
+                    ("name".to_string(), name.to_string()),
+                    ("session_type".to_string(), "ERSPAN".to_string()),
+                    ("direction".to_string(), direction.to_string()),
+                    ("src_ip".to_string(), src_ip.to_string()),
+                    ("dst_ip".to_string(), dst_ip.to_string()),
+                    ("gre_type".to_string(), gre_type.to_string()),
+                ],
+            )
+            .unwrap();
+        (oid, name.to_string())
+    }
+
+    mod test_mirror_integration {
+        use super::*;
+
+        /// Test SPAN session creation with SAI validation
+        #[test]
+        fn test_mirror_span_session_creation_integration() {
+            let sai = MockSai::new();
+
+            // Create SPAN session
+            let (oid, name) = create_mirror_session_with_sai(
+                "mirror_session_1",
+                "SPAN",
+                "BOTH",
+                "Ethernet48",
+                &sai,
+            );
+
+            // Verify SAI object was created
+            assert_eq!(sai.count_objects(SaiObjectType::MirrorSession), 1);
+
+            // Verify object attributes
+            let obj = sai.get_object(oid).unwrap();
+            assert_eq!(obj.object_type, SaiObjectType::MirrorSession);
+
+            let type_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "session_type")
+                .map(|(_, v)| v.clone());
+            assert_eq!(type_attr, Some("SPAN".to_string()));
+
+            let dir_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "direction")
+                .map(|(_, v)| v.clone());
+            assert_eq!(dir_attr, Some("BOTH".to_string()));
+
+            sai.clear();
+        }
+
+        /// Test ERSPAN session with GRE tunnel configuration
+        #[test]
+        fn test_mirror_erspan_session_configuration_integration() {
+            let sai = MockSai::new();
+
+            // Create ERSPAN session with GRE tunnel
+            let (oid, _) = create_erspan_session_with_sai(
+                "erspan_session_1",
+                "RX",
+                "10.0.0.1",
+                "10.0.0.2",
+                0x88BE,  // ERSPAN Type II GRE type
+                &sai,
+            );
+
+            // Verify SAI object was created
+            assert_eq!(sai.count_objects(SaiObjectType::MirrorSession), 1);
+
+            // Verify ERSPAN attributes
+            let obj = sai.get_object(oid).unwrap();
+
+            let type_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "session_type")
+                .map(|(_, v)| v.clone());
+            assert_eq!(type_attr, Some("ERSPAN".to_string()));
+
+            let src_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "src_ip")
+                .map(|(_, v)| v.clone());
+            assert_eq!(src_attr, Some("10.0.0.1".to_string()));
+
+            let dst_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "dst_ip")
+                .map(|(_, v)| v.clone());
+            assert_eq!(dst_attr, Some("10.0.0.2".to_string()));
+
+            sai.clear();
+        }
+
+        /// Test multiple mirror sessions management
+        #[test]
+        fn test_multiple_mirror_sessions_management_integration() {
+            let sai = MockSai::new();
+
+            // Create sessions with different directions
+            let (oid1, _) = create_mirror_session_with_sai("session_rx", "SPAN", "RX", "Ethernet48", &sai);
+            let (oid2, _) = create_mirror_session_with_sai("session_tx", "SPAN", "TX", "Ethernet48", &sai);
+            let (oid3, _) = create_mirror_session_with_sai("session_both", "SPAN", "BOTH", "Ethernet52", &sai);
+            let (oid4, _) = create_erspan_session_with_sai("erspan_1", "RX", "10.0.0.1", "10.0.0.2", 0x88BE, &sai);
+
+            // Verify all sessions were created
+            assert_eq!(sai.count_objects(SaiObjectType::MirrorSession), 4);
+
+            // Verify directions
+            let sessions = vec![
+                (oid1, "RX"),
+                (oid2, "TX"),
+                (oid3, "BOTH"),
+                (oid4, "RX"),
+            ];
+
+            for (oid, expected_dir) in sessions {
+                let obj = sai.get_object(oid).unwrap();
+                let dir_attr = obj.attributes.iter()
+                    .find(|(k, _)| k == "direction")
+                    .map(|(_, v)| v.clone());
+                assert_eq!(dir_attr, Some(expected_dir.to_string()));
+            }
+
+            sai.clear();
+        }
+
+        /// Test mirror session removal and cleanup
+        #[test]
+        fn test_mirror_session_removal_and_cleanup_integration() {
+            let sai = MockSai::new();
+
+            // Create sessions
+            let (oid1, _) = create_mirror_session_with_sai("session_1", "SPAN", "RX", "Ethernet48", &sai);
+            let (oid2, _) = create_erspan_session_with_sai("erspan_1", "TX", "10.0.0.1", "10.0.0.2", 0x88BE, &sai);
+
+            assert_eq!(sai.count_objects(SaiObjectType::MirrorSession), 2);
+
+            // Remove sessions
+            sai.remove_object(oid1).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::MirrorSession), 1);
+
+            sai.remove_object(oid2).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::MirrorSession), 0);
+
+            // Verify all removed
+            assert!(sai.get_object(oid1).is_none());
+            assert!(sai.get_object(oid2).is_none());
+
+            sai.clear();
+        }
+    }
+
+    // ==================== MUX Integration Tests ====================
+
+    /// Helper function to create a MUX port with SAI (creates tunnel and ACL)
+    fn create_mux_port_with_sai(
+        port_name: &str,
+        state: &str,
+        peer_ip: &str,
+        sai: &MockSai,
+    ) -> (u64, u64, String) {
+        // Create MUX tunnel
+        let tunnel_oid = sai
+            .create_object(
+                SaiObjectType::MuxTunnel,
+                vec![
+                    ("port_name".to_string(), port_name.to_string()),
+                    ("state".to_string(), state.to_string()),
+                    ("peer_ip".to_string(), peer_ip.to_string()),
+                ],
+            )
+            .unwrap();
+
+        // Create MUX ACL
+        let acl_oid = sai
+            .create_object(
+                SaiObjectType::MuxAcl,
+                vec![
+                    ("port_name".to_string(), port_name.to_string()),
+                    ("state".to_string(), state.to_string()),
+                ],
+            )
+            .unwrap();
+
+        (tunnel_oid, acl_oid, port_name.to_string())
+    }
+
+    mod test_mux_integration {
+        use super::*;
+
+        /// Test MUX port creation with SAI validation
+        #[test]
+        fn test_mux_port_creation_integration() {
+            let sai = MockSai::new();
+
+            // Create MUX port (creates both tunnel and ACL)
+            let (tunnel_oid, acl_oid, port_name) = create_mux_port_with_sai(
+                "Ethernet0",
+                "active",
+                "10.0.0.1",
+                &sai,
+            );
+
+            // Verify SAI objects were created
+            assert_eq!(sai.count_objects(SaiObjectType::MuxTunnel), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::MuxAcl), 1);
+
+            // Verify tunnel attributes
+            let tunnel = sai.get_object(tunnel_oid).unwrap();
+            assert_eq!(tunnel.object_type, SaiObjectType::MuxTunnel);
+
+            let state_attr = tunnel.attributes.iter()
+                .find(|(k, _)| k == "state")
+                .map(|(_, v)| v.clone());
+            assert_eq!(state_attr, Some("active".to_string()));
+
+            // Verify ACL attributes
+            let acl = sai.get_object(acl_oid).unwrap();
+            assert_eq!(acl.object_type, SaiObjectType::MuxAcl);
+
+            sai.clear();
+        }
+
+        /// Test MUX state transition
+        #[test]
+        fn test_mux_state_transition_integration() {
+            let sai = MockSai::new();
+
+            // Create MUX port in active state
+            let (tunnel_oid, acl_oid, _) = create_mux_port_with_sai(
+                "Ethernet0",
+                "active",
+                "10.0.0.1",
+                &sai,
+            );
+
+            // Verify initial state
+            let tunnel = sai.get_object(tunnel_oid).unwrap();
+            let state_attr = tunnel.attributes.iter()
+                .find(|(k, _)| k == "state")
+                .map(|(_, v)| v.clone());
+            assert_eq!(state_attr, Some("active".to_string()));
+
+            // Simulate state transition by removing and recreating with new state
+            sai.remove_object(tunnel_oid).unwrap();
+            sai.remove_object(acl_oid).unwrap();
+
+            let (new_tunnel_oid, new_acl_oid, _) = create_mux_port_with_sai(
+                "Ethernet0",
+                "standby",
+                "10.0.0.1",
+                &sai,
+            );
+
+            // Verify new state
+            let new_tunnel = sai.get_object(new_tunnel_oid).unwrap();
+            let new_state_attr = new_tunnel.attributes.iter()
+                .find(|(k, _)| k == "state")
+                .map(|(_, v)| v.clone());
+            assert_eq!(new_state_attr, Some("standby".to_string()));
+
+            sai.clear();
+        }
+
+        /// Test multiple MUX ports management
+        #[test]
+        fn test_multiple_mux_ports_management_integration() {
+            let sai = MockSai::new();
+
+            // Create MUX ports on different interfaces
+            let ports = vec![
+                ("Ethernet0", "active", "10.0.0.1"),
+                ("Ethernet4", "standby", "10.0.0.2"),
+                ("Ethernet8", "active", "10.0.0.3"),
+                ("Ethernet12", "standby", "10.0.0.4"),
+            ];
+
+            let mut tunnel_oids = Vec::new();
+            for (port, state, peer_ip) in &ports {
+                let (tunnel_oid, _, _) = create_mux_port_with_sai(port, state, peer_ip, &sai);
+                tunnel_oids.push(tunnel_oid);
+            }
+
+            // Verify all objects were created
+            assert_eq!(sai.count_objects(SaiObjectType::MuxTunnel), 4);
+            assert_eq!(sai.count_objects(SaiObjectType::MuxAcl), 4);
+
+            // Verify states
+            for (idx, oid) in tunnel_oids.iter().enumerate() {
+                let obj = sai.get_object(*oid).unwrap();
+                let state_attr = obj.attributes.iter()
+                    .find(|(k, _)| k == "state")
+                    .map(|(_, v)| v.clone());
+                assert_eq!(state_attr, Some(ports[idx].1.to_string()));
+            }
+
+            sai.clear();
+        }
+
+        /// Test MUX port removal and cleanup
+        #[test]
+        fn test_mux_port_removal_and_cleanup_integration() {
+            let sai = MockSai::new();
+
+            // Create MUX ports
+            let (tunnel_oid1, acl_oid1, _) = create_mux_port_with_sai("Ethernet0", "active", "10.0.0.1", &sai);
+            let (tunnel_oid2, acl_oid2, _) = create_mux_port_with_sai("Ethernet4", "standby", "10.0.0.2", &sai);
+
+            assert_eq!(sai.count_objects(SaiObjectType::MuxTunnel), 2);
+            assert_eq!(sai.count_objects(SaiObjectType::MuxAcl), 2);
+
+            // Remove first port (both tunnel and ACL)
+            sai.remove_object(acl_oid1).unwrap();
+            sai.remove_object(tunnel_oid1).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::MuxTunnel), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::MuxAcl), 1);
+
+            // Remove second port
+            sai.remove_object(acl_oid2).unwrap();
+            sai.remove_object(tunnel_oid2).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::MuxTunnel), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::MuxAcl), 0);
+
+            sai.clear();
+        }
+    }
+
+    // ==================== PBH Integration Tests ====================
+
+    /// Helper function to create a PBH hash with SAI
+    fn create_pbh_hash_with_sai(
+        name: &str,
+        hash_field_list: Vec<&str>,
+        sai: &MockSai,
+    ) -> (u64, String) {
+        let fields_str = hash_field_list.join(",");
+        let oid = sai
+            .create_object(
+                SaiObjectType::PbhHash,
+                vec![
+                    ("name".to_string(), name.to_string()),
+                    ("hash_field_list".to_string(), fields_str),
+                ],
+            )
+            .unwrap();
+        (oid, name.to_string())
+    }
+
+    /// Helper function to create a PBH table with SAI
+    fn create_pbh_table_with_sai(
+        name: &str,
+        interface_list: Vec<&str>,
+        sai: &MockSai,
+    ) -> (u64, String) {
+        let interfaces_str = interface_list.join(",");
+        let oid = sai
+            .create_object(
+                SaiObjectType::PbhTable,
+                vec![
+                    ("name".to_string(), name.to_string()),
+                    ("interface_list".to_string(), interfaces_str),
+                ],
+            )
+            .unwrap();
+        (oid, name.to_string())
+    }
+
+    /// Helper function to create a PBH rule with SAI
+    fn create_pbh_rule_with_sai(
+        table_name: &str,
+        rule_name: &str,
+        priority: u32,
+        hash_name: &str,
+        sai: &MockSai,
+    ) -> (u64, String) {
+        let oid = sai
+            .create_object(
+                SaiObjectType::PbhRule,
+                vec![
+                    ("table_name".to_string(), table_name.to_string()),
+                    ("rule_name".to_string(), rule_name.to_string()),
+                    ("priority".to_string(), priority.to_string()),
+                    ("hash_name".to_string(), hash_name.to_string()),
+                ],
+            )
+            .unwrap();
+        (oid, rule_name.to_string())
+    }
+
+    mod test_pbh_integration {
+        use super::*;
+
+        /// Test PBH hash creation with SAI validation
+        #[test]
+        fn test_pbh_hash_creation_integration() {
+            let sai = MockSai::new();
+
+            // Create PBH hash with multiple fields
+            let (oid, name) = create_pbh_hash_with_sai(
+                "inner_v4_hash",
+                vec!["INNER_SRC_IPV4", "INNER_DST_IPV4", "INNER_L4_SRC_PORT", "INNER_L4_DST_PORT"],
+                &sai,
+            );
+
+            // Verify SAI object was created
+            assert_eq!(sai.count_objects(SaiObjectType::PbhHash), 1);
+
+            // Verify object attributes
+            let obj = sai.get_object(oid).unwrap();
+            assert_eq!(obj.object_type, SaiObjectType::PbhHash);
+
+            let name_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "name")
+                .map(|(_, v)| v.clone());
+            assert_eq!(name_attr, Some("inner_v4_hash".to_string()));
+
+            let fields_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "hash_field_list")
+                .map(|(_, v)| v.clone());
+            assert!(fields_attr.unwrap().contains("INNER_SRC_IPV4"));
+
+            sai.clear();
+        }
+
+        /// Test PBH table and rule configuration
+        #[test]
+        fn test_pbh_table_and_rule_configuration_integration() {
+            let sai = MockSai::new();
+
+            // Create hash first
+            let (hash_oid, hash_name) = create_pbh_hash_with_sai(
+                "inner_v4_hash",
+                vec!["INNER_SRC_IPV4", "INNER_DST_IPV4"],
+                &sai,
+            );
+
+            // Create table
+            let (table_oid, table_name) = create_pbh_table_with_sai(
+                "pbh_table_1",
+                vec!["Ethernet0", "Ethernet4", "Ethernet8"],
+                &sai,
+            );
+
+            // Create rule
+            let (rule_oid, rule_name) = create_pbh_rule_with_sai(
+                &table_name,
+                "rule_1",
+                100,
+                &hash_name,
+                &sai,
+            );
+
+            // Verify all objects were created
+            assert_eq!(sai.count_objects(SaiObjectType::PbhHash), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::PbhTable), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::PbhRule), 1);
+
+            // Verify rule attributes
+            let rule = sai.get_object(rule_oid).unwrap();
+            let priority_attr = rule.attributes.iter()
+                .find(|(k, _)| k == "priority")
+                .map(|(_, v)| v.clone());
+            assert_eq!(priority_attr, Some("100".to_string()));
+
+            sai.clear();
+        }
+
+        /// Test multiple PBH hashes management
+        #[test]
+        fn test_multiple_pbh_hashes_management_integration() {
+            let sai = MockSai::new();
+
+            // Create multiple hashes with different fields
+            let hashes = vec![
+                ("inner_v4_hash", vec!["INNER_SRC_IPV4", "INNER_DST_IPV4"]),
+                ("inner_v6_hash", vec!["INNER_SRC_IPV6", "INNER_DST_IPV6"]),
+                ("outer_v4_hash", vec!["SRC_IPV4", "DST_IPV4"]),
+                ("gre_hash", vec!["GRE_KEY"]),
+            ];
+
+            let mut hash_oids = Vec::new();
+            for (name, fields) in &hashes {
+                let (oid, _) = create_pbh_hash_with_sai(name, fields.clone(), &sai);
+                hash_oids.push(oid);
+            }
+
+            // Verify all hashes were created
+            assert_eq!(sai.count_objects(SaiObjectType::PbhHash), 4);
+
+            // Verify each hash has correct name
+            for (idx, oid) in hash_oids.iter().enumerate() {
+                let obj = sai.get_object(*oid).unwrap();
+                let name_attr = obj.attributes.iter()
+                    .find(|(k, _)| k == "name")
+                    .map(|(_, v)| v.clone());
+                assert_eq!(name_attr, Some(hashes[idx].0.to_string()));
+            }
+
+            sai.clear();
+        }
+
+        /// Test PBH removal and cleanup
+        #[test]
+        fn test_pbh_removal_and_cleanup_integration() {
+            let sai = MockSai::new();
+
+            // Create full PBH configuration
+            let (hash_oid, hash_name) = create_pbh_hash_with_sai(
+                "inner_v4_hash",
+                vec!["INNER_SRC_IPV4", "INNER_DST_IPV4"],
+                &sai,
+            );
+            let (table_oid, table_name) = create_pbh_table_with_sai(
+                "pbh_table_1",
+                vec!["Ethernet0"],
+                &sai,
+            );
+            let (rule_oid, _) = create_pbh_rule_with_sai(
+                &table_name,
+                "rule_1",
+                100,
+                &hash_name,
+                &sai,
+            );
+
+            assert_eq!(sai.count_objects(SaiObjectType::PbhHash), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::PbhTable), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::PbhRule), 1);
+
+            // Remove in proper order: rule, table, hash
+            sai.remove_object(rule_oid).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::PbhRule), 0);
+
+            sai.remove_object(table_oid).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::PbhTable), 0);
+
+            sai.remove_object(hash_oid).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::PbhHash), 0);
+
+            // Verify all removed
+            assert!(sai.get_object(rule_oid).is_none());
+            assert!(sai.get_object(table_oid).is_none());
+            assert!(sai.get_object(hash_oid).is_none());
+
+            sai.clear();
         }
     }
 
