@@ -9981,14 +9981,38 @@ mod integration_tests {
 
     mod chassis_orch_tests {
         use super::*;
-        use sonic_orchagent::chassis::{ChassisOrch, ChassisOrchConfig, ChassisOrchStats, SystemPortEntry, SystemPortKey, SystemPortConfig};
+        use sonic_orchagent::chassis::{
+            ChassisOrch, ChassisOrchCallbacks, ChassisOrchConfig, ChassisOrchStats, FabricPortKey,
+            RawSaiObjectId, Result, SystemPortConfig, SystemPortEntry, SystemPortKey,
+        };
+
+        /// Mock callbacks for testing.
+        struct MockChassisCallbacks;
+
+        impl ChassisOrchCallbacks for MockChassisCallbacks {
+            fn create_system_port(&self, config: &SystemPortConfig) -> Result<RawSaiObjectId> {
+                Ok(0x1000 + config.system_port_id as u64)
+            }
+            fn remove_system_port(&self, _oid: RawSaiObjectId) -> Result<()> { Ok(()) }
+            fn set_system_port_attribute(&self, _oid: RawSaiObjectId, _attr_name: &str, _attr_value: &str) -> Result<()> { Ok(()) }
+            fn create_fabric_port(&self, port_id: u32) -> Result<RawSaiObjectId> {
+                Ok(0x2000 + port_id as u64)
+            }
+            fn remove_fabric_port(&self, _oid: RawSaiObjectId) -> Result<()> { Ok(()) }
+            fn set_fabric_port_isolate(&self, _oid: RawSaiObjectId, _isolate: bool) -> Result<()> { Ok(()) }
+            fn write_system_port_state(&self, _key: &SystemPortKey, _state: &str) -> Result<()> { Ok(()) }
+            fn remove_system_port_state(&self, _key: &SystemPortKey) -> Result<()> { Ok(()) }
+            fn on_system_port_created(&self, _entry: &SystemPortEntry) {}
+            fn on_system_port_removed(&self, _key: &SystemPortKey) {}
+            fn on_fabric_port_isolate_changed(&self, _key: &FabricPortKey, _isolate: bool) {}
+        }
 
         /// Test system port configuration and initialization
         #[test]
         fn test_chassis_port_config_integration() {
             let sai = MockSai::new();
             let config = ChassisOrchConfig::default();
-            let mut orch = ChassisOrch::new(config);
+            let mut orch: ChassisOrch<MockChassisCallbacks> = ChassisOrch::new(config);
 
             // Create system port SAI objects
             let port_oid_1 = sai.create_object(
@@ -10050,7 +10074,7 @@ mod integration_tests {
         fn test_chassis_state_management_integration() {
             let sai = MockSai::new();
             let config = ChassisOrchConfig::default();
-            let mut orch = ChassisOrch::new(config);
+            let mut orch: ChassisOrch<MockChassisCallbacks> = ChassisOrch::new(config);
 
             // Verify initial state
             let initial_stats = orch.stats();
@@ -10115,7 +10139,7 @@ mod integration_tests {
         fn test_multiple_port_operations_integration() {
             let sai = MockSai::new();
             let config = ChassisOrchConfig::default();
-            let mut orch = ChassisOrch::new(config);
+            let mut orch: ChassisOrch<MockChassisCallbacks> = ChassisOrch::new(config);
 
             // Create initial batch of system ports
             let mut initial_oids = Vec::new();
@@ -10190,7 +10214,7 @@ mod integration_tests {
         fn test_port_removal_and_cleanup_integration() {
             let sai = MockSai::new();
             let config = ChassisOrchConfig::default();
-            let orch = ChassisOrch::new(config);
+            let orch: ChassisOrch<MockChassisCallbacks> = ChassisOrch::new(config);
 
             // Create system ports
             let sys_port_oids: Vec<u64> = (0..4)

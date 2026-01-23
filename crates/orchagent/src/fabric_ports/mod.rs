@@ -13,5 +13,8 @@ mod orch;
 mod types;
 
 pub use ffi::{register_fabric_ports_orch, unregister_fabric_ports_orch};
-pub use orch::{FabricPortsOrch, FabricPortsOrchCallbacks, FabricPortsOrchConfig, FabricPortsOrchError, FabricPortsOrchStats};
+pub use orch::{
+    FabricPortsOrch, FabricPortsOrchCallbacks, FabricPortsOrchConfig, FabricPortsOrchError,
+    FabricPortsOrchStats, Result,
+};
 pub use types::{FabricPortState, IsolationState, LinkStatus, PortHealthState};

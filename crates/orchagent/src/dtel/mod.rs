@@ -19,5 +19,8 @@ mod orch;
 mod types;
 
 pub use ffi::{register_dtel_orch, unregister_dtel_orch};
-pub use orch::{DtelOrch, DtelOrchCallbacks, DtelOrchConfig, DtelOrchError, DtelOrchStats};
+pub use orch::{
+    DtelEventEntry, DtelOrch, DtelOrchCallbacks, DtelOrchConfig, DtelOrchError, DtelOrchStats,
+    Result, WatchlistEntry,
+};
 pub use types::{DtelEventType, IntSessionConfig, IntSessionEntry};

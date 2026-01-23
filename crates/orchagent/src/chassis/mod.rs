@@ -12,5 +12,11 @@ mod orch;
 mod types;
 
 pub use ffi::{register_chassis_orch, unregister_chassis_orch};
-pub use orch::{ChassisOrch, ChassisOrchCallbacks, ChassisOrchConfig, ChassisOrchError, ChassisOrchStats};
-pub use types::{ChassisStats, FabricPortEntry, FabricPortKey, SystemPortConfig, SystemPortEntry, SystemPortKey};
+pub use orch::{
+    ChassisOrch, ChassisOrchCallbacks, ChassisOrchConfig, ChassisOrchError, ChassisOrchStats,
+    Result,
+};
+pub use types::{
+    ChassisStats, FabricPortEntry, FabricPortKey, RawSaiObjectId, SystemPortConfig,
+    SystemPortEntry, SystemPortKey,
+};
