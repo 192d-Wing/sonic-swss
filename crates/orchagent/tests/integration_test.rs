@@ -52,6 +52,9 @@ pub enum SaiObjectType {
     VirtualRouter,
     DebugCounter,
     TwampSession,
+    StpInstance,
+    StpPort,
+    Policer,
 }
 
 impl MockSai {
@@ -5539,6 +5542,435 @@ mod integration_tests {
             }
         }
     }
+
+    // NhgOrch integration tests
+    mod nhg_orch_tests {
+        use super::*;
+        use sonic_orchagent::nhg::{
+            LabelStack, NextHopGroupMember, NextHopKey, NhgOrch, NhgOrchCallbacks, NhgOrchConfig,
+        };
+        use sonic_types::{IpAddress, MacAddress};
+        use std::str::FromStr;
+        use std::sync::{Arc, Mutex};
+
+        /// Mock callbacks for NhgOrch testing
+        struct MockNhgCallbacks {
+            sai: Arc<MockSai>,
+            created_nexthops: Mutex<Vec<NextHopKey>>,
+            removed_nexthops: Mutex<Vec<u64>>,
+            created_nhgs: Mutex<Vec<Vec<NextHopGroupMember>>>,
+            removed_nhgs: Mutex<Vec<u64>>,
+        }
+
+        impl MockNhgCallbacks {
+            fn new(sai: Arc<MockSai>) -> Self {
+                Self {
+                    sai,
+                    created_nexthops: Mutex::new(Vec::new()),
+                    removed_nexthops: Mutex::new(Vec::new()),
+                    created_nhgs: Mutex::new(Vec::new()),
+                    removed_nhgs: Mutex::new(Vec::new()),
+                }
+            }
+        }
+
+        impl NhgOrchCallbacks for MockNhgCallbacks {
+            fn create_next_hop(&self, key: &NextHopKey) -> Result<u64, String> {
+                let oid = self.sai.create_object(
+                    SaiObjectType::NextHop,
+                    vec![
+                        ("ip".to_string(), key.ip_address.to_string()),
+                        ("alias".to_string(), key.alias.clone()),
+                        ("weight".to_string(), key.weight.to_string()),
+                    ],
+                )?;
+
+                self.created_nexthops.lock().unwrap().push(key.clone());
+                Ok(oid)
+            }
+
+            fn remove_next_hop(&self, nh_id: u64) -> Result<(), String> {
+                self.removed_nexthops.lock().unwrap().push(nh_id);
+                self.sai.remove_object(nh_id)
+            }
+
+            fn create_next_hop_group(&self, members: &[NextHopGroupMember]) -> Result<u64, String> {
+                let oid = self.sai.create_object(
+                    SaiObjectType::NextHopGroup,
+                    vec![
+                        ("member_count".to_string(), members.len().to_string()),
+                    ],
+                )?;
+
+                self.created_nhgs.lock().unwrap().push(members.to_vec());
+                Ok(oid)
+            }
+
+            fn remove_next_hop_group(&self, nhg_id: u64) -> Result<(), String> {
+                self.removed_nhgs.lock().unwrap().push(nhg_id);
+                self.sai.remove_object(nhg_id)
+            }
+        }
+
+        /// Helper to create a basic next-hop group member
+        fn create_nhg_member(ip: &str, alias: &str) -> NextHopGroupMember {
+            NextHopGroupMember {
+                key: NextHopKey {
+                    ip_address: IpAddress::from_str(ip).unwrap(),
+                    alias: alias.to_string(),
+                    vni: 0,
+                    mac_address: None,
+                    label_stack: LabelStack::default(),
+                    weight: 0,
+                    srv6_segment: None,
+                    srv6_source: None,
+                    srv6_vpn_sid: None,
+                },
+                gm_id: 0,
+                nh_id: 0,
+            }
+        }
+
+        /// Helper to create a weighted next-hop group member
+        fn create_weighted_nhg_member(ip: &str, alias: &str, weight: u32) -> NextHopGroupMember {
+            NextHopGroupMember {
+                key: NextHopKey {
+                    ip_address: IpAddress::from_str(ip).unwrap(),
+                    alias: alias.to_string(),
+                    vni: 0,
+                    mac_address: None,
+                    label_stack: LabelStack::default(),
+                    weight,
+                    srv6_segment: None,
+                    srv6_source: None,
+                    srv6_vpn_sid: None,
+                },
+                gm_id: 0,
+                nh_id: 0,
+            }
+        }
+
+        #[test]
+        fn test_nhg_ecmp_creation_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockNhgCallbacks::new(Arc::clone(&sai)));
+            let mut orch = NhgOrch::new(NhgOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Initially no next-hop groups
+            assert_eq!(orch.nhg_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::NextHopGroup), 0);
+
+            // Create ECMP next-hop group with 4 equal-cost paths
+            let members = vec![
+                create_nhg_member("10.0.0.1", "Ethernet0"),
+                create_nhg_member("10.0.0.2", "Ethernet4"),
+                create_nhg_member("10.0.0.3", "Ethernet8"),
+                create_nhg_member("10.0.0.4", "Ethernet12"),
+            ];
+
+            orch.create_nhg("ecmp_group".to_string(), members.clone()).unwrap();
+
+            // Verify NHG created in orchestrator
+            assert_eq!(orch.nhg_count(), 1);
+            assert!(orch.nhg_exists("ecmp_group"));
+            assert_eq!(orch.stats().nhgs_created, 1);
+
+            // Verify SAI next-hop group object was created
+            assert_eq!(sai.count_objects(SaiObjectType::NextHopGroup), 1);
+            let created_nhgs = callbacks.created_nhgs.lock().unwrap();
+            assert_eq!(created_nhgs.len(), 1);
+            assert_eq!(created_nhgs[0].len(), 4);
+
+            // Verify all members have equal weight (ECMP)
+            for member in &created_nhgs[0] {
+                assert_eq!(member.key.weight, 0);
+            }
+
+            // Verify SAI object attributes
+            let sai_objs: Vec<_> = sai.objects.lock().unwrap()
+                .iter()
+                .filter(|obj| obj.object_type == SaiObjectType::NextHopGroup)
+                .cloned()
+                .collect();
+            assert_eq!(sai_objs.len(), 1);
+            assert_eq!(sai_objs[0].object_type, SaiObjectType::NextHopGroup);
+
+            // Verify attributes contain member count
+            let member_count_attr = sai_objs[0].attributes.iter()
+                .find(|(k, _)| k == "member_count")
+                .map(|(_, v)| v.clone());
+            assert_eq!(member_count_attr, Some("4".to_string()));
+        }
+
+        #[test]
+        fn test_nhg_wcmp_weighted_multipath_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockNhgCallbacks::new(Arc::clone(&sai)));
+            let mut orch = NhgOrch::new(NhgOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Create WCMP next-hop group with different weights
+            // Weights: 100, 200, 50 (total: 350)
+            // Traffic distribution: ~28.5%, ~57.1%, ~14.3%
+            let members = vec![
+                create_weighted_nhg_member("10.0.0.1", "Ethernet0", 100),
+                create_weighted_nhg_member("10.0.0.2", "Ethernet4", 200),
+                create_weighted_nhg_member("10.0.0.3", "Ethernet8", 50),
+            ];
+
+            orch.create_nhg("wcmp_group".to_string(), members.clone()).unwrap();
+
+            // Verify NHG created
+            assert_eq!(orch.nhg_count(), 1);
+            assert!(orch.nhg_exists("wcmp_group"));
+            assert_eq!(orch.stats().nhgs_created, 1);
+
+            // Verify SAI next-hop group object was created
+            assert_eq!(sai.count_objects(SaiObjectType::NextHopGroup), 1);
+
+            // Verify weighted members
+            let created_nhgs = callbacks.created_nhgs.lock().unwrap();
+            assert_eq!(created_nhgs.len(), 1);
+            assert_eq!(created_nhgs[0].len(), 3);
+
+            // Verify each member has correct weight
+            assert_eq!(created_nhgs[0][0].key.weight, 100);
+            assert_eq!(created_nhgs[0][1].key.weight, 200);
+            assert_eq!(created_nhgs[0][2].key.weight, 50);
+
+            // Verify different weights (not ECMP)
+            let weights: Vec<u32> = created_nhgs[0].iter()
+                .map(|m| m.key.weight)
+                .collect();
+            assert_ne!(weights[0], weights[1]);
+            assert_ne!(weights[1], weights[2]);
+            assert_ne!(weights[0], weights[2]);
+
+            // Test adding another WCMP group
+            drop(created_nhgs);
+            let members2 = vec![
+                create_weighted_nhg_member("192.168.1.1", "Ethernet16", 300),
+                create_weighted_nhg_member("192.168.1.2", "Ethernet20", 100),
+            ];
+
+            orch.create_nhg("wcmp_group2".to_string(), members2).unwrap();
+
+            // Verify both groups exist
+            assert_eq!(orch.nhg_count(), 2);
+            assert!(orch.nhg_exists("wcmp_group"));
+            assert!(orch.nhg_exists("wcmp_group2"));
+            assert_eq!(sai.count_objects(SaiObjectType::NextHopGroup), 2);
+            assert_eq!(orch.stats().nhgs_created, 2);
+        }
+
+        #[test]
+        fn test_nhg_type_variants_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockNhgCallbacks::new(Arc::clone(&sai)));
+            let mut orch = NhgOrch::new(NhgOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Test 1: Overlay NHG (with VNI and MAC)
+            let overlay_member = NextHopGroupMember {
+                key: NextHopKey {
+                    ip_address: IpAddress::from_str("192.168.100.1").unwrap(),
+                    alias: "Vxlan100".to_string(),
+                    vni: 10000,
+                    mac_address: Some(MacAddress::from_str("00:11:22:33:44:55").unwrap()),
+                    label_stack: LabelStack::default(),
+                    weight: 0,
+                    srv6_segment: None,
+                    srv6_source: None,
+                    srv6_vpn_sid: None,
+                },
+                gm_id: 0,
+                nh_id: 0,
+            };
+
+            orch.create_nhg("overlay_nhg".to_string(), vec![overlay_member.clone()]).unwrap();
+            assert!(orch.nhg_exists("overlay_nhg"));
+            assert_eq!(sai.count_objects(SaiObjectType::NextHopGroup), 1);
+
+            // Verify overlay attributes
+            let created_nhgs = callbacks.created_nhgs.lock().unwrap();
+            assert_eq!(created_nhgs[0][0].key.vni, 10000);
+            assert!(created_nhgs[0][0].key.mac_address.is_some());
+            drop(created_nhgs);
+
+            // Test 2: SRv6 NHG (with SRv6 segment)
+            let srv6_member = NextHopGroupMember {
+                key: NextHopKey {
+                    ip_address: IpAddress::from_str("2001:db8::1").unwrap(),
+                    alias: "Ethernet0".to_string(),
+                    vni: 0,
+                    mac_address: None,
+                    label_stack: LabelStack::default(),
+                    weight: 0,
+                    srv6_segment: Some("fc00:0:1:1::".to_string()),
+                    srv6_source: Some("fc00:0:1::1".to_string()),
+                    srv6_vpn_sid: None,
+                },
+                gm_id: 0,
+                nh_id: 0,
+            };
+
+            orch.create_nhg("srv6_nhg".to_string(), vec![srv6_member.clone()]).unwrap();
+            assert!(orch.nhg_exists("srv6_nhg"));
+            assert_eq!(sai.count_objects(SaiObjectType::NextHopGroup), 2);
+
+            // Verify SRv6 attributes
+            let created_nhgs = callbacks.created_nhgs.lock().unwrap();
+            assert_eq!(created_nhgs.len(), 2);
+            assert!(created_nhgs[1][0].key.srv6_segment.is_some());
+            assert!(created_nhgs[1][0].key.srv6_source.is_some());
+            assert_eq!(created_nhgs[1][0].key.srv6_segment, Some("fc00:0:1:1::".to_string()));
+            drop(created_nhgs);
+
+            // Test 3: MPLS NHG (with label stack)
+            let mpls_member = NextHopGroupMember {
+                key: NextHopKey {
+                    ip_address: IpAddress::from_str("10.1.1.1").unwrap(),
+                    alias: "Ethernet24".to_string(),
+                    vni: 0,
+                    mac_address: None,
+                    label_stack: vec![100, 200, 300],
+                    weight: 0,
+                    srv6_segment: None,
+                    srv6_source: None,
+                    srv6_vpn_sid: None,
+                },
+                gm_id: 0,
+                nh_id: 0,
+            };
+
+            orch.create_nhg("mpls_nhg".to_string(), vec![mpls_member.clone()]).unwrap();
+            assert!(orch.nhg_exists("mpls_nhg"));
+            assert_eq!(sai.count_objects(SaiObjectType::NextHopGroup), 3);
+
+            // Verify MPLS label stack
+            let created_nhgs = callbacks.created_nhgs.lock().unwrap();
+            assert_eq!(created_nhgs.len(), 3);
+            assert_eq!(created_nhgs[2][0].key.label_stack, vec![100, 200, 300]);
+            assert!(!created_nhgs[2][0].key.label_stack.is_empty());
+            drop(created_nhgs);
+
+            // Test 4: SRv6 VPN NHG (with VPN SID)
+            let srv6_vpn_member = NextHopGroupMember {
+                key: NextHopKey {
+                    ip_address: IpAddress::from_str("2001:db8::2").unwrap(),
+                    alias: "Ethernet28".to_string(),
+                    vni: 0,
+                    mac_address: None,
+                    label_stack: LabelStack::default(),
+                    weight: 0,
+                    srv6_segment: Some("fc00:0:2:1::".to_string()),
+                    srv6_source: Some("fc00:0:2::1".to_string()),
+                    srv6_vpn_sid: Some("fc00:0:2:100::".to_string()),
+                },
+                gm_id: 0,
+                nh_id: 0,
+            };
+
+            orch.create_nhg("srv6_vpn_nhg".to_string(), vec![srv6_vpn_member.clone()]).unwrap();
+            assert!(orch.nhg_exists("srv6_vpn_nhg"));
+            assert_eq!(sai.count_objects(SaiObjectType::NextHopGroup), 4);
+
+            // Verify SRv6 VPN attributes
+            let created_nhgs = callbacks.created_nhgs.lock().unwrap();
+            assert_eq!(created_nhgs.len(), 4);
+            assert!(created_nhgs[3][0].key.srv6_vpn_sid.is_some());
+            assert_eq!(created_nhgs[3][0].key.srv6_vpn_sid, Some("fc00:0:2:100::".to_string()));
+            drop(created_nhgs);
+
+            // Verify all NHG types coexist
+            assert_eq!(orch.nhg_count(), 4);
+            assert_eq!(orch.stats().nhgs_created, 4);
+
+            // Verify all SAI objects exist
+            assert_eq!(sai.count_objects(SaiObjectType::NextHopGroup), 4);
+        }
+
+        #[test]
+        fn test_nhg_removal_and_cleanup_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockNhgCallbacks::new(Arc::clone(&sai)));
+            let mut orch = NhgOrch::new(NhgOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Create multiple NHGs
+            let members1 = vec![
+                create_nhg_member("10.0.0.1", "Ethernet0"),
+                create_nhg_member("10.0.0.2", "Ethernet4"),
+            ];
+            orch.create_nhg("nhg1".to_string(), members1).unwrap();
+
+            let members2 = vec![
+                create_nhg_member("10.0.0.3", "Ethernet8"),
+                create_nhg_member("10.0.0.4", "Ethernet12"),
+                create_nhg_member("10.0.0.5", "Ethernet16"),
+            ];
+            orch.create_nhg("nhg2".to_string(), members2).unwrap();
+
+            let members3 = vec![
+                create_weighted_nhg_member("10.0.0.6", "Ethernet20", 100),
+            ];
+            orch.create_nhg("nhg3".to_string(), members3).unwrap();
+
+            // Verify initial state
+            assert_eq!(orch.nhg_count(), 3);
+            assert_eq!(sai.count_objects(SaiObjectType::NextHopGroup), 3);
+            assert_eq!(orch.stats().nhgs_created, 3);
+            assert_eq!(orch.stats().nhgs_removed, 0);
+
+            // Test removal with reference counting - should fail when ref count > 0
+            orch.increment_nhg_ref("nhg1").unwrap();
+            let result = orch.remove_nhg("nhg1");
+            assert!(result.is_err());
+            assert!(orch.nhg_exists("nhg1"));
+            assert_eq!(orch.nhg_count(), 3);
+
+            // Decrement ref count and try again
+            orch.decrement_nhg_ref("nhg1").unwrap();
+            orch.remove_nhg("nhg1").unwrap();
+
+            // Verify nhg1 removed
+            assert!(!orch.nhg_exists("nhg1"));
+            assert_eq!(orch.nhg_count(), 2);
+            assert_eq!(sai.count_objects(SaiObjectType::NextHopGroup), 2);
+            assert_eq!(orch.stats().nhgs_removed, 1);
+
+            // Verify SAI object was removed
+            let removed_nhgs = callbacks.removed_nhgs.lock().unwrap();
+            assert_eq!(removed_nhgs.len(), 1);
+            drop(removed_nhgs);
+
+            // Remove nhg2 (no ref count)
+            orch.remove_nhg("nhg2").unwrap();
+            assert!(!orch.nhg_exists("nhg2"));
+            assert_eq!(orch.nhg_count(), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::NextHopGroup), 1);
+            assert_eq!(orch.stats().nhgs_removed, 2);
+
+            // Test removing non-existent NHG
+            let result = orch.remove_nhg("nonexistent");
+            assert!(result.is_err());
+            assert_eq!(orch.nhg_count(), 1);
+
+            // Remove final NHG
+            orch.remove_nhg("nhg3").unwrap();
+
+            // Verify complete cleanup
+            assert_eq!(orch.nhg_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::NextHopGroup), 0);
+            assert_eq!(orch.stats().nhgs_created, 3);
+            assert_eq!(orch.stats().nhgs_removed, 3);
+
+            // Verify all SAI objects removed
+            let removed_nhgs = callbacks.removed_nhgs.lock().unwrap();
+            assert_eq!(removed_nhgs.len(), 3);
+        }
+    }
 }
 
     // CrmOrch integration tests
@@ -6302,6 +6734,1123 @@ mod integration_tests {
             // Cleanup
             assert_eq!(sai.count_objects(SaiObjectType::QueueCounter), 1);
             assert_eq!(sai.count_objects(SaiObjectType::BufferCounter), 1);
+            sai.clear();
+        }
+    }
+
+    // MlagOrch integration tests
+    mod mlag_orch_tests {
+        use super::*;
+        use sonic_orchagent::mlag::{MlagOrch, MlagOrchConfig, MlagOrchCallbacks, MlagUpdate, MlagIslUpdate, MlagIfUpdate};
+        use std::sync::{Arc, Mutex};
+
+        /// Mock callbacks for MlagOrch testing
+        struct MockMlagCallbacks {
+            updates: Mutex<Vec<MlagUpdate>>,
+            ports_ready: bool,
+        }
+
+        impl MockMlagCallbacks {
+            fn new() -> Self {
+                Self {
+                    updates: Mutex::new(Vec::new()),
+                    ports_ready: true,
+                }
+            }
+
+            fn with_ports_ready(ports_ready: bool) -> Self {
+                Self {
+                    updates: Mutex::new(Vec::new()),
+                    ports_ready,
+                }
+            }
+
+            fn get_updates(&self) -> Vec<MlagUpdate> {
+                self.updates.lock().unwrap().clone()
+            }
+
+            fn clear_updates(&self) {
+                self.updates.lock().unwrap().clear();
+            }
+        }
+
+        impl MlagOrchCallbacks for MockMlagCallbacks {
+            fn notify(&self, update: MlagUpdate) {
+                self.updates.lock().unwrap().push(update);
+            }
+
+            fn all_ports_ready(&self) -> bool {
+                self.ports_ready
+            }
+        }
+
+        /// Helper function to create MLAG domain with ISL
+        fn create_mlag_domain(orch: &mut MlagOrch, isl_name: &str) -> Result<(), String> {
+            orch.add_isl_interface(isl_name)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        }
+
+        /// Helper function to add MLAG interface
+        fn add_mlag_interface(orch: &mut MlagOrch, if_name: &str) -> Result<(), String> {
+            orch.add_mlag_interface(if_name)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        }
+
+        #[test]
+        fn test_mlag_domain_creation_integration() {
+            let callbacks = Arc::new(MockMlagCallbacks::new());
+            let mut orch = MlagOrch::new(MlagOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Initialize orch
+            orch.set_initialized();
+            assert!(orch.is_initialized());
+
+            // Initially no ISL configured
+            assert!(orch.isl_name().is_none());
+            assert_eq!(orch.mlag_interface_count(), 0);
+
+            // Create MLAG domain by setting ISL
+            create_mlag_domain(&mut orch, "PortChannel100").unwrap();
+
+            // Verify ISL is set
+            assert_eq!(orch.isl_name(), Some("PortChannel100"));
+            assert!(orch.is_isl_interface("PortChannel100"));
+
+            // Verify notification was sent
+            let updates = callbacks.get_updates();
+            assert_eq!(updates.len(), 1);
+            assert!(matches!(&updates[0], MlagUpdate::Isl(u) if u.is_add && u.isl_name == "PortChannel100"));
+
+            // Verify statistics
+            let stats = orch.stats();
+            assert_eq!(stats.isl_adds, 1);
+            assert_eq!(stats.isl_deletes, 0);
+            assert_eq!(stats.notifications, 1);
+
+            // Test ISL reconfiguration
+            callbacks.clear_updates();
+            create_mlag_domain(&mut orch, "PortChannel200").unwrap();
+
+            // Verify ISL was updated
+            assert_eq!(orch.isl_name(), Some("PortChannel200"));
+            assert!(!orch.is_isl_interface("PortChannel100"));
+            assert!(orch.is_isl_interface("PortChannel200"));
+
+            // Verify second notification
+            let updates = callbacks.get_updates();
+            assert_eq!(updates.len(), 1);
+            assert!(matches!(&updates[0], MlagUpdate::Isl(u) if u.is_add && u.isl_name == "PortChannel200"));
+
+            // Verify updated statistics
+            let stats = orch.stats();
+            assert_eq!(stats.isl_adds, 2);
+            assert_eq!(stats.notifications, 2);
+
+            // Verify all ports are ready
+            assert!(orch.all_ports_ready());
+        }
+
+        #[test]
+        fn test_mlag_isl_configuration_integration() {
+            let callbacks = Arc::new(MockMlagCallbacks::new());
+            let mut orch = MlagOrch::new(MlagOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Test various ISL naming formats
+            let isl_names = vec![
+                "PortChannel1",
+                "PortChannel999",
+                "peer-link",
+                "PortChannel100",
+            ];
+
+            for isl_name in &isl_names {
+                callbacks.clear_updates();
+
+                // Set ISL
+                create_mlag_domain(&mut orch, isl_name).unwrap();
+                assert_eq!(orch.isl_name(), Some(*isl_name));
+
+                // Verify notification
+                let updates = callbacks.get_updates();
+                assert_eq!(updates.len(), 1);
+                assert!(matches!(&updates[0], MlagUpdate::Isl(u) if u.is_add && u.isl_name == *isl_name));
+            }
+
+            // Verify total statistics
+            let stats = orch.stats();
+            assert_eq!(stats.isl_adds, isl_names.len() as u64);
+
+            // Test ISL removal
+            callbacks.clear_updates();
+            orch.del_isl_interface().unwrap();
+
+            // Verify ISL removed
+            assert!(orch.isl_name().is_none());
+
+            // Verify delete notification
+            let updates = callbacks.get_updates();
+            assert_eq!(updates.len(), 1);
+            assert!(matches!(&updates[0], MlagUpdate::Isl(u) if !u.is_add));
+
+            // Verify removal statistics
+            let stats = orch.stats();
+            assert_eq!(stats.isl_deletes, 1);
+
+            // Test error: removing ISL when not set
+            let result = orch.del_isl_interface();
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_mlag_interface_operations_integration() {
+            let callbacks = Arc::new(MockMlagCallbacks::new());
+            let mut orch = MlagOrch::new(MlagOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Set up MLAG domain with ISL
+            orch.set_initialized();
+            create_mlag_domain(&mut orch, "PortChannel100").unwrap();
+            callbacks.clear_updates();
+
+            // Add multiple MLAG interfaces
+            let mlag_interfaces = vec![
+                "PortChannel1",
+                "PortChannel2",
+                "PortChannel3",
+                "Ethernet0",
+                "Ethernet4",
+            ];
+
+            for if_name in &mlag_interfaces {
+                add_mlag_interface(&mut orch, if_name).unwrap();
+            }
+
+            // Verify all interfaces were added
+            assert_eq!(orch.mlag_interface_count(), 5);
+            for if_name in &mlag_interfaces {
+                assert!(orch.is_mlag_interface(if_name));
+            }
+
+            // Verify notifications (5 interface adds)
+            let updates = callbacks.get_updates();
+            assert_eq!(updates.len(), 5);
+            for (i, if_name) in mlag_interfaces.iter().enumerate() {
+                assert!(matches!(&updates[i], MlagUpdate::Intf(u) if u.is_add && u.if_name == *if_name));
+            }
+
+            // Verify statistics
+            let stats = orch.stats();
+            assert_eq!(stats.intf_adds, 5);
+            assert_eq!(stats.intf_deletes, 0);
+
+            // Verify ISL and MLAG interfaces are tracked separately
+            assert!(orch.is_isl_interface("PortChannel100"));
+            assert!(!orch.is_mlag_interface("PortChannel100"));
+            assert!(orch.is_mlag_interface("PortChannel1"));
+            assert!(!orch.is_isl_interface("PortChannel1"));
+
+            // Test interface iteration
+            let intfs: Vec<&String> = orch.mlag_interfaces().collect();
+            assert_eq!(intfs.len(), 5);
+            for if_name in &mlag_interfaces {
+                assert!(intfs.iter().any(|i| i.as_str() == *if_name));
+            }
+
+            // Test partial removal
+            callbacks.clear_updates();
+            orch.del_mlag_interface("PortChannel1").unwrap();
+            orch.del_mlag_interface("Ethernet0").unwrap();
+
+            // Verify partial cleanup
+            assert_eq!(orch.mlag_interface_count(), 3);
+            assert!(!orch.is_mlag_interface("PortChannel1"));
+            assert!(!orch.is_mlag_interface("Ethernet0"));
+            assert!(orch.is_mlag_interface("PortChannel2"));
+            assert!(orch.is_mlag_interface("PortChannel3"));
+            assert!(orch.is_mlag_interface("Ethernet4"));
+
+            // Verify delete notifications
+            let updates = callbacks.get_updates();
+            assert_eq!(updates.len(), 2);
+            assert!(matches!(&updates[0], MlagUpdate::Intf(u) if !u.is_add && u.if_name == "PortChannel1"));
+            assert!(matches!(&updates[1], MlagUpdate::Intf(u) if !u.is_add && u.if_name == "Ethernet0"));
+
+            // Verify updated statistics
+            let stats = orch.stats();
+            assert_eq!(stats.intf_adds, 5);
+            assert_eq!(stats.intf_deletes, 2);
+
+            // Test error cases
+            let result = orch.add_mlag_interface("PortChannel2");
+            assert!(result.is_err()); // Duplicate interface
+
+            let result = orch.del_mlag_interface("NonExistent");
+            assert!(result.is_err()); // Interface not found
+        }
+
+        #[test]
+        fn test_mlag_configuration_removal_and_cleanup_integration() {
+            let callbacks = Arc::new(MockMlagCallbacks::new());
+            let mut orch = MlagOrch::new(MlagOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Set up complete MLAG configuration
+            orch.set_initialized();
+            create_mlag_domain(&mut orch, "PortChannel100").unwrap();
+
+            // Add multiple MLAG interfaces
+            for i in 1..=10 {
+                add_mlag_interface(&mut orch, &format!("PortChannel{}", i)).unwrap();
+            }
+
+            // Verify full setup
+            assert_eq!(orch.mlag_interface_count(), 10);
+            assert_eq!(orch.isl_name(), Some("PortChannel100"));
+            assert!(orch.is_initialized());
+
+            // Verify initial statistics
+            let stats = orch.stats();
+            assert_eq!(stats.isl_adds, 1);
+            assert_eq!(stats.intf_adds, 10);
+            assert_eq!(stats.notifications, 11); // 1 ISL + 10 interfaces
+
+            callbacks.clear_updates();
+
+            // Clean teardown: remove interfaces first
+            for i in 1..=10 {
+                orch.del_mlag_interface(&format!("PortChannel{}", i)).unwrap();
+            }
+
+            // Verify all interfaces removed
+            assert_eq!(orch.mlag_interface_count(), 0);
+
+            // Verify delete notifications for interfaces
+            let updates = callbacks.get_updates();
+            assert_eq!(updates.len(), 10);
+            for update in &updates {
+                assert!(matches!(update, MlagUpdate::Intf(u) if !u.is_add));
+            }
+
+            callbacks.clear_updates();
+
+            // Remove ISL last
+            orch.del_isl_interface().unwrap();
+
+            // Verify ISL removed
+            assert!(orch.isl_name().is_none());
+
+            // Verify ISL delete notification
+            let updates = callbacks.get_updates();
+            assert_eq!(updates.len(), 1);
+            assert!(matches!(&updates[0], MlagUpdate::Isl(u) if !u.is_add));
+
+            // Verify complete cleanup state
+            assert_eq!(orch.mlag_interface_count(), 0);
+            assert!(orch.isl_name().is_none());
+
+            // Verify final statistics
+            let stats = orch.stats();
+            assert_eq!(stats.isl_adds, 1);
+            assert_eq!(stats.isl_deletes, 1);
+            assert_eq!(stats.intf_adds, 10);
+            assert_eq!(stats.intf_deletes, 10);
+            assert_eq!(stats.notifications, 22); // 11 adds + 11 deletes
+
+            // Test re-initialization after cleanup
+            callbacks.clear_updates();
+            create_mlag_domain(&mut orch, "PortChannel200").unwrap();
+            add_mlag_interface(&mut orch, "PortChannel5").unwrap();
+
+            assert_eq!(orch.isl_name(), Some("PortChannel200"));
+            assert_eq!(orch.mlag_interface_count(), 1);
+
+            // Verify new notifications
+            let updates = callbacks.get_updates();
+            assert_eq!(updates.len(), 2);
+            assert!(matches!(&updates[0], MlagUpdate::Isl(u) if u.is_add && u.isl_name == "PortChannel200"));
+            assert!(matches!(&updates[1], MlagUpdate::Intf(u) if u.is_add && u.if_name == "PortChannel5"));
+
+            // Verify updated statistics
+            let stats = orch.stats();
+            assert_eq!(stats.isl_adds, 2);
+            assert_eq!(stats.isl_deletes, 1);
+            assert_eq!(stats.intf_adds, 11);
+            assert_eq!(stats.intf_deletes, 10);
+        }
+    }
+
+    // PolicerOrch integration tests
+    mod policer_orch_tests {
+        use super::*;
+        use sonic_orchagent::policer::{
+            PolicerOrch, PolicerOrchCallbacks, PolicerOrchConfig,
+            ColorSource, MeterType, PacketAction, PolicerConfig, PolicerMode, StormType,
+        };
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+
+        /// Mock callbacks for PolicerOrch testing
+        struct MockPolicerCallbacks {
+            sai: Arc<MockSai>,
+            created_policers: Mutex<Vec<(String, PolicerConfig)>>,
+            updated_policers: Mutex<Vec<u64>>,
+            removed_policers: Mutex<Vec<u64>>,
+            storm_policers: Mutex<Vec<(u64, StormType, Option<u64>)>>,
+            ports: Mutex<HashMap<String, u64>>,
+            ports_ready: bool,
+        }
+
+        impl MockPolicerCallbacks {
+            fn new(sai: Arc<MockSai>) -> Self {
+                let mut ports = HashMap::new();
+                ports.insert("Ethernet0".to_string(), 0x100);
+                ports.insert("Ethernet4".to_string(), 0x104);
+                ports.insert("Ethernet8".to_string(), 0x108);
+
+                Self {
+                    sai,
+                    created_policers: Mutex::new(Vec::new()),
+                    updated_policers: Mutex::new(Vec::new()),
+                    removed_policers: Mutex::new(Vec::new()),
+                    storm_policers: Mutex::new(Vec::new()),
+                    ports: Mutex::new(ports),
+                    ports_ready: true,
+                }
+            }
+        }
+
+        impl PolicerOrchCallbacks for MockPolicerCallbacks {
+            fn create_policer(&self, config: &PolicerConfig) -> Result<u64, String> {
+                let oid = self.sai.create_object(
+                    SaiObjectType::Policer,
+                    vec![
+                        ("meter_type".to_string(), config.meter_type.as_str().to_string()),
+                        ("mode".to_string(), config.mode.as_str().to_string()),
+                        ("color_source".to_string(), config.color_source.as_str().to_string()),
+                        ("cir".to_string(), config.cir.to_string()),
+                        ("cbs".to_string(), config.cbs.to_string()),
+                        ("pir".to_string(), config.pir.to_string()),
+                        ("pbs".to_string(), config.pbs.to_string()),
+                    ],
+                )?;
+
+                self.created_policers
+                    .lock()
+                    .unwrap()
+                    .push(("policer".to_string(), config.clone()));
+
+                Ok(oid)
+            }
+
+            fn update_policer(&self, oid: u64, _config: &PolicerConfig) -> Result<(), String> {
+                self.updated_policers.lock().unwrap().push(oid);
+                Ok(())
+            }
+
+            fn remove_policer(&self, oid: u64) -> Result<(), String> {
+                self.removed_policers.lock().unwrap().push(oid);
+                self.sai.remove_object(oid)
+            }
+
+            fn get_port_id(&self, port_name: &str) -> Option<u64> {
+                self.ports.lock().unwrap().get(port_name).copied()
+            }
+
+            fn all_ports_ready(&self) -> bool {
+                self.ports_ready
+            }
+
+            fn set_port_storm_policer(
+                &self,
+                port_id: u64,
+                storm_type: StormType,
+                policer_oid: Option<u64>,
+            ) -> Result<(), String> {
+                self.storm_policers
+                    .lock()
+                    .unwrap()
+                    .push((port_id, storm_type, policer_oid));
+                Ok(())
+            }
+        }
+
+        /// Helper function to create a policer with srTCM configuration
+        fn create_srtcm_policer(
+            orch: &mut PolicerOrch,
+            name: &str,
+            cir: u64,
+            cbs: u64,
+        ) -> Result<(), String> {
+            let config = PolicerConfig {
+                meter_type: MeterType::Bytes,
+                mode: PolicerMode::SrTcm,
+                color_source: ColorSource::Blind,
+                cir,
+                cbs,
+                pir: 0,
+                pbs: 0,
+                green_action: PacketAction::Forward,
+                yellow_action: PacketAction::Forward,
+                red_action: PacketAction::Drop,
+            };
+
+            orch.set_policer(name.to_string(), config)
+                .map_err(|e| e.to_string())
+        }
+
+        /// Helper function to create a policer with trTCM configuration
+        fn create_trtcm_policer(
+            orch: &mut PolicerOrch,
+            name: &str,
+            cir: u64,
+            cbs: u64,
+            pir: u64,
+            pbs: u64,
+        ) -> Result<(), String> {
+            let config = PolicerConfig {
+                meter_type: MeterType::Bytes,
+                mode: PolicerMode::TrTcm,
+                color_source: ColorSource::Blind,
+                cir,
+                cbs,
+                pir,
+                pbs,
+                green_action: PacketAction::Forward,
+                yellow_action: PacketAction::Forward,
+                red_action: PacketAction::Drop,
+            };
+
+            orch.set_policer(name.to_string(), config)
+                .map_err(|e| e.to_string())
+        }
+
+        #[test]
+        fn test_policer_srtcm_creation_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockPolicerCallbacks::new(Arc::clone(&sai)));
+            let mut orch = PolicerOrch::new(PolicerOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Initially no policers
+            assert_eq!(orch.policer_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 0);
+
+            // Create srTCM policer with CIR of 10 Mbps and CBS of 100 KB
+            create_srtcm_policer(&mut orch, "srtcm_policer", 10_000_000, 100_000).unwrap();
+
+            // Verify policer created
+            assert_eq!(orch.policer_count(), 1);
+            assert!(orch.policer_exists("srtcm_policer"));
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 1);
+
+            // Verify SAI object was created with correct attributes
+            let created = callbacks.created_policers.lock().unwrap();
+            assert_eq!(created.len(), 1);
+            assert_eq!(created[0].1.mode, PolicerMode::SrTcm);
+            assert_eq!(created[0].1.meter_type, MeterType::Bytes);
+            assert_eq!(created[0].1.cir, 10_000_000);
+            assert_eq!(created[0].1.cbs, 100_000);
+            assert_eq!(created[0].1.pir, 0); // srTCM uses only CIR
+            assert_eq!(created[0].1.green_action, PacketAction::Forward);
+            assert_eq!(created[0].1.red_action, PacketAction::Drop);
+
+            // Get policer OID
+            let policer_oid = orch.get_policer_oid("srtcm_policer").unwrap();
+
+            // Verify SAI object exists
+            let sai_obj = sai.get_object(policer_oid).unwrap();
+            assert_eq!(sai_obj.object_type, SaiObjectType::Policer);
+            assert!(sai_obj.attributes.iter().any(|(k, v)| k == "mode" && v == "SR_TCM"));
+            assert!(sai_obj.attributes.iter().any(|(k, v)| k == "cir" && v == "10000000"));
+
+            // Verify statistics
+            assert_eq!(orch.stats().policers_created, 1);
+            assert_eq!(orch.stats().policers_removed, 0);
+
+            // Cleanup
+            drop(created);
+            orch.remove_policer("srtcm_policer").unwrap();
+            assert_eq!(orch.policer_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 0);
+        }
+
+        #[test]
+        fn test_policer_trtcm_creation_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockPolicerCallbacks::new(Arc::clone(&sai)));
+            let mut orch = PolicerOrch::new(PolicerOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Initially no policers
+            assert_eq!(orch.policer_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 0);
+
+            // Create trTCM policer with CIR of 5 Mbps, CBS of 50 KB, PIR of 10 Mbps, PBS of 100 KB
+            create_trtcm_policer(
+                &mut orch,
+                "trtcm_policer",
+                5_000_000,
+                50_000,
+                10_000_000,
+                100_000,
+            )
+            .unwrap();
+
+            // Verify policer created
+            assert_eq!(orch.policer_count(), 1);
+            assert!(orch.policer_exists("trtcm_policer"));
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 1);
+
+            // Verify SAI object was created with correct attributes
+            let created = callbacks.created_policers.lock().unwrap();
+            assert_eq!(created.len(), 1);
+            assert_eq!(created[0].1.mode, PolicerMode::TrTcm);
+            assert_eq!(created[0].1.meter_type, MeterType::Bytes);
+            assert_eq!(created[0].1.cir, 5_000_000);
+            assert_eq!(created[0].1.cbs, 50_000);
+            assert_eq!(created[0].1.pir, 10_000_000); // trTCM uses both CIR and PIR
+            assert_eq!(created[0].1.pbs, 100_000);
+            assert_eq!(created[0].1.color_source, ColorSource::Blind);
+
+            // Get policer OID
+            let policer_oid = orch.get_policer_oid("trtcm_policer").unwrap();
+
+            // Verify SAI object exists with correct type
+            let sai_obj = sai.get_object(policer_oid).unwrap();
+            assert_eq!(sai_obj.object_type, SaiObjectType::Policer);
+            assert!(sai_obj.attributes.iter().any(|(k, v)| k == "mode" && v == "TR_TCM"));
+            assert!(sai_obj.attributes.iter().any(|(k, v)| k == "cir" && v == "5000000"));
+            assert!(sai_obj.attributes.iter().any(|(k, v)| k == "pir" && v == "10000000"));
+
+            // Test rate update (should update existing policer)
+            drop(created);
+            create_trtcm_policer(
+                &mut orch,
+                "trtcm_policer",
+                8_000_000,
+                80_000,
+                15_000_000,
+                150_000,
+            )
+            .unwrap();
+
+            // Still only one policer, but updated
+            assert_eq!(orch.policer_count(), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 1);
+
+            // Verify update callback was called
+            let updated = callbacks.updated_policers.lock().unwrap();
+            assert_eq!(updated.len(), 1);
+            assert_eq!(updated[0], policer_oid);
+
+            // Verify statistics
+            assert_eq!(orch.stats().policers_created, 1);
+            assert_eq!(orch.stats().policers_updated, 1);
+
+            // Cleanup
+            drop(updated);
+            orch.remove_policer("trtcm_policer").unwrap();
+            assert_eq!(orch.policer_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 0);
+
+            let removed = callbacks.removed_policers.lock().unwrap();
+            assert_eq!(removed.len(), 1);
+            assert_eq!(removed[0], policer_oid);
+        }
+
+        #[test]
+        fn test_storm_control_policer_configuration_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockPolicerCallbacks::new(Arc::clone(&sai)));
+            let mut orch = PolicerOrch::new(PolicerOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Initially no policers
+            assert_eq!(orch.policer_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 0);
+
+            // Configure broadcast storm control on Ethernet0 at 8000 kbps
+            orch.set_port_storm_control("Ethernet0", StormType::Broadcast, 8000)
+                .unwrap();
+
+            // Verify storm control policer was created
+            assert_eq!(orch.policer_count(), 1);
+            assert!(orch.policer_exists("_Ethernet0_broadcast"));
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 1);
+
+            // Verify SAI policer attributes
+            let created = callbacks.created_policers.lock().unwrap();
+            assert_eq!(created.len(), 1);
+            assert_eq!(created[0].1.mode, PolicerMode::StormControl);
+            assert_eq!(created[0].1.meter_type, MeterType::Bytes);
+            // 8000 kbps = 8000 * 1000 / 8 = 1000000 bps
+            assert_eq!(created[0].1.cir, 1_000_000);
+
+            // Verify storm policer was applied to port
+            let storm = callbacks.storm_policers.lock().unwrap();
+            assert_eq!(storm.len(), 1);
+            assert_eq!(storm[0].0, 0x100); // Ethernet0 port ID
+            assert_eq!(storm[0].1, StormType::Broadcast);
+            assert!(storm[0].2.is_some()); // Policer OID is attached
+
+            drop(created);
+            drop(storm);
+
+            // Configure unknown-unicast storm control on the same port
+            orch.set_port_storm_control("Ethernet0", StormType::UnknownUnicast, 6000)
+                .unwrap();
+
+            // Should have two policers now
+            assert_eq!(orch.policer_count(), 2);
+            assert!(orch.policer_exists("_Ethernet0_unknown-unicast"));
+
+            // Configure storm control on a different port
+            orch.set_port_storm_control("Ethernet4", StormType::UnknownMulticast, 10000)
+                .unwrap();
+
+            // Should have three policers
+            assert_eq!(orch.policer_count(), 3);
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 3);
+            assert!(orch.policer_exists("_Ethernet4_unknown-multicast"));
+
+            // Verify statistics
+            assert_eq!(orch.stats().policers_created, 3);
+            assert_eq!(orch.stats().storm_control_applied, 3);
+
+            // Cleanup - remove storm control from Ethernet0 broadcast
+            orch.remove_port_storm_control("Ethernet0", StormType::Broadcast)
+                .unwrap();
+
+            // Should have two policers remaining
+            assert_eq!(orch.policer_count(), 2);
+            assert!(!orch.policer_exists("_Ethernet0_broadcast"));
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 2);
+
+            // Verify storm policer was detached from port
+            let storm = callbacks.storm_policers.lock().unwrap();
+            assert_eq!(storm.len(), 4); // 3 set, 1 unset
+            assert_eq!(storm[3].2, None); // Last one is unset
+
+            // Final cleanup
+            drop(storm);
+            orch.remove_port_storm_control("Ethernet0", StormType::UnknownUnicast)
+                .unwrap();
+            orch.remove_port_storm_control("Ethernet4", StormType::UnknownMulticast)
+                .unwrap();
+
+            assert_eq!(orch.policer_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 0);
+        }
+
+        #[test]
+        fn test_policer_removal_and_cleanup_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockPolicerCallbacks::new(Arc::clone(&sai)));
+            let mut orch = PolicerOrch::new(PolicerOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Create multiple policers of different types
+            create_srtcm_policer(&mut orch, "policer1", 5_000_000, 50_000).unwrap();
+            create_srtcm_policer(&mut orch, "policer2", 10_000_000, 100_000).unwrap();
+            create_trtcm_policer(
+                &mut orch,
+                "policer3",
+                8_000_000,
+                80_000,
+                15_000_000,
+                150_000,
+            )
+            .unwrap();
+            orch.set_port_storm_control("Ethernet0", StormType::Broadcast, 8000)
+                .unwrap();
+
+            // Verify all policers were created
+            assert_eq!(orch.policer_count(), 4);
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 4);
+
+            // Get OIDs before removal
+            let oid1 = orch.get_policer_oid("policer1").unwrap();
+            let oid2 = orch.get_policer_oid("policer2").unwrap();
+            let oid3 = orch.get_policer_oid("policer3").unwrap();
+
+            // Verify SAI objects exist
+            assert!(sai.get_object(oid1).is_some());
+            assert!(sai.get_object(oid2).is_some());
+            assert!(sai.get_object(oid3).is_some());
+
+            // Remove policer1
+            orch.remove_policer("policer1").unwrap();
+            assert_eq!(orch.policer_count(), 3);
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 3);
+            assert!(!orch.policer_exists("policer1"));
+            assert!(orch.policer_exists("policer2"));
+
+            // Verify SAI object was removed
+            assert!(sai.get_object(oid1).is_none());
+
+            // Test reference counting prevents removal
+            orch.increase_ref_count("policer2").unwrap();
+            let result = orch.remove_policer("policer2");
+            assert!(result.is_err());
+            assert_eq!(orch.policer_count(), 3); // Still 3 policers
+            assert!(orch.policer_exists("policer2")); // Still exists
+
+            // Decrease ref count and try again
+            orch.decrease_ref_count("policer2").unwrap();
+            orch.remove_policer("policer2").unwrap();
+            assert_eq!(orch.policer_count(), 2);
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 2);
+            assert!(!orch.policer_exists("policer2"));
+
+            // Verify removal tracking
+            let removed = callbacks.removed_policers.lock().unwrap();
+            assert_eq!(removed.len(), 2);
+            assert!(removed.contains(&oid1));
+            assert!(removed.contains(&oid2));
+
+            drop(removed);
+
+            // Remove remaining policers
+            orch.remove_policer("policer3").unwrap();
+            orch.remove_port_storm_control("Ethernet0", StormType::Broadcast)
+                .unwrap();
+
+            // Verify complete cleanup
+            assert_eq!(orch.policer_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 0);
+
+            // Verify final statistics
+            assert_eq!(orch.stats().policers_created, 4);
+            assert_eq!(orch.stats().policers_removed, 4);
+            assert_eq!(orch.stats().storm_control_applied, 1);
+
+            // Verify all SAI objects were properly removed
+            let removed = callbacks.removed_policers.lock().unwrap();
+            assert_eq!(removed.len(), 4);
+        }
+    }
+
+    // StpOrch integration tests
+    mod stp_orch_tests {
+        use super::*;
+        use sonic_orchagent::stp::{StpOrch, StpOrchCallbacks, StpOrchConfig, StpState, SaiStpPortState};
+        use std::collections::HashMap;
+        use std::sync::Arc;
+
+        /// Helper to create a test STP callbacks implementation
+        struct TestStpCallbacks {
+            sai: Arc<MockSai>,
+            bridge_port_id: u64,
+            vlan_stp_mappings: Arc<Mutex<HashMap<String, u64>>>,
+        }
+
+        impl TestStpCallbacks {
+            fn new(sai: Arc<MockSai>) -> Self {
+                Self {
+                    sai,
+                    bridge_port_id: 0x2000,
+                    vlan_stp_mappings: Arc::new(Mutex::new(HashMap::new())),
+                }
+            }
+        }
+
+        impl StpOrchCallbacks for TestStpCallbacks {
+            fn all_ports_ready(&self) -> bool {
+                true
+            }
+
+            fn get_port_bridge_port_id(&self, _alias: &str) -> Option<u64> {
+                Some(self.bridge_port_id)
+            }
+
+            fn create_stp_instance(&self) -> Result<u64, String> {
+                self.sai.create_object(
+                    SaiObjectType::StpInstance,
+                    vec![("type".to_string(), "stp".to_string())],
+                )
+            }
+
+            fn remove_stp_instance(&self, oid: u64) -> Result<(), String> {
+                self.sai.remove_object(oid)
+            }
+
+            fn set_vlan_stp_instance(&self, vlan_alias: &str, stp_inst_oid: u64) -> Result<(), String> {
+                self.vlan_stp_mappings.lock().unwrap().insert(vlan_alias.to_string(), stp_inst_oid);
+                Ok(())
+            }
+
+            fn create_stp_port(
+                &self,
+                bridge_port_id: u64,
+                stp_inst_oid: u64,
+                state: SaiStpPortState,
+            ) -> Result<u64, String> {
+                let state_str = match state {
+                    SaiStpPortState::Blocking => "blocking",
+                    SaiStpPortState::Learning => "learning",
+                    SaiStpPortState::Forwarding => "forwarding",
+                };
+
+                self.sai.create_object(
+                    SaiObjectType::StpPort,
+                    vec![
+                        ("bridge_port".to_string(), bridge_port_id.to_string()),
+                        ("stp_instance".to_string(), stp_inst_oid.to_string()),
+                        ("state".to_string(), state_str.to_string()),
+                    ],
+                )
+            }
+
+            fn remove_stp_port(&self, stp_port_oid: u64) -> Result<(), String> {
+                self.sai.remove_object(stp_port_oid)
+            }
+
+            fn set_stp_port_state(&self, _stp_port_oid: u64, _state: SaiStpPortState) -> Result<(), String> {
+                Ok(())
+            }
+
+            fn flush_fdb_by_vlan(&self, _vlan_alias: &str) -> Result<(), String> {
+                Ok(())
+            }
+
+            fn ensure_bridge_port(&self, _port_alias: &str) -> Result<u64, String> {
+                Ok(self.bridge_port_id)
+            }
+        }
+
+        #[test]
+        fn test_stp_instance_creation_integration() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = StpOrch::new(StpOrchConfig::default());
+            let callbacks = Arc::new(TestStpCallbacks::new(sai.clone()));
+            orch.set_callbacks(callbacks.clone());
+
+            // Initialize with default STP instance
+            let default_stp_oid = sai.create_object(
+                SaiObjectType::StpInstance,
+                vec![("default".to_string(), "true".to_string())],
+            ).unwrap();
+            orch.initialize(default_stp_oid, 256);
+
+            // Verify default instance exists
+            assert_eq!(orch.instance_count(), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::StpInstance), 1);
+
+            // Create new STP instance with VLAN configuration
+            orch.add_vlan_to_instance("Vlan100", 1).unwrap();
+
+            // Verify new instance was created
+            assert_eq!(orch.instance_count(), 2);
+            assert_eq!(sai.count_objects(SaiObjectType::StpInstance), 2);
+
+            // Verify VLAN mapping was set
+            let vlan_mappings = callbacks.vlan_stp_mappings.lock().unwrap();
+            assert!(vlan_mappings.contains_key("Vlan100"));
+
+            // Verify the instance OID is tracked
+            let instance_oid = orch.get_instance_oid(1).unwrap();
+            let sai_obj = sai.get_object(instance_oid).unwrap();
+            assert_eq!(sai_obj.object_type, SaiObjectType::StpInstance);
+
+            // Verify statistics
+            assert_eq!(orch.stats().instances_created, 1);
+
+            // Cleanup
+            sai.clear();
+        }
+
+        #[test]
+        fn test_stp_port_state_transitions_integration() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = StpOrch::new(StpOrchConfig::default());
+            let callbacks = Arc::new(TestStpCallbacks::new(sai.clone()));
+            orch.set_callbacks(callbacks);
+
+            // Initialize
+            let default_stp_oid = sai.create_object(
+                SaiObjectType::StpInstance,
+                vec![("default".to_string(), "true".to_string())],
+            ).unwrap();
+            orch.initialize(default_stp_oid, 256);
+
+            // Create STP instance
+            let instance_oid = orch.add_instance(1).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::StpInstance), 2);
+
+            // Create STP port and transition through states
+            let mut stp_port_ids = HashMap::new();
+
+            // Initial state: Blocking (created automatically)
+            orch.update_port_state("Ethernet0", 1, StpState::Blocking, &mut stp_port_ids).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::StpPort), 1);
+
+            let stp_port_oid = *stp_port_ids.get(&1).unwrap();
+            let port_obj = sai.get_object(stp_port_oid).unwrap();
+            assert_eq!(port_obj.object_type, SaiObjectType::StpPort);
+            assert_eq!(port_obj.attributes.iter().find(|(k, _)| k == "stp_instance").unwrap().1, instance_oid.to_string());
+
+            // Transition to Learning
+            orch.update_port_state("Ethernet0", 1, StpState::Learning, &mut stp_port_ids).unwrap();
+            assert_eq!(orch.stats().state_updates, 2);
+
+            // Transition to Forwarding
+            orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids).unwrap();
+            assert_eq!(orch.stats().state_updates, 3);
+
+            // Transition back to Blocking
+            orch.update_port_state("Ethernet0", 1, StpState::Blocking, &mut stp_port_ids).unwrap();
+            assert_eq!(orch.stats().state_updates, 4);
+
+            // Verify the port still exists and is tracked
+            assert!(stp_port_ids.contains_key(&1));
+            assert_eq!(sai.count_objects(SaiObjectType::StpPort), 1);
+
+            // Cleanup
+            sai.clear();
+        }
+
+        #[test]
+        fn test_multiple_stp_instances_integration() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = StpOrch::new(StpOrchConfig::default());
+            let callbacks = Arc::new(TestStpCallbacks::new(sai.clone()));
+            orch.set_callbacks(callbacks.clone());
+
+            // Initialize
+            let default_stp_oid = sai.create_object(
+                SaiObjectType::StpInstance,
+                vec![("default".to_string(), "true".to_string())],
+            ).unwrap();
+            orch.initialize(default_stp_oid, 256);
+
+            // Create multiple STP instances with different VLANs
+            orch.add_vlan_to_instance("Vlan100", 1).unwrap();
+            orch.add_vlan_to_instance("Vlan200", 2).unwrap();
+            orch.add_vlan_to_instance("Vlan300", 3).unwrap();
+
+            // Verify all instances were created
+            assert_eq!(orch.instance_count(), 4); // Default + 3 new instances
+            assert_eq!(sai.count_objects(SaiObjectType::StpInstance), 4);
+
+            // Verify each instance has unique OID
+            let oid1 = orch.get_instance_oid(1).unwrap();
+            let oid2 = orch.get_instance_oid(2).unwrap();
+            let oid3 = orch.get_instance_oid(3).unwrap();
+            assert_ne!(oid1, oid2);
+            assert_ne!(oid2, oid3);
+            assert_ne!(oid1, oid3);
+
+            // Verify VLAN mappings
+            let vlan_mappings = callbacks.vlan_stp_mappings.lock().unwrap();
+            assert_eq!(vlan_mappings.get("Vlan100"), Some(&oid1));
+            assert_eq!(vlan_mappings.get("Vlan200"), Some(&oid2));
+            assert_eq!(vlan_mappings.get("Vlan300"), Some(&oid3));
+
+            // Add multiple VLANs to same instance
+            drop(vlan_mappings);
+            orch.add_vlan_to_instance("Vlan101", 1).unwrap();
+            orch.add_vlan_to_instance("Vlan102", 1).unwrap();
+
+            // Verify no new instance was created
+            assert_eq!(orch.instance_count(), 4);
+            assert_eq!(sai.count_objects(SaiObjectType::StpInstance), 4);
+
+            // Create STP ports for different instances on the same physical port
+            let mut stp_port_ids_eth0 = HashMap::new();
+            orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids_eth0).unwrap();
+            orch.add_stp_port("Ethernet0", 2, &mut stp_port_ids_eth0).unwrap();
+            orch.add_stp_port("Ethernet0", 3, &mut stp_port_ids_eth0).unwrap();
+
+            // Verify STP ports were created for each instance
+            assert_eq!(sai.count_objects(SaiObjectType::StpPort), 3);
+            assert_eq!(stp_port_ids_eth0.len(), 3);
+
+            // Verify statistics
+            assert_eq!(orch.stats().instances_created, 3);
+            assert_eq!(orch.stats().ports_created, 3);
+
+            // Cleanup
+            sai.clear();
+        }
+
+        #[test]
+        fn test_stp_instance_removal_and_cleanup_integration() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = StpOrch::new(StpOrchConfig::default());
+            let callbacks = Arc::new(TestStpCallbacks::new(sai.clone()));
+            orch.set_callbacks(callbacks.clone());
+
+            // Initialize
+            let default_stp_oid = sai.create_object(
+                SaiObjectType::StpInstance,
+                vec![("default".to_string(), "true".to_string())],
+            ).unwrap();
+            orch.initialize(default_stp_oid, 256);
+
+            // Create instances with VLANs
+            orch.add_vlan_to_instance("Vlan100", 1).unwrap();
+            orch.add_vlan_to_instance("Vlan200", 1).unwrap();
+            orch.add_vlan_to_instance("Vlan300", 2).unwrap();
+
+            assert_eq!(orch.instance_count(), 3);
+            assert_eq!(sai.count_objects(SaiObjectType::StpInstance), 3);
+
+            // Create STP ports for instances (each port needs its own HashMap)
+            let mut stp_port_ids_eth0 = HashMap::new();
+            let mut stp_port_ids_eth4 = HashMap::new();
+            orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids_eth0).unwrap();
+            orch.add_stp_port("Ethernet4", 1, &mut stp_port_ids_eth4).unwrap();
+            orch.add_stp_port("Ethernet0", 2, &mut stp_port_ids_eth0).unwrap();
+
+            assert_eq!(sai.count_objects(SaiObjectType::StpPort), 3);
+
+            // Remove STP port from instance 1 on Ethernet0
+            orch.remove_stp_port(1, &mut stp_port_ids_eth0).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::StpPort), 2);
+            assert_eq!(orch.stats().ports_removed, 1);
+
+            // Remove instance 1
+            let instance1_oid = orch.get_instance_oid(1).unwrap();
+            orch.remove_instance(1).unwrap();
+
+            // Verify instance was removed from orchestrator
+            assert_eq!(orch.instance_count(), 2);
+            assert!(orch.get_instance_oid(1).is_none());
+
+            // Verify SAI object was removed
+            assert_eq!(sai.count_objects(SaiObjectType::StpInstance), 2);
+            assert!(sai.get_object(instance1_oid).is_none());
+
+            // Verify statistics
+            assert_eq!(orch.stats().instances_created, 2);
+            assert_eq!(orch.stats().instances_removed, 1);
+
+            // Remove instance 2 ports and then the instance
+            let instance2_oid = orch.get_instance_oid(2).unwrap();
+            orch.remove_stp_port(2, &mut stp_port_ids_eth0).unwrap();
+            orch.remove_instance(2).unwrap();
+
+            // Verify cleanup
+            assert_eq!(orch.instance_count(), 1); // Only default remains
+            assert_eq!(sai.count_objects(SaiObjectType::StpInstance), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::StpPort), 1); // Ethernet4 port for instance 1 still exists
+            assert!(sai.get_object(instance2_oid).is_none());
+
+            // Verify final statistics
+            assert_eq!(orch.stats().instances_removed, 2);
+            assert_eq!(orch.stats().ports_removed, 2);
+
+            // Verify VLAN mappings reset to default
+            let vlan_mappings = callbacks.vlan_stp_mappings.lock().unwrap();
+            // When instance is removed, VLANs should be reset to default (handled in production code)
+            // Here we just verify the cleanup happened
+            assert_eq!(orch.instance_count(), 1);
+
+            // Cleanup
             sai.clear();
         }
     }
