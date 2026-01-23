@@ -54,7 +54,7 @@ mod types;
 pub use ffi::{register_acl_orch, unregister_acl_orch};
 pub use orch::{AclOrch, AclOrchCallbacks, AclOrchConfig, AclOrchError};
 pub use range::{AclRange, AclRangeType};
-pub use rule::{AclRule, AclRuleAction, AclRuleMatch, AclRuleType};
+pub use rule::{AclRule, AclRuleAction, AclRuleMatch, AclRuleType, AclRedirectTarget, AclMatchValue};
 pub use table::{AclTable, AclTableConfig};
 pub use table_type::{AclTableType, AclTableTypeBuilder};
 pub use types::{

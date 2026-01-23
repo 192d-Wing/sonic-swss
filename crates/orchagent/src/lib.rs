@@ -98,14 +98,14 @@ pub use route::{
 pub use ports::{
     Port, PortAdminState, PortConfig, PortConfigError, PortFecMode, PortOperState,
     PortRole, PortsOrch, PortsOrchCallbacks, PortsOrchConfig, PortsOrchError, PortType,
-    QueueInfo, QueueType, SchedulerInfo, register_ports_orch, unregister_ports_orch,
+    QueueInfo, QueueType, SchedulerInfo, VlanTaggingMode, register_ports_orch, unregister_ports_orch,
 };
 
 // Re-export AclOrch and related types
 pub use acl::{
-    AclActionType, AclBindPointType, AclMatchField, AclOrch, AclOrchCallbacks,
+    AclActionType, AclBindPointType, AclMatchField, AclMatchValue, AclOrch, AclOrchCallbacks,
     AclOrchConfig, AclOrchError, AclPacketAction, AclPriority, AclRange,
-    AclRangeType, AclRule, AclRuleAction, AclRuleId, AclRuleMatch, AclRuleType,
+    AclRangeType, AclRedirectTarget, AclRule, AclRuleAction, AclRuleId, AclRuleMatch, AclRuleType,
     AclStage, AclTable, AclTableConfig, AclTableId, AclTableType, AclTableTypeBuilder,
     MetaDataValue, register_acl_orch, unregister_acl_orch,
 };

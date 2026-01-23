@@ -51,5 +51,5 @@ pub use port::{Port, PortType, PortRole, PortFecMode, PortAdminState, PortOperSt
 pub use queue::{QueueInfo, QueueType, SchedulerInfo};
 pub use types::{
     PortInitState, PortTable, LagTable, VlanTable, GearboxPortTable,
-    SystemPortTable, PortSupportedSpeeds,
+    SystemPortTable, PortSupportedSpeeds, VlanTaggingMode,
 };
