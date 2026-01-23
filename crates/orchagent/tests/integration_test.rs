@@ -9369,15 +9369,29 @@ mod integration_tests {
     // SwitchOrch integration tests
     mod switch_orch_tests {
         use super::*;
-        use sonic_orchagent::switch::SwitchOrch;
-        use sonic_orchagent::switch::SwitchOrchConfig;
+        use sonic_orchagent::switch::{SwitchOrch, SwitchOrchCallbacks, SwitchOrchConfig, SwitchCapabilities, SwitchHashConfig, SwitchState};
+
+        type Result<T> = std::result::Result<T, sonic_orchagent::switch::SwitchOrchError>;
+
+        struct DummySwitchCallbacks;
+        impl SwitchOrchCallbacks for DummySwitchCallbacks {
+            fn initialize_switch(&self, _caps: &SwitchCapabilities) -> Result<SwitchState> { Ok(SwitchState::default()) }
+            fn set_hash_algorithm(&self, _is_ecmp: bool, _config: &SwitchHashConfig) -> Result<()> { Ok(()) }
+            fn get_capabilities(&self) -> Result<SwitchCapabilities> { Ok(SwitchCapabilities::default()) }
+            fn set_switch_attribute(&self, _name: &str, _value: &str) -> Result<()> { Ok(()) }
+            fn get_switch_attribute(&self, _name: &str) -> Result<String> { Ok(String::new()) }
+            fn on_switch_initialized(&self, _state: &SwitchState) {}
+            fn on_hash_updated(&self, _is_ecmp: bool) {}
+            fn on_warm_restart_begin(&self) {}
+            fn on_warm_restart_end(&self, _success: bool) {}
+        }
 
         /// Test creating a basic SwitchOrch instance with default configuration
         #[test]
         fn test_switch_config_creation_integration() {
             let sai = MockSai::new();
             let config = SwitchOrchConfig::default();
-            let orch = SwitchOrch::new(config);
+            let orch: SwitchOrch<DummySwitchCallbacks> = SwitchOrch::new(config);
 
             assert!(!orch.is_initialized());
             assert!(orch.get_state().is_none());
@@ -9415,7 +9429,7 @@ mod integration_tests {
                 warm_restart_read_timer: 60,
                 warm_restart_timer: 120,
             };
-            let orch = SwitchOrch::new(config);
+            let orch: SwitchOrch<DummySwitchCallbacks> = SwitchOrch::new(config);
 
             let switch_oid = sai.create_object(
                 SaiObjectType::Switch,
@@ -9467,7 +9481,7 @@ mod integration_tests {
             let sai = MockSai::new();
 
             let config1 = SwitchOrchConfig::default();
-            let orch1 = SwitchOrch::new(config1);
+            let orch1: SwitchOrch<DummySwitchCallbacks> = SwitchOrch::new(config1);
 
             let switch_oid_1 = sai.create_object(
                 SaiObjectType::Switch,
@@ -9482,7 +9496,7 @@ mod integration_tests {
                 warm_restart_read_timer: 45,
                 warm_restart_timer: 90,
             };
-            let orch2 = SwitchOrch::new(config2);
+            let orch2: SwitchOrch<DummySwitchCallbacks> = SwitchOrch::new(config2);
 
             let switch_oid_2 = sai.create_object(
                 SaiObjectType::Switch,
@@ -10299,7 +10313,60 @@ mod integration_tests {
             }
         }
 
-        impl CoppOrchCallbacks for MockCoppCallbacks {}
+        type CoppResult<T> = std::result::Result<T, sonic_orchagent::copp::CoppOrchError>;
+
+        impl CoppOrchCallbacks for MockCoppCallbacks {
+            fn create_trap(&self, key: &CoppTrapKey, config: &CoppTrapConfig) -> CoppResult<u64> {
+                let trap_oid = self.sai.create_object(
+                    SaiObjectType::CoppTrap,
+                    vec![
+                        ("trap_id".to_string(), key.trap_id.clone()),
+                        ("action".to_string(), format!("{:?}", config.trap_action)),
+                        ("priority".to_string(), config.trap_priority.unwrap_or(0).to_string()),
+                    ],
+                ).map_err(|e| sonic_orchagent::copp::CoppOrchError::SaiError(e.to_string()))?;
+                Ok(trap_oid)
+            }
+
+            fn remove_trap(&self, trap_id: u64) -> CoppResult<()> {
+                self.sai.remove_object(trap_id)
+                    .map_err(|e| sonic_orchagent::copp::CoppOrchError::SaiError(e.to_string()))
+            }
+
+            fn update_trap_rate(&self, _trap_id: u64, _cir: u64, _cbs: u64) -> CoppResult<()> {
+                Ok(())
+            }
+
+            fn get_trap_stats(&self, _trap_id: u64) -> CoppResult<(u64, u64)> {
+                Ok((0, 0))
+            }
+
+            fn on_trap_created(&self, _key: &CoppTrapKey, _trap_id: u64) {}
+            fn on_trap_removed(&self, _key: &CoppTrapKey) {}
+        }
+
+        struct DummyCoppCallbacks;
+
+        impl CoppOrchCallbacks for DummyCoppCallbacks {
+            fn create_trap(&self, _key: &CoppTrapKey, _config: &CoppTrapConfig) -> CoppResult<u64> {
+                Ok(0x1000)
+            }
+
+            fn remove_trap(&self, _trap_id: u64) -> CoppResult<()> {
+                Ok(())
+            }
+
+            fn update_trap_rate(&self, _trap_id: u64, _cir: u64, _cbs: u64) -> CoppResult<()> {
+                Ok(())
+            }
+
+            fn get_trap_stats(&self, _trap_id: u64) -> CoppResult<(u64, u64)> {
+                Ok((0, 0))
+            }
+
+            fn on_trap_created(&self, _key: &CoppTrapKey, _trap_id: u64) {}
+            fn on_trap_removed(&self, _key: &CoppTrapKey) {}
+        }
 
         fn create_trap_config(
             trap_action: CoppTrapAction,
@@ -10326,7 +10393,7 @@ mod integration_tests {
         fn test_copp_trap_config_integration() {
             let sai = Arc::new(MockSai::new());
             let _callbacks = Arc::new(MockCoppCallbacks::new(sai.clone()));
-            let mut orch = CoppOrch::new(CoppOrchConfig::default());
+            let orch: CoppOrch<DummyCoppCallbacks> = CoppOrch::new(CoppOrchConfig::default());
 
             // Verify no traps exist initially
             assert_eq!(orch.stats().stats.traps_created, 0);
@@ -10447,7 +10514,7 @@ mod integration_tests {
         fn test_copp_multiple_traps_configuration_integration() {
             let sai = Arc::new(MockSai::new());
             let _callbacks = Arc::new(MockCoppCallbacks::new(sai.clone()));
-            let mut orch = CoppOrch::new(CoppOrchConfig::default());
+            let orch: CoppOrch<DummyCoppCallbacks> = CoppOrch::new(CoppOrchConfig::default());
 
             // Define multiple trap types with different configurations
             let trap_configs = vec![
@@ -10600,8 +10667,33 @@ mod integration_tests {
     // IcmpOrch integration tests
     mod icmp_orch_tests {
         use super::*;
-        use sonic_orchagent::icmp::{IcmpOrch, IcmpOrchConfig, IcmpEchoEntry, IcmpEchoKey, IcmpMode};
+        use sonic_orchagent::icmp::{IcmpOrch, IcmpOrchConfig, IcmpOrchCallbacks, IcmpEchoEntry, IcmpEchoKey, IcmpMode, IcmpStats, IcmpRedirectConfig, NeighborDiscoveryConfig};
         use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+        type IcmpResult<T> = std::result::Result<T, sonic_orchagent::icmp::IcmpOrchError>;
+
+        struct DummyIcmpCallbacks;
+
+        impl IcmpOrchCallbacks for DummyIcmpCallbacks {
+            fn configure_icmp_redirect(&self, _config: &IcmpRedirectConfig) -> IcmpResult<()> {
+                Ok(())
+            }
+
+            fn configure_neighbor_discovery(&self, _config: &NeighborDiscoveryConfig) -> IcmpResult<()> {
+                Ok(())
+            }
+
+            fn process_redirect(&self, _src_ip: &str, _dst_ip: &str, _gateway_ip: &str) -> IcmpResult<()> {
+                Ok(())
+            }
+
+            fn get_icmp_statistics(&self) -> IcmpResult<IcmpStats> {
+                Ok(IcmpStats::default())
+            }
+
+            fn on_redirect_processed(&self, _src_ip: &str) {}
+            fn on_neighbor_discovery_complete(&self, _neighbor_ip: &str) {}
+        }
 
         fn create_icmp_echo_session_with_sai(
             vrf_name: &str,
@@ -10635,7 +10727,7 @@ mod integration_tests {
         fn test_icmp_echo_session_integration() {
             let sai = MockSai::new();
             let config = IcmpOrchConfig::default();
-            let orch = IcmpOrch::new(config);
+            let orch: IcmpOrch<DummyIcmpCallbacks> = IcmpOrch::new(config);
 
             // Verify no ICMP echo sessions exist initially
             assert_eq!(sai.count_objects(SaiObjectType::IcmpEchoSession), 0);
@@ -10670,7 +10762,7 @@ mod integration_tests {
         fn test_icmp_echo_configuration_integration() {
             let sai = MockSai::new();
             let config = IcmpOrchConfig::default();
-            let orch = IcmpOrch::new(config);
+            let orch: IcmpOrch<DummyIcmpCallbacks> = IcmpOrch::new(config);
 
             // Create multiple ICMP echo sessions with different configurations
             let ipv4_enabled = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
@@ -10706,7 +10798,7 @@ mod integration_tests {
         fn test_multiple_icmp_echo_sessions_integration() {
             let sai = MockSai::new();
             let config = IcmpOrchConfig::default();
-            let orch = IcmpOrch::new(config);
+            let orch: IcmpOrch<DummyIcmpCallbacks> = IcmpOrch::new(config);
 
             // Create multiple ICMP echo sessions in default VRF
             let ips = vec![
@@ -10753,7 +10845,7 @@ mod integration_tests {
         fn test_icmp_echo_removal_and_cleanup_integration() {
             let sai = MockSai::new();
             let config = IcmpOrchConfig::default();
-            let orch = IcmpOrch::new(config);
+            let orch: IcmpOrch<DummyIcmpCallbacks> = IcmpOrch::new(config);
 
             // Create initial ICMP echo sessions
             let ip1 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
@@ -12241,6 +12333,315 @@ mod integration_tests {
             assert!(sai.get_object(rule_oid).is_none());
             assert!(sai.get_object(table_oid).is_none());
             assert!(sai.get_object(hash_oid).is_none());
+
+            sai.clear();
+        }
+    }
+
+    // ============================================================================
+    // MIRROR ORCHESTRATION INTEGRATION TESTS
+    // ============================================================================
+    mod mirror_orch_tests {
+        use super::*;
+        use sonic_orchagent::mirror::{
+            MirrorOrch, MirrorOrchCallbacks, MirrorOrchConfig, MirrorSessionConfig,
+            MirrorSessionType, MirrorDirection,
+        };
+        use sonic_sai::types::RawSaiObjectId;
+
+        type Result<T> = std::result::Result<T, sonic_orchagent::mirror::MirrorOrchError>;
+
+        struct MockMirrorCallbacks {
+            sai: Arc<MockSai>,
+        }
+
+        impl MirrorOrchCallbacks for MockMirrorCallbacks {
+            fn create_mirror_session(&self, config: &MirrorSessionConfig) -> Result<RawSaiObjectId> {
+                let session_type = match config.session_type {
+                    MirrorSessionType::Span => "SPAN",
+                    MirrorSessionType::Erspan => "ERSPAN",
+                };
+                let oid = self.sai.create_object(
+                    SaiObjectType::MirrorSession,
+                    vec![
+                        ("type".to_string(), session_type.to_string()),
+                        ("dst_port".to_string(), config.dst_port.clone().unwrap_or_default()),
+                    ],
+                ).map_err(|e| sonic_orchagent::mirror::MirrorOrchError::SaiError(e))?;
+                Ok(oid)
+            }
+            fn remove_mirror_session(&self, session_id: RawSaiObjectId) -> Result<()> {
+                self.sai.remove_object(session_id)
+                    .map_err(|e| sonic_orchagent::mirror::MirrorOrchError::SaiError(e))
+            }
+            fn update_mirror_session(&self, _session_id: RawSaiObjectId, _config: &MirrorSessionConfig) -> Result<()> { Ok(()) }
+            fn get_mirror_sessions_by_type(&self, _session_type: MirrorSessionType) -> Result<Vec<RawSaiObjectId>> { Ok(vec![]) }
+            fn on_session_created(&self, _name: &str, _session_id: RawSaiObjectId) {}
+            fn on_session_removed(&self, _name: &str) {}
+        }
+
+        #[test]
+        fn test_mirror_span_session_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockMirrorCallbacks { sai: sai.clone() });
+            let mut orch: MirrorOrch<MockMirrorCallbacks> = MirrorOrch::new(MirrorOrchConfig::default())
+                .with_callbacks(callbacks);
+
+            let config = MirrorSessionConfig {
+                session_type: MirrorSessionType::Span,
+                direction: MirrorDirection::Both,
+                dst_port: Some("Ethernet0".to_string()),
+                src_ip: None,
+                dst_ip: None,
+            };
+
+            let result = orch.create_session("span_session".into(), config);
+            assert!(result.is_ok());
+            assert_eq!(sai.count_objects(SaiObjectType::MirrorSession), 1);
+            assert_eq!(orch.stats().sessions_created, 1);
+
+            let session = orch.get_session("span_session").unwrap();
+            assert_eq!(session.config.session_type, MirrorSessionType::Span);
+
+            sai.clear();
+        }
+
+        #[test]
+        fn test_mirror_erspan_session_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockMirrorCallbacks { sai: sai.clone() });
+            let mut orch: MirrorOrch<MockMirrorCallbacks> = MirrorOrch::new(MirrorOrchConfig::default())
+                .with_callbacks(callbacks);
+
+            let config = MirrorSessionConfig {
+                session_type: MirrorSessionType::Erspan,
+                direction: MirrorDirection::Rx,
+                dst_port: None,
+                src_ip: None,
+                dst_ip: None,
+            };
+
+            let result = orch.create_session("erspan_session".into(), config);
+            assert!(result.is_ok());
+            assert_eq!(sai.count_objects(SaiObjectType::MirrorSession), 1);
+
+            let obj = sai.get_object(result.unwrap()).unwrap();
+            assert!(obj.attributes.iter().any(|(k, v)| k == "type" && v == "ERSPAN"));
+
+            sai.clear();
+        }
+
+        #[test]
+        fn test_mirror_multiple_sessions_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockMirrorCallbacks { sai: sai.clone() });
+            let mut orch: MirrorOrch<MockMirrorCallbacks> = MirrorOrch::new(MirrorOrchConfig::default())
+                .with_callbacks(callbacks);
+
+            for i in 0..3 {
+                let config = MirrorSessionConfig {
+                    session_type: MirrorSessionType::Span,
+                    direction: MirrorDirection::Both,
+                    dst_port: Some(format!("Ethernet{}", i * 4)),
+                    src_ip: None,
+                    dst_ip: None,
+                };
+                assert!(orch.create_session(format!("session_{}", i), config).is_ok());
+            }
+
+            assert_eq!(sai.count_objects(SaiObjectType::MirrorSession), 3);
+            assert_eq!(orch.session_count(), 3);
+            assert_eq!(orch.stats().sessions_active, 3);
+
+            sai.clear();
+        }
+
+        #[test]
+        fn test_mirror_session_removal_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockMirrorCallbacks { sai: sai.clone() });
+            let mut orch: MirrorOrch<MockMirrorCallbacks> = MirrorOrch::new(MirrorOrchConfig::default())
+                .with_callbacks(callbacks);
+
+            let config = MirrorSessionConfig {
+                session_type: MirrorSessionType::Span,
+                direction: MirrorDirection::Tx,
+                dst_port: Some("Ethernet8".to_string()),
+                src_ip: None,
+                dst_ip: None,
+            };
+
+            assert!(orch.create_session("to_remove".into(), config).is_ok());
+            assert_eq!(sai.count_objects(SaiObjectType::MirrorSession), 1);
+
+            assert!(orch.remove_session("to_remove").is_ok());
+            assert_eq!(sai.count_objects(SaiObjectType::MirrorSession), 0);
+            assert_eq!(orch.stats().sessions_removed, 1);
+            assert!(orch.get_session("to_remove").is_none());
+
+            sai.clear();
+        }
+    }
+
+    // ============================================================================
+    // FDB ORCHESTRATION INTEGRATION TESTS
+    // ============================================================================
+    mod fdb_orch_tests {
+        use super::*;
+        use sonic_orchagent::fdb::{
+            FdbOrch, FdbOrchCallbacks, FdbOrchConfig, FdbKey, FdbEntry,
+            FdbEntryType, FdbOrigin, MacAddress,
+        };
+
+        type Result<T> = std::result::Result<T, sonic_orchagent::fdb::FdbOrchError>;
+
+        struct MockFdbCallbacks {
+            sai: Arc<MockSai>,
+        }
+
+        impl FdbOrchCallbacks for MockFdbCallbacks {
+            fn add_fdb_entry(&self, entry: &FdbEntry) -> Result<()> {
+                self.sai.create_object(
+                    SaiObjectType::FdbEntry,
+                    vec![
+                        ("mac".to_string(), entry.key.mac.to_string()),
+                        ("vlan".to_string(), entry.key.vlan_id.to_string()),
+                        ("port".to_string(), entry.port_name.clone()),
+                    ],
+                ).map_err(|e| sonic_orchagent::fdb::FdbOrchError::SaiError(e))?;
+                Ok(())
+            }
+            fn remove_fdb_entry(&self, key: &FdbKey) -> Result<()> {
+                // Find and remove the object
+                let objects = self.sai.objects.lock().unwrap();
+                let found = objects.iter().find(|obj| {
+                    obj.object_type == SaiObjectType::FdbEntry &&
+                    obj.attributes.iter().any(|(k, v)| k == "mac" && v == &key.mac.to_string())
+                });
+                if let Some(obj) = found {
+                    let oid = obj.oid;
+                    drop(objects);
+                    self.sai.remove_object(oid)
+                        .map_err(|e| sonic_orchagent::fdb::FdbOrchError::SaiError(e))?;
+                }
+                Ok(())
+            }
+            fn update_fdb_entry(&self, _key: &FdbKey, _entry: &FdbEntry) -> Result<()> { Ok(()) }
+            fn get_fdb_entry(&self, _key: &FdbKey) -> Result<Option<FdbEntry>> { Ok(None) }
+            fn flush_entries_by_port(&self, _port: Option<&str>) -> Result<u32> { Ok(0) }
+            fn flush_entries_by_vlan(&self, _vlan: Option<u16>) -> Result<u32> { Ok(0) }
+            fn on_fdb_entry_added(&self, _entry: &FdbEntry) {}
+            fn on_fdb_entry_removed(&self, _key: &FdbKey) {}
+            fn on_fdb_flush(&self, _port: Option<&str>, _vlan: Option<u16>, _count: u32) {}
+        }
+
+        fn create_test_entry(mac_bytes: [u8; 6], vlan_id: u16, port: &str) -> FdbEntry {
+            FdbEntry {
+                key: FdbKey::new(MacAddress::new(mac_bytes), vlan_id),
+                port_name: port.to_string(),
+                bridge_port_oid: 0,
+                entry_type: FdbEntryType::Static,
+                origin: FdbOrigin::Provisioned,
+                remote_ip: None,
+                esi: None,
+                vni: None,
+            }
+        }
+
+        #[test]
+        fn test_fdb_entry_creation_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockFdbCallbacks { sai: sai.clone() });
+            let mut orch: FdbOrch<MockFdbCallbacks> = FdbOrch::new(FdbOrchConfig::default())
+                .with_callbacks(callbacks);
+
+            let entry = create_test_entry([0x00, 0x11, 0x22, 0x33, 0x44, 0x55], 100, "Ethernet0");
+            let key = entry.key.clone();
+
+            let result = orch.add_entry(entry);
+            assert!(result.is_ok());
+            assert_eq!(sai.count_objects(SaiObjectType::FdbEntry), 1);
+            assert!(orch.get_entry(&key).is_some());
+
+            sai.clear();
+        }
+
+        #[test]
+        fn test_fdb_multiple_entries_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockFdbCallbacks { sai: sai.clone() });
+            let mut orch: FdbOrch<MockFdbCallbacks> = FdbOrch::new(FdbOrchConfig::default())
+                .with_callbacks(callbacks);
+
+            for i in 0..5 {
+                let entry = create_test_entry(
+                    [0x00, 0x11, 0x22, 0x33, 0x44, i as u8],
+                    100,
+                    &format!("Ethernet{}", i * 4)
+                );
+                assert!(orch.add_entry(entry).is_ok());
+            }
+
+            assert_eq!(sai.count_objects(SaiObjectType::FdbEntry), 5);
+            assert_eq!(orch.entry_count(), 5);
+
+            sai.clear();
+        }
+
+        #[test]
+        fn test_fdb_entry_removal_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockFdbCallbacks { sai: sai.clone() });
+            let mut orch: FdbOrch<MockFdbCallbacks> = FdbOrch::new(FdbOrchConfig::default())
+                .with_callbacks(callbacks);
+
+            let entry = create_test_entry([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF], 200, "Ethernet8");
+            let key = entry.key.clone();
+
+            assert!(orch.add_entry(entry).is_ok());
+            assert_eq!(sai.count_objects(SaiObjectType::FdbEntry), 1);
+
+            assert!(orch.remove_entry(&key).is_ok());
+            assert_eq!(sai.count_objects(SaiObjectType::FdbEntry), 0);
+            assert!(orch.get_entry(&key).is_none());
+
+            sai.clear();
+        }
+
+        #[test]
+        fn test_fdb_vlan_filtering_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockFdbCallbacks { sai: sai.clone() });
+            let mut orch: FdbOrch<MockFdbCallbacks> = FdbOrch::new(FdbOrchConfig::default())
+                .with_callbacks(callbacks);
+
+            // Add entries on VLAN 100
+            for i in 0..3 {
+                let entry = create_test_entry(
+                    [0x00, 0x00, 0x00, 0x00, 0x01, i as u8],
+                    100,
+                    &format!("Ethernet{}", i)
+                );
+                assert!(orch.add_entry(entry).is_ok());
+            }
+
+            // Add entries on VLAN 200
+            for i in 0..2 {
+                let entry = create_test_entry(
+                    [0x00, 0x00, 0x00, 0x00, 0x02, i as u8],
+                    200,
+                    &format!("Ethernet{}", i + 10)
+                );
+                assert!(orch.add_entry(entry).is_ok());
+            }
+
+            assert_eq!(sai.count_objects(SaiObjectType::FdbEntry), 5);
+
+            let vlan100_entries = orch.get_by_vlan(100);
+            assert_eq!(vlan100_entries.len(), 3);
+
+            let vlan200_entries = orch.get_by_vlan(200);
+            assert_eq!(vlan200_entries.len(), 2);
 
             sai.clear();
         }
