@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome, audit_log};
 
 use super::group::{FlexCounterGroup, FlexCounterGroupMap};
 use super::state::{
@@ -415,6 +416,20 @@ impl FlexCounterOrch {
                     .await?;
             }
 
+            let record = AuditRecord::new(
+                AuditCategory::ConfigurationChange,
+                "FlexCounterOrch",
+                format!("set_polling_interval: {}", group),
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(format!("{}", group))
+            .with_object_type("flex_counter_group")
+            .with_details(serde_json::json!({
+                "poll_interval_ms": interval_ms,
+                "gearbox": gearbox,
+            }));
+            audit_log!(record);
+
             self.group_map.set_poll_interval(group, interval_ms);
         }
 
@@ -439,6 +454,21 @@ impl FlexCounterOrch {
                     .await?;
             }
 
+            let record = AuditRecord::new(
+                AuditCategory::ResourceModify,
+                "FlexCounterOrch",
+                format!("{}_group: {}", if enable { "enable" } else { "disable" }, group),
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(format!("{}", group))
+            .with_object_type("flex_counter_group")
+            .with_details(serde_json::json!({
+                "enabled": enable,
+                "sai_group": sai_group,
+                "gearbox": gearbox,
+            }));
+            audit_log!(record);
+
             self.group_map.set_enabled(group, enable);
             self.update_state_flags(group, enable);
 
@@ -458,6 +488,20 @@ impl FlexCounterOrch {
             if let Some(size) = size {
                 debug!("Setting bulk chunk size for {} to {}", group, size);
                 callbacks.set_bulk_chunk_size(sai_group, Some(size)).await?;
+
+                let record = AuditRecord::new(
+                    AuditCategory::ConfigurationChange,
+                    "FlexCounterOrch",
+                    format!("set_bulk_chunk_size: {}", group),
+                )
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("{}", group))
+                .with_object_type("flex_counter_group")
+                .with_details(serde_json::json!({
+                    "chunk_size": size,
+                }));
+                audit_log!(record);
+
                 self.group_map.set_bulk_chunk_size(group, size);
                 self.state.groups_with_bulk_chunk_size.insert(group);
             }
@@ -465,6 +509,17 @@ impl FlexCounterOrch {
             // Clear bulk chunk size if it was previously set but now removed
             debug!("Clearing bulk chunk size for {}", group);
             callbacks.set_bulk_chunk_size(sai_group, None).await?;
+
+            let record = AuditRecord::new(
+                AuditCategory::ConfigurationChange,
+                "FlexCounterOrch",
+                format!("clear_bulk_chunk_size: {}", group),
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(format!("{}", group))
+            .with_object_type("flex_counter_group");
+            audit_log!(record);
+
             self.group_map.clear_bulk_chunk_size(group);
             self.state.groups_with_bulk_chunk_size.remove(&group);
         }

@@ -1,19 +1,28 @@
 //! NVGRE tunnel orchestration logic.
 
 use super::types::{MapType, NvgreTunnelConfig, NvgreTunnelMapConfig, NvgreTunnelMapEntry, TunnelSaiIds, NVGRE_VSID_MAX_VALUE};
+use crate::{audit_log, audit::{AuditCategory, AuditOutcome, AuditRecord}};
 use sonic_sai::types::RawSaiObjectId;
 use sonic_types::IpAddress;
 use std::collections::HashMap;
 use std::sync::Arc;
+use thiserror::Error;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum NvgreOrchError {
+    #[error("Tunnel not found: {0}")]
     TunnelNotFound(String),
+    #[error("Tunnel already exists: {0}")]
     TunnelExists(String),
+    #[error("Map entry not found: {0}")]
     MapEntryNotFound(String),
+    #[error("Map entry already exists: {0}")]
     MapEntryExists(String),
+    #[error("VLAN not found: {0}")]
     VlanNotFound(u16),
+    #[error("Invalid VSID: {0}")]
     InvalidVsid(u32),
+    #[error("SAI error: {0}")]
     SaiError(String),
 }
 
@@ -110,7 +119,15 @@ impl NvgreOrch {
 
     pub fn create_tunnel(&mut self, config: NvgreTunnelConfig) -> Result<(), NvgreOrchError> {
         if self.tunnels.contains_key(&config.name) {
-            return Err(NvgreOrchError::TunnelExists(config.name.clone()));
+            let err = NvgreOrchError::TunnelExists(config.name.clone());
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "NvgreOrch", "create_tunnel")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(config.name)
+                    .with_object_type("nvgre_tunnel")
+                    .with_error(err.to_string())
+            );
+            return Err(err);
         }
 
         let callbacks = self.callbacks.as_ref()
@@ -120,34 +137,105 @@ impl NvgreOrch {
 
         // Create mappers for VLAN and BRIDGE
         for map_type in &[MapType::Vlan, MapType::Bridge] {
-            let encap_id = callbacks.create_tunnel_map(*map_type, true)
-                .map_err(NvgreOrchError::SaiError)?;
-            let decap_id = callbacks.create_tunnel_map(*map_type, false)
-                .map_err(NvgreOrchError::SaiError)?;
+            if let Err(e) = callbacks.create_tunnel_map(*map_type, true) {
+                let err = NvgreOrchError::SaiError(e);
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceCreate, "NvgreOrch", "create_tunnel")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(config.name.clone())
+                        .with_object_type("nvgre_tunnel")
+                        .with_error(err.to_string())
+                );
+                return Err(err);
+            }
+            if let Err(e) = callbacks.create_tunnel_map(*map_type, false) {
+                let err = NvgreOrchError::SaiError(e);
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceCreate, "NvgreOrch", "create_tunnel")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(config.name.clone())
+                        .with_object_type("nvgre_tunnel")
+                        .with_error(err.to_string())
+                );
+                return Err(err);
+            }
 
-            tunnel.tunnel_ids.tunnel_encap_id.insert(*map_type, encap_id);
-            tunnel.tunnel_ids.tunnel_decap_id.insert(*map_type, decap_id);
+            if let (Ok(encap_id), Ok(decap_id)) = (
+                callbacks.create_tunnel_map(*map_type, true),
+                callbacks.create_tunnel_map(*map_type, false),
+            ) {
+                tunnel.tunnel_ids.tunnel_encap_id.insert(*map_type, encap_id);
+                tunnel.tunnel_ids.tunnel_decap_id.insert(*map_type, decap_id);
+            }
         }
 
         // Create tunnel
         let underlay_rif = callbacks.get_underlay_rif();
-        tunnel.tunnel_ids.tunnel_id = callbacks.create_tunnel(&config.src_ip, &tunnel.tunnel_ids, underlay_rif)
-            .map_err(NvgreOrchError::SaiError)?;
+        tunnel.tunnel_ids.tunnel_id = match callbacks.create_tunnel(&config.src_ip, &tunnel.tunnel_ids, underlay_rif) {
+            Ok(id) => id,
+            Err(e) => {
+                let err = NvgreOrchError::SaiError(e);
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceCreate, "NvgreOrch", "create_tunnel")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(config.name.clone())
+                        .with_object_type("nvgre_tunnel")
+                        .with_error(err.to_string())
+                );
+                return Err(err);
+            }
+        };
 
         // Create termination
         let vr_id = callbacks.get_virtual_router_id();
-        tunnel.tunnel_ids.tunnel_term_id = callbacks.create_tunnel_termination(tunnel.tunnel_ids.tunnel_id, &config.src_ip, vr_id)
-            .map_err(NvgreOrchError::SaiError)?;
+        tunnel.tunnel_ids.tunnel_term_id = match callbacks.create_tunnel_termination(tunnel.tunnel_ids.tunnel_id, &config.src_ip, vr_id) {
+            Ok(id) => id,
+            Err(e) => {
+                let err = NvgreOrchError::SaiError(e);
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceCreate, "NvgreOrch", "create_tunnel")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(config.name.clone())
+                        .with_object_type("nvgre_tunnel")
+                        .with_error(err.to_string())
+                );
+                return Err(err);
+            }
+        };
 
         self.tunnels.insert(config.name.clone(), tunnel);
         self.stats.tunnels_created += 1;
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "NvgreOrch", "create_tunnel")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(config.name)
+                .with_object_type("nvgre_tunnel")
+                .with_details(serde_json::json!({
+                    "src_ip": config.src_ip.to_string(),
+                    "encapsulation": "enabled",
+                    "decapsulation": "enabled",
+                }))
+        );
 
         Ok(())
     }
 
     pub fn remove_tunnel(&mut self, name: &str) -> Result<(), NvgreOrchError> {
-        let tunnel = self.tunnels.remove(name)
-            .ok_or_else(|| NvgreOrchError::TunnelNotFound(name.to_string()))?;
+        let tunnel = match self.tunnels.remove(name) {
+            Some(t) => t,
+            None => {
+                let err = NvgreOrchError::TunnelNotFound(name.to_string());
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "NvgreOrch", "remove_tunnel")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(name)
+                        .with_object_type("nvgre_tunnel")
+                        .with_error(err.to_string())
+                );
+                return Err(err);
+            }
+        };
 
         let callbacks = self.callbacks.as_ref()
             .ok_or_else(|| NvgreOrchError::SaiError("No callbacks set".to_string()))?;
@@ -173,62 +261,189 @@ impl NvgreOrch {
 
         self.stats.tunnels_removed += 1;
 
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceDelete, "NvgreOrch", "remove_tunnel")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(name)
+                .with_object_type("nvgre_tunnel")
+                .with_details(serde_json::json!({
+                    "src_ip": tunnel.src_ip.to_string(),
+                    "map_entries_removed": tunnel.map_entries.len(),
+                }))
+        );
+
         Ok(())
     }
 
     pub fn add_tunnel_map(&mut self, config: NvgreTunnelMapConfig) -> Result<(), NvgreOrchError> {
-        config.validate_vsid().map_err(|e| NvgreOrchError::InvalidVsid(config.vsid))?;
+        if let Err(_) = config.validate_vsid() {
+            let err = NvgreOrchError::InvalidVsid(config.vsid);
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "NvgreOrch", "add_tunnel_map")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(format!("{}/{}", config.tunnel_name, config.map_entry_name))
+                    .with_object_type("nvgre_tunnel_map")
+                    .with_error(err.to_string())
+                    .with_details(serde_json::json!({
+                        "vsid": config.vsid,
+                        "vlan_id": config.vlan_id,
+                    }))
+            );
+            return Err(err);
+        }
 
-        let tunnel = self.tunnels.get_mut(&config.tunnel_name)
-            .ok_or_else(|| NvgreOrchError::TunnelNotFound(config.tunnel_name.clone()))?;
+        let tunnel = match self.tunnels.get_mut(&config.tunnel_name) {
+            Some(t) => t,
+            None => {
+                let err = NvgreOrchError::TunnelNotFound(config.tunnel_name.clone());
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceCreate, "NvgreOrch", "add_tunnel_map")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(format!("{}/{}", config.tunnel_name, config.map_entry_name))
+                        .with_object_type("nvgre_tunnel_map")
+                        .with_error(err.to_string())
+                );
+                return Err(err);
+            }
+        };
 
         if tunnel.has_map_entry(&config.map_entry_name) {
-            return Err(NvgreOrchError::MapEntryExists(config.map_entry_name.clone()));
+            let err = NvgreOrchError::MapEntryExists(config.map_entry_name.clone());
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "NvgreOrch", "add_tunnel_map")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(format!("{}/{}", config.tunnel_name, config.map_entry_name))
+                    .with_object_type("nvgre_tunnel_map")
+                    .with_error(err.to_string())
+            );
+            return Err(err);
         }
 
         let callbacks = self.callbacks.as_ref()
             .ok_or_else(|| NvgreOrchError::SaiError("No callbacks set".to_string()))?;
 
         // Validate VLAN exists
-        callbacks.get_vlan_oid(config.vlan_id)
-            .ok_or(NvgreOrchError::VlanNotFound(config.vlan_id))?;
+        if callbacks.get_vlan_oid(config.vlan_id).is_none() {
+            let err = NvgreOrchError::VlanNotFound(config.vlan_id);
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "NvgreOrch", "add_tunnel_map")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(format!("{}/{}", config.tunnel_name, config.map_entry_name))
+                    .with_object_type("nvgre_tunnel_map")
+                    .with_error(err.to_string())
+                    .with_details(serde_json::json!({
+                        "vlan_id": config.vlan_id,
+                    }))
+            );
+            return Err(err);
+        }
 
         let encap_map_id = *tunnel.tunnel_ids.tunnel_encap_id.get(&MapType::Vlan)
             .ok_or_else(|| NvgreOrchError::SaiError("No encap map".to_string()))?;
         let decap_map_id = *tunnel.tunnel_ids.tunnel_decap_id.get(&MapType::Vlan)
             .ok_or_else(|| NvgreOrchError::SaiError("No decap map".to_string()))?;
 
-        let map_entry_id = callbacks.create_tunnel_map_entry(
+        let map_entry_id = match callbacks.create_tunnel_map_entry(
             MapType::Vlan,
             config.vsid,
             config.vlan_id,
             false,
             encap_map_id,
             decap_map_id,
-        ).map_err(NvgreOrchError::SaiError)?;
+        ) {
+            Ok(id) => id,
+            Err(e) => {
+                let err = NvgreOrchError::SaiError(e);
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceCreate, "NvgreOrch", "add_tunnel_map")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(format!("{}/{}", config.tunnel_name, config.map_entry_name))
+                        .with_object_type("nvgre_tunnel_map")
+                        .with_error(err.to_string())
+                );
+                return Err(err);
+            }
+        };
 
         let entry = NvgreTunnelMapEntry::new(map_entry_id, config.vlan_id, config.vsid);
         tunnel.add_map_entry(config.map_entry_name.clone(), entry);
 
         self.stats.map_entries_created += 1;
 
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "NvgreOrch", "add_tunnel_map")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("{}/{}", config.tunnel_name, config.map_entry_name))
+                .with_object_type("nvgre_tunnel_map")
+                .with_details(serde_json::json!({
+                    "tunnel_name": config.tunnel_name,
+                    "vsid": config.vsid,
+                    "vlan_id": config.vlan_id,
+                }))
+        );
+
         Ok(())
     }
 
     pub fn remove_tunnel_map(&mut self, tunnel_name: &str, map_entry_name: &str) -> Result<(), NvgreOrchError> {
-        let tunnel = self.tunnels.get_mut(tunnel_name)
-            .ok_or_else(|| NvgreOrchError::TunnelNotFound(tunnel_name.to_string()))?;
+        let tunnel = match self.tunnels.get_mut(tunnel_name) {
+            Some(t) => t,
+            None => {
+                let err = NvgreOrchError::TunnelNotFound(tunnel_name.to_string());
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "NvgreOrch", "remove_tunnel_map")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(format!("{}/{}", tunnel_name, map_entry_name))
+                        .with_object_type("nvgre_tunnel_map")
+                        .with_error(err.to_string())
+                );
+                return Err(err);
+            }
+        };
 
-        let entry = tunnel.remove_map_entry(map_entry_name)
-            .ok_or_else(|| NvgreOrchError::MapEntryNotFound(map_entry_name.to_string()))?;
+        let entry = match tunnel.remove_map_entry(map_entry_name) {
+            Some(e) => e,
+            None => {
+                let err = NvgreOrchError::MapEntryNotFound(map_entry_name.to_string());
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "NvgreOrch", "remove_tunnel_map")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(format!("{}/{}", tunnel_name, map_entry_name))
+                        .with_object_type("nvgre_tunnel_map")
+                        .with_error(err.to_string())
+                );
+                return Err(err);
+            }
+        };
 
         let callbacks = self.callbacks.as_ref()
             .ok_or_else(|| NvgreOrchError::SaiError("No callbacks set".to_string()))?;
 
-        callbacks.remove_tunnel_map_entry(entry.map_entry_id)
-            .map_err(NvgreOrchError::SaiError)?;
+        if let Err(e) = callbacks.remove_tunnel_map_entry(entry.map_entry_id) {
+            let err = NvgreOrchError::SaiError(e);
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceDelete, "NvgreOrch", "remove_tunnel_map")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(format!("{}/{}", tunnel_name, map_entry_name))
+                    .with_object_type("nvgre_tunnel_map")
+                    .with_error(err.to_string())
+            );
+            return Err(err);
+        }
 
         self.stats.map_entries_removed += 1;
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceDelete, "NvgreOrch", "remove_tunnel_map")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("{}/{}", tunnel_name, map_entry_name))
+                .with_object_type("nvgre_tunnel_map")
+                .with_details(serde_json::json!({
+                    "tunnel_name": tunnel_name,
+                    "vsid": entry.vsid,
+                    "vlan_id": entry.vlan_id,
+                }))
+        );
 
         Ok(())
     }

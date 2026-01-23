@@ -2,6 +2,7 @@
 
 use super::types::{FgNhgEntry, FgNhgPrefix, FgNhgStats};
 use std::collections::HashMap;
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome, audit_log};
 
 #[derive(Debug, Clone)]
 pub enum FgNhgOrchError {
@@ -59,6 +60,112 @@ impl FgNhgOrch {
 
     pub fn stats(&self) -> &FgNhgOrchStats {
         &self.stats
+    }
+
+    /// Create a fine-grained next hop group with audit logging.
+    pub fn create_fg_nhg(&mut self, prefix: FgNhgPrefix, entry: FgNhgEntry) -> Result<(), FgNhgOrchError> {
+        if self.nhgs.contains_key(&prefix) {
+            let record = AuditRecord::new(
+                AuditCategory::ErrorCondition,
+                "FgNhgOrch",
+                format!("create_fg_nhg_failed: {}", prefix.ip_prefix),
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&prefix.ip_prefix)
+            .with_object_type("fg_nhg")
+            .with_error("NHG already exists");
+            audit_log!(record);
+
+            return Err(FgNhgOrchError::NhgNotFound(prefix));
+        }
+
+        let member_count = entry.members.len();
+        let total_weight: u32 = entry.members.iter().map(|m| m.weight).sum();
+
+        self.nhgs.insert(prefix.clone(), entry);
+        self.stats.stats.nhgs_created += 1;
+
+        let record = AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "FgNhgOrch",
+            format!("create_fg_nhg: {}", prefix.ip_prefix),
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&prefix.ip_prefix)
+        .with_object_type("fg_nhg")
+        .with_details(serde_json::json!({
+            "bucket_size": self.config.default_bucket_size,
+            "member_count": member_count,
+            "total_weight": total_weight,
+        }));
+        audit_log!(record);
+
+        Ok(())
+    }
+
+    /// Update a fine-grained next hop group with audit logging.
+    pub fn update_fg_nhg(&mut self, prefix: FgNhgPrefix, entry: FgNhgEntry) -> Result<(), FgNhgOrchError> {
+        let old_entry = self.nhgs.get(&prefix)
+            .ok_or_else(|| FgNhgOrchError::NhgNotFound(prefix.clone()))?;
+
+        let old_member_count = old_entry.members.len();
+        let new_member_count = entry.members.len();
+
+        self.nhgs.insert(prefix.clone(), entry);
+        self.stats.stats.members_added += (new_member_count - old_member_count.min(new_member_count)) as u64;
+
+        let record = AuditRecord::new(
+            AuditCategory::ResourceModify,
+            "FgNhgOrch",
+            format!("update_fg_nhg: {}", prefix.ip_prefix),
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&prefix.ip_prefix)
+        .with_object_type("fg_nhg")
+        .with_details(serde_json::json!({
+            "old_member_count": old_member_count,
+            "new_member_count": new_member_count,
+        }));
+        audit_log!(record);
+
+        Ok(())
+    }
+
+    /// Remove a fine-grained next hop group with audit logging.
+    pub fn remove_fg_nhg(&mut self, prefix: &FgNhgPrefix) -> Result<(), FgNhgOrchError> {
+        let entry = self.nhgs.remove(prefix)
+            .ok_or_else(|| {
+                let record = AuditRecord::new(
+                    AuditCategory::ErrorCondition,
+                    "FgNhgOrch",
+                    format!("remove_fg_nhg_failed: {}", prefix.ip_prefix),
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(&prefix.ip_prefix)
+                .with_object_type("fg_nhg")
+                .with_error("NHG not found");
+                audit_log!(record);
+
+                FgNhgOrchError::NhgNotFound(prefix.clone())
+            })?;
+
+        self.stats.stats.nhgs_created -= 1;
+        self.stats.stats.members_added -= entry.members.len() as u64;
+
+        let record = AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "FgNhgOrch",
+            format!("remove_fg_nhg: {}", prefix.ip_prefix),
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&prefix.ip_prefix)
+        .with_object_type("fg_nhg")
+        .with_details(serde_json::json!({
+            "member_count": entry.members.len(),
+        }));
+        audit_log!(record);
+
+        Ok(())
     }
 }
 

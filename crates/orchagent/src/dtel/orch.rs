@@ -10,6 +10,7 @@ use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome, audit_log};
 
 /// Result type for DtelOrch operations.
 pub type Result<T> = std::result::Result<T, DtelOrchError>;
@@ -154,6 +155,17 @@ impl<C: DtelOrchCallbacks> DtelOrch<C> {
         let session_id = config.session_id.clone();
 
         if self.sessions.contains_key(&session_id) {
+            let record = AuditRecord::new(
+                AuditCategory::ErrorCondition,
+                "DtelOrch",
+                format!("add_session_failed: {}", session_id),
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&session_id)
+            .with_object_type("int_session")
+            .with_error("Session already exists");
+            audit_log!(record);
+
             return Err(DtelOrchError::SessionExists(session_id));
         }
 
@@ -164,9 +176,24 @@ impl<C: DtelOrchCallbacks> DtelOrch<C> {
             0x1000 + self.sessions.len() as u64
         };
 
-        let entry = Arc::new(IntSessionEntry::new(session_oid, config));
+        let entry = Arc::new(IntSessionEntry::new(session_oid, config.clone()));
         self.sessions.insert(session_id.clone(), entry);
         self.stats.sessions_created += 1;
+
+        let record = AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "DtelOrch",
+            format!("create_session: {}", session_id),
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&session_id)
+        .with_object_type("int_session")
+        .with_details(serde_json::json!({
+            "session_oid": format!("{:#x}", session_oid),
+            "collect_switch_id": config.collect_switch_id,
+            "max_hop_count": config.max_hop_count,
+        }));
+        audit_log!(record);
 
         if let Some(ref callbacks) = self.callbacks {
             callbacks.on_session_created(&session_id, session_oid);
@@ -181,18 +208,56 @@ impl<C: DtelOrchCallbacks> DtelOrch<C> {
         let entry = self
             .sessions
             .remove(session_id)
-            .ok_or_else(|| DtelOrchError::SessionNotFound(session_id.to_string()))?;
+            .ok_or_else(|| {
+                let record = AuditRecord::new(
+                    AuditCategory::ErrorCondition,
+                    "DtelOrch",
+                    format!("remove_session_failed: {}", session_id),
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(session_id)
+                .with_object_type("int_session")
+                .with_error("Session not found");
+                audit_log!(record);
+
+                DtelOrchError::SessionNotFound(session_id.to_string())
+            })?;
 
         // Check reference count before removing
         let ref_count = entry.ref_count.load(Ordering::SeqCst);
         if ref_count > 1 {
             // Session still in use, put it back
             self.sessions.insert(session_id.to_string(), entry);
+
+            let record = AuditRecord::new(
+                AuditCategory::ErrorCondition,
+                "DtelOrch",
+                format!("remove_session_failed: {} (ref_count={})", session_id, ref_count),
+            )
+            .with_outcome(AuditOutcome::Denied)
+            .with_object_id(session_id)
+            .with_object_type("int_session")
+            .with_error(format!("Session still has {} references", ref_count));
+            audit_log!(record);
+
             return Err(DtelOrchError::InvalidConfig(format!(
                 "Session {} still has {} references",
                 session_id, ref_count
             )));
         }
+
+        let record = AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "DtelOrch",
+            format!("remove_session: {}", session_id),
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(session_id)
+        .with_object_type("int_session")
+        .with_details(serde_json::json!({
+            "session_oid": format!("{:#x}", entry.session_oid),
+        }));
+        audit_log!(record);
 
         if let Some(ref callbacks) = self.callbacks {
             callbacks.remove_int_session(entry.session_oid)?;
@@ -252,6 +317,19 @@ impl<C: DtelOrchCallbacks> DtelOrch<C> {
         self.events.insert(event_type, entry);
         self.stats.events_enabled += 1;
 
+        let record = AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "DtelOrch",
+            format!("enable_event: {:?}", event_type),
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("{:?}", event_type))
+        .with_object_type("dtel_event")
+        .with_details(serde_json::json!({
+            "event_oid": format!("{:#x}", event_oid),
+        }));
+        audit_log!(record);
+
         if let Some(ref callbacks) = self.callbacks {
             callbacks.on_event_state_changed(event_type, true);
         }
@@ -264,7 +342,33 @@ impl<C: DtelOrchCallbacks> DtelOrch<C> {
         let entry = self
             .events
             .remove(&event_type)
-            .ok_or(DtelOrchError::EventNotFound(event_type))?;
+            .ok_or_else(|| {
+                let record = AuditRecord::new(
+                    AuditCategory::ErrorCondition,
+                    "DtelOrch",
+                    format!("disable_event_failed: {:?}", event_type),
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(format!("{:?}", event_type))
+                .with_object_type("dtel_event")
+                .with_error("Event not found");
+                audit_log!(record);
+
+                DtelOrchError::EventNotFound(event_type)
+            })?;
+
+        let record = AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "DtelOrch",
+            format!("disable_event: {:?}", event_type),
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("{:?}", event_type))
+        .with_object_type("dtel_event")
+        .with_details(serde_json::json!({
+            "event_oid": format!("{:#x}", entry.event_oid),
+        }));
+        audit_log!(record);
 
         if let Some(ref callbacks) = self.callbacks {
             callbacks.disable_event(entry.event_oid)?;
@@ -294,14 +398,45 @@ impl<C: DtelOrchCallbacks> DtelOrch<C> {
 
     /// Add a watchlist entry.
     pub fn add_watchlist_entry(&mut self, key: String, entry: WatchlistEntry) {
-        self.watchlist.insert(key, entry);
+        self.watchlist.insert(key.clone(), entry.clone());
         self.stats.watchlist_entries = self.watchlist.len() as u64;
+
+        let record = AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "DtelOrch",
+            format!("add_watchlist_entry: {}", key),
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&key)
+        .with_object_type("dtel_watchlist")
+        .with_details(serde_json::json!({
+            "acl_table_oid": format!("{:#x}", entry.acl_table_oid),
+            "acl_rule_oid": format!("{:#x}", entry.acl_rule_oid),
+        }));
+        audit_log!(record);
     }
 
     /// Remove a watchlist entry.
     pub fn remove_watchlist_entry(&mut self, key: &str) -> Option<WatchlistEntry> {
         let entry = self.watchlist.remove(key);
         self.stats.watchlist_entries = self.watchlist.len() as u64;
+
+        if let Some(ref removed_entry) = entry {
+            let record = AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "DtelOrch",
+                format!("remove_watchlist_entry: {}", key),
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(key)
+            .with_object_type("dtel_watchlist")
+            .with_details(serde_json::json!({
+                "acl_table_oid": format!("{:#x}", removed_entry.acl_table_oid),
+                "acl_rule_oid": format!("{:#x}", removed_entry.acl_rule_oid),
+            }));
+            audit_log!(record);
+        }
+
         entry
     }
 

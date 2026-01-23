@@ -1,16 +1,27 @@
 //! MACsec orchestration logic.
 
-use super::types::{MacsecPort, MacsecSc, MacsecSa, MacsecStats, Sci};
+use super::types::{MacsecPort, MacsecSc, MacsecSa, MacsecStats, Sci, MacsecDirection};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
+use thiserror::Error;
+
+#[derive(Debug, Clone, Error)]
 pub enum MacsecOrchError {
+    #[error("Port not found: {0}")]
     PortNotFound(String),
+    #[error("SC not found: 0x{:x}", .0)]
     ScNotFound(Sci),
+    #[error("SA not found: {0}")]
     SaNotFound(u8),
+    #[error("Invalid AN: {0}")]
     InvalidAn(u8),
+    #[error("Invalid cipher suite: {0}")]
     InvalidCipherSuite(String),
+    #[error("Invalid key: {0}")]
     InvalidKey(String),
+    #[error("SAI error: {0}")]
     SaiError(String),
 }
 
@@ -114,8 +125,37 @@ impl MacsecOrch {
         let sci = sc.sci;
 
         if self.scs.contains_key(&sci) {
+            let audit_record = AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "MacsecOrch",
+                "create_flow",
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&format!("0x{:016x}", sci))
+            .with_object_type("macsec_sc")
+            .with_error("SC already exists");
+            audit_log!(audit_record);
             return Err(MacsecOrchError::SaiError("SC already exists".to_string()));
         }
+
+        let direction = match sc.direction {
+            MacsecDirection::Ingress => "ingress",
+            MacsecDirection::Egress => "egress",
+        };
+
+        let audit_record = AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "MacsecOrch",
+            "create_flow",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&format!("0x{:016x}", sci))
+        .with_object_type("macsec_sc")
+        .with_details(serde_json::json!({
+            "sci": format!("0x{:016x}", sci),
+            "direction": direction,
+        }));
+        audit_log!(audit_record);
 
         self.stats.stats.scs_created = self.stats.stats.scs_created.saturating_add(1);
         self.scs.insert(sci, sc);
@@ -131,12 +171,51 @@ impl MacsecOrch {
             .cloned()
             .collect();
 
+        let sa_count = sas_to_remove.len();
+
         for key in sas_to_remove {
             self.sas.remove(&key);
         }
 
-        self.scs.remove(&sci)
-            .ok_or_else(|| MacsecOrchError::ScNotFound(sci))
+        match self.scs.remove(&sci) {
+            Some(sc) => {
+                let direction = match sc.direction {
+                    MacsecDirection::Ingress => "ingress",
+                    MacsecDirection::Egress => "egress",
+                };
+
+                let audit_record = AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "MacsecOrch",
+                    "remove_flow",
+                )
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(&format!("0x{:016x}", sci))
+                .with_object_type("macsec_sc")
+                .with_details(serde_json::json!({
+                    "sci": format!("0x{:016x}", sci),
+                    "direction": direction,
+                    "associated_sas_removed": sa_count,
+                }));
+                audit_log!(audit_record);
+
+                Ok(sc)
+            }
+            None => {
+                let audit_record = AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "MacsecOrch",
+                    "remove_flow",
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(&format!("0x{:016x}", sci))
+                .with_object_type("macsec_sc")
+                .with_error("SC not found");
+                audit_log!(audit_record);
+
+                Err(MacsecOrchError::ScNotFound(sci))
+            }
+        }
     }
 
     pub fn get_sa(&self, sci: Sci, an: u8) -> Option<&MacsecSa> {
@@ -150,14 +229,49 @@ impl MacsecOrch {
 
         // Verify SC exists
         if !self.scs.contains_key(&sci) {
+            let audit_record = AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "MacsecOrch",
+                "create_sa",
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&format!("0x{:016x}:{}", sci, sa.an))
+            .with_object_type("macsec_sa")
+            .with_error("SC not found");
+            audit_log!(audit_record);
             return Err(MacsecOrchError::ScNotFound(sci));
         }
 
         let key = (sci, sa.an);
 
         if self.sas.contains_key(&key) {
+            let audit_record = AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "MacsecOrch",
+                "create_sa",
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&format!("0x{:016x}:{}", sci, sa.an))
+            .with_object_type("macsec_sa")
+            .with_error("SA already exists");
+            audit_log!(audit_record);
             return Err(MacsecOrchError::SaiError("SA already exists".to_string()));
         }
+
+        let audit_record = AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "MacsecOrch",
+            "create_sa",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&format!("0x{:016x}:{}", sci, sa.an))
+        .with_object_type("macsec_sa")
+        .with_details(serde_json::json!({
+            "sci": format!("0x{:016x}", sci),
+            "an": sa.an,
+            "packet_number": sa.pn,
+        }));
+        audit_log!(audit_record);
 
         self.stats.stats.sas_created = self.stats.stats.sas_created.saturating_add(1);
         self.sas.insert(key, sa);
@@ -167,8 +281,40 @@ impl MacsecOrch {
 
     pub fn remove_sa(&mut self, sci: Sci, an: u8) -> Result<MacsecSa, MacsecOrchError> {
         let key = (sci, an);
-        self.sas.remove(&key)
-            .ok_or_else(|| MacsecOrchError::SaNotFound(an))
+        match self.sas.remove(&key) {
+            Some(sa) => {
+                let audit_record = AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "MacsecOrch",
+                    "remove_sa",
+                )
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(&format!("0x{:016x}:{}", sci, an))
+                .with_object_type("macsec_sa")
+                .with_details(serde_json::json!({
+                    "sci": format!("0x{:016x}", sci),
+                    "an": an,
+                    "packet_number": sa.pn,
+                }));
+                audit_log!(audit_record);
+
+                Ok(sa)
+            }
+            None => {
+                let audit_record = AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "MacsecOrch",
+                    "remove_sa",
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(&format!("0x{:016x}:{}", sci, an))
+                .with_object_type("macsec_sa")
+                .with_error("SA not found");
+                audit_log!(audit_record);
+
+                Err(MacsecOrchError::SaNotFound(an))
+            }
+        }
     }
 
     pub fn get_sas_for_sc(&self, sci: Sci) -> Vec<&MacsecSa> {

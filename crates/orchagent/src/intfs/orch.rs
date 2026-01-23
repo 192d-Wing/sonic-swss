@@ -3,8 +3,13 @@
 use super::types::IntfsEntry;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
+use thiserror::Error;
+
+#[derive(Debug, Clone, Error)]
 pub enum IntfsOrchError {
+    #[error("Interface not found: {0}")]
     InterfaceNotFound(String),
 }
 
@@ -42,15 +47,261 @@ impl IntfsOrch {
     }
 
     pub fn add_interface(&mut self, name: String, entry: IntfsEntry) {
+        let interface_type = if name.starts_with("Vlan") {
+            "VLAN"
+        } else if name.starts_with("PortChannel") {
+            "LAG"
+        } else {
+            "physical"
+        };
+
+        let audit_record = AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "IntfsOrch",
+            "create_interface",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&name)
+        .with_object_type("interface")
+        .with_details(serde_json::json!({
+            "interface_name": name,
+            "interface_type": interface_type,
+            "ip_address_count": entry.ip_addresses.len(),
+            "vrf_id": format!("0x{:x}", entry.vrf_id),
+            "proxy_arp": entry.proxy_arp,
+            "ref_count": entry.ref_count,
+        }));
+        audit_log!(audit_record);
+
         self.interfaces.insert(name, entry);
+        self.stats.interfaces_created += 1;
     }
 
     pub fn remove_interface(&mut self, name: &str) -> Option<IntfsEntry> {
-        self.interfaces.remove(name)
+        match self.interfaces.remove(name) {
+            Some(entry) => {
+                let audit_record = AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "IntfsOrch",
+                    "remove_interface",
+                )
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(name)
+                .with_object_type("interface")
+                .with_details(serde_json::json!({
+                    "interface_name": name,
+                    "ip_address_count": entry.ip_addresses.len(),
+                    "ref_count": entry.ref_count,
+                    "vrf_id": format!("0x{:x}", entry.vrf_id),
+                    "proxy_arp": entry.proxy_arp,
+                }));
+                audit_log!(audit_record);
+                Some(entry)
+            }
+            None => {
+                let audit_record = AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "IntfsOrch",
+                    "remove_interface",
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(name)
+                .with_object_type("interface")
+                .with_error("Interface not found");
+                audit_log!(audit_record);
+                None
+            }
+        }
     }
 
     pub fn interface_count(&self) -> usize {
         self.interfaces.len()
+    }
+
+    /// Add IP address to an interface
+    pub fn add_ip_address(&mut self, intf_name: &str, ip_prefix: sonic_types::IpPrefix) -> Result<(), IntfsOrchError> {
+        match self.interfaces.get_mut(intf_name) {
+            Some(entry) => {
+                let ip_str = ip_prefix.to_string();
+                entry.ip_addresses.insert(ip_prefix);
+
+                let audit_record = AuditRecord::new(
+                    AuditCategory::ResourceCreate,
+                    "IntfsOrch",
+                    "add_ip_address",
+                )
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(intf_name)
+                .with_object_type("interface")
+                .with_details(serde_json::json!({
+                    "interface_name": intf_name,
+                    "ip_prefix": ip_str,
+                    "total_addresses": entry.ip_addresses.len(),
+                }));
+                audit_log!(audit_record);
+                Ok(())
+            }
+            None => {
+                let err = IntfsOrchError::InterfaceNotFound(intf_name.to_string());
+                let audit_record = AuditRecord::new(
+                    AuditCategory::ResourceCreate,
+                    "IntfsOrch",
+                    "add_ip_address",
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(intf_name)
+                .with_object_type("interface")
+                .with_error("Interface not found");
+                audit_log!(audit_record);
+                Err(err)
+            }
+        }
+    }
+
+    /// Remove IP address from an interface
+    pub fn remove_ip_address(&mut self, intf_name: &str, ip_prefix: sonic_types::IpPrefix) -> Result<(), IntfsOrchError> {
+        match self.interfaces.get_mut(intf_name) {
+            Some(entry) => {
+                let ip_str = ip_prefix.to_string();
+                let removed = entry.ip_addresses.remove(&ip_prefix);
+
+                if removed {
+                    let audit_record = AuditRecord::new(
+                        AuditCategory::ResourceDelete,
+                        "IntfsOrch",
+                        "remove_ip_address",
+                    )
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_id(intf_name)
+                    .with_object_type("interface")
+                    .with_details(serde_json::json!({
+                        "interface_name": intf_name,
+                        "ip_prefix": ip_str,
+                        "remaining_addresses": entry.ip_addresses.len(),
+                    }));
+                    audit_log!(audit_record);
+                    Ok(())
+                } else {
+                    let audit_record = AuditRecord::new(
+                        AuditCategory::ResourceDelete,
+                        "IntfsOrch",
+                        "remove_ip_address",
+                    )
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(intf_name)
+                    .with_object_type("interface")
+                    .with_error(&format!("IP address {} not found", ip_str));
+                    audit_log!(audit_record);
+                    Ok(())
+                }
+            }
+            None => {
+                let err = IntfsOrchError::InterfaceNotFound(intf_name.to_string());
+                let audit_record = AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "IntfsOrch",
+                    "remove_ip_address",
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(intf_name)
+                .with_object_type("interface")
+                .with_error("Interface not found");
+                audit_log!(audit_record);
+                Err(err)
+            }
+        }
+    }
+
+    /// Increase reference count for an interface
+    pub fn increase_ref_count(&mut self, intf_name: &str) -> Result<u32, IntfsOrchError> {
+        match self.interfaces.get_mut(intf_name) {
+            Some(entry) => {
+                let new_count = entry.add_ref();
+                let audit_record = AuditRecord::new(
+                    AuditCategory::ResourceModify,
+                    "IntfsOrch",
+                    "increase_ref_count",
+                )
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(intf_name)
+                .with_object_type("interface")
+                .with_details(serde_json::json!({
+                    "interface_name": intf_name,
+                    "new_ref_count": new_count,
+                    "action": "reference_count_increased",
+                }));
+                audit_log!(audit_record);
+                Ok(new_count)
+            }
+            None => {
+                let err = IntfsOrchError::InterfaceNotFound(intf_name.to_string());
+                let audit_record = AuditRecord::new(
+                    AuditCategory::ResourceModify,
+                    "IntfsOrch",
+                    "increase_ref_count",
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(intf_name)
+                .with_object_type("interface")
+                .with_error("Interface not found");
+                audit_log!(audit_record);
+                Err(err)
+            }
+        }
+    }
+
+    /// Decrease reference count for an interface
+    pub fn decrease_ref_count(&mut self, intf_name: &str) -> Result<u32, IntfsOrchError> {
+        match self.interfaces.get_mut(intf_name) {
+            Some(entry) => {
+                match entry.remove_ref() {
+                    Ok(new_count) => {
+                        let audit_record = AuditRecord::new(
+                            AuditCategory::ResourceModify,
+                            "IntfsOrch",
+                            "decrease_ref_count",
+                        )
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_id(intf_name)
+                        .with_object_type("interface")
+                        .with_details(serde_json::json!({
+                            "interface_name": intf_name,
+                            "new_ref_count": new_count,
+                            "action": "reference_count_decreased",
+                        }));
+                        audit_log!(audit_record);
+                        Ok(new_count)
+                    }
+                    Err(e) => {
+                        let audit_record = AuditRecord::new(
+                            AuditCategory::ResourceModify,
+                            "IntfsOrch",
+                            "decrease_ref_count",
+                        )
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(intf_name)
+                        .with_object_type("interface")
+                        .with_error(&e);
+                        audit_log!(audit_record);
+                        Err(IntfsOrchError::InterfaceNotFound(e))
+                    }
+                }
+            }
+            None => {
+                let err = IntfsOrchError::InterfaceNotFound(intf_name.to_string());
+                let audit_record = AuditRecord::new(
+                    AuditCategory::ResourceModify,
+                    "IntfsOrch",
+                    "decrease_ref_count",
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(intf_name)
+                .with_object_type("interface")
+                .with_error("Interface not found");
+                audit_log!(audit_record);
+                Err(err)
+            }
+        }
     }
 }
 

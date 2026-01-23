@@ -1,17 +1,24 @@
 //! Next hop group orchestration logic.
 
 use super::types::{LabelStack, NextHopGroupMember, NextHopKey};
+use crate::{audit_log, audit::{AuditCategory, AuditOutcome, AuditRecord}};
 use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use thiserror::Error;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum NhgOrchError {
+    #[error("NHG already exists: {0}")]
     NhgExists(String),
+    #[error("NHG not found: {0}")]
     NhgNotFound(String),
+    #[error("Next hop not found: {0}")]
     NextHopNotFound(String),
+    #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
+    #[error("SAI error: {0}")]
     SaiError(String),
 }
 
@@ -103,7 +110,15 @@ impl NhgOrch {
 
     pub fn create_nhg(&mut self, name: String, members: Vec<NextHopGroupMember>) -> Result<(), NhgOrchError> {
         if self.nhgs.contains_key(&name) {
-            return Err(NhgOrchError::NhgExists(name));
+            let err = NhgOrchError::NhgExists(name.clone());
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "NhgOrch", "create_nhg")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(name)
+                    .with_object_type("next_hop_group")
+                    .with_error(err.to_string())
+            );
+            return Err(err);
         }
 
         let callbacks = Arc::clone(
@@ -111,8 +126,23 @@ impl NhgOrch {
                 .ok_or_else(|| NhgOrchError::InvalidConfig("No callbacks set".to_string()))?,
         );
 
-        let nhg_id = callbacks.create_next_hop_group(&members)
-            .map_err(NhgOrchError::SaiError)?;
+        let nhg_id = match callbacks.create_next_hop_group(&members) {
+            Ok(id) => id,
+            Err(e) => {
+                let err = NhgOrchError::SaiError(e);
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceCreate, "NhgOrch", "create_nhg")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(name)
+                        .with_object_type("next_hop_group")
+                        .with_error(err.to_string())
+                        .with_details(serde_json::json!({
+                            "member_count": members.len(),
+                        }))
+                );
+                return Err(err);
+            }
+        };
 
         let entry = NhgOrchEntry {
             name: name.clone(),
@@ -121,8 +151,20 @@ impl NhgOrch {
             ref_count: AtomicU32::new(0),
         };
 
-        self.nhgs.insert(name, entry);
+        self.nhgs.insert(name.clone(), entry);
         self.stats.nhgs_created += 1;
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "NhgOrch", "create_nhg")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(name)
+                .with_object_type("next_hop_group")
+                .with_details(serde_json::json!({
+                    "member_count": members.len(),
+                    "nhg_id": format!("{:#x}", nhg_id),
+                    "ref_count": 0,
+                }))
+        );
 
         Ok(())
     }
@@ -131,10 +173,22 @@ impl NhgOrch {
         let entry = self.nhgs.get(name)
             .ok_or_else(|| NhgOrchError::NhgNotFound(name.to_string()))?;
 
-        if entry.ref_count.load(Ordering::SeqCst) > 0 {
-            return Err(NhgOrchError::InvalidConfig(
-                format!("NHG {} still in use (ref_count={})", name, entry.ref_count.load(Ordering::SeqCst))
-            ));
+        let ref_count = entry.ref_count.load(Ordering::SeqCst);
+        if ref_count > 0 {
+            let err = NhgOrchError::InvalidConfig(
+                format!("NHG {} still in use (ref_count={})", name, ref_count)
+            );
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceDelete, "NhgOrch", "remove_nhg")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(name)
+                    .with_object_type("next_hop_group")
+                    .with_error(err.to_string())
+                    .with_details(serde_json::json!({
+                        "ref_count": ref_count,
+                    }))
+            );
+            return Err(err);
         }
 
         let entry = self.nhgs.remove(name).unwrap();
@@ -142,10 +196,30 @@ impl NhgOrch {
         let callbacks = self.callbacks.as_ref()
             .ok_or_else(|| NhgOrchError::InvalidConfig("No callbacks set".to_string()))?;
 
-        callbacks.remove_next_hop_group(entry.nhg_id)
-            .map_err(NhgOrchError::SaiError)?;
+        if let Err(e) = callbacks.remove_next_hop_group(entry.nhg_id) {
+            let err = NhgOrchError::SaiError(e);
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceDelete, "NhgOrch", "remove_nhg")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(name)
+                    .with_object_type("next_hop_group")
+                    .with_error(err.to_string())
+            );
+            return Err(err);
+        }
 
         self.stats.nhgs_removed += 1;
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceDelete, "NhgOrch", "remove_nhg")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(name)
+                .with_object_type("next_hop_group")
+                .with_details(serde_json::json!({
+                    "member_count": entry.members.len(),
+                    "nhg_id": format!("{:#x}", entry.nhg_id),
+                }))
+        );
 
         Ok(())
     }
@@ -155,7 +229,20 @@ impl NhgOrch {
             .ok_or_else(|| NhgOrchError::NhgNotFound(name.to_string()))?;
 
         let prev = entry.ref_count.fetch_add(1, Ordering::SeqCst);
-        Ok(prev.saturating_add(1))
+        let new_count = prev.saturating_add(1);
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceModify, "NhgOrch", "add_member")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(name)
+                .with_object_type("next_hop_group_reference")
+                .with_details(serde_json::json!({
+                    "ref_count_before": prev,
+                    "ref_count_after": new_count,
+                }))
+        );
+
+        Ok(new_count)
     }
 
     pub fn decrement_nhg_ref(&self, name: &str) -> Result<u32, NhgOrchError> {
@@ -164,13 +251,34 @@ impl NhgOrch {
 
         let prev = entry.ref_count.load(Ordering::SeqCst);
         if prev == 0 {
-            return Err(NhgOrchError::InvalidConfig(
+            let err = NhgOrchError::InvalidConfig(
                 format!("NHG {} ref_count already at 0", name)
-            ));
+            );
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceModify, "NhgOrch", "remove_member")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(name)
+                    .with_object_type("next_hop_group_reference")
+                    .with_error(err.to_string())
+            );
+            return Err(err);
         }
 
         entry.ref_count.fetch_sub(1, Ordering::SeqCst);
-        Ok(prev - 1)
+        let new_count = prev - 1;
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceModify, "NhgOrch", "remove_member")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(name)
+                .with_object_type("next_hop_group_reference")
+                .with_details(serde_json::json!({
+                    "ref_count_before": prev,
+                    "ref_count_after": new_count,
+                }))
+        );
+
+        Ok(new_count)
     }
 }
 

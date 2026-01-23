@@ -5,16 +5,24 @@ use std::sync::Arc;
 
 use super::types::{MlagIfUpdate, MlagIslUpdate, MlagSubjectType, MlagUpdate};
 
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
+use thiserror::Error;
+
 /// MLAG orchestrator error type.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum MlagOrchError {
     /// Interface not found.
+    #[error("Interface not found: {0}")]
     InterfaceNotFound(String),
     /// Duplicate interface.
+    #[error("Duplicate interface: {0}")]
     DuplicateInterface(String),
     /// ISL not set.
+    #[error("ISL not set")]
     IslNotSet,
     /// Ports not ready.
+    #[error("Ports not ready")]
     PortsNotReady,
 }
 
@@ -163,6 +171,20 @@ impl MlagOrch {
             return Ok(false);
         }
 
+        let audit_record = AuditRecord::new(
+            AuditCategory::NetworkConfig,
+            "MlagOrch",
+            "set_isl",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&isl_name)
+        .with_object_type("mlag_isl")
+        .with_details(serde_json::json!({
+            "isl_interface": isl_name,
+            "action": "isl_created_or_modified",
+        }));
+        audit_log!(audit_record);
+
         self.isl_name = Some(isl_name.clone());
         self.stats.isl_adds += 1;
 
@@ -177,10 +199,35 @@ impl MlagOrch {
     /// Returns Ok(true) if the ISL was removed, Err if it wasn't set.
     pub fn del_isl_interface(&mut self) -> Result<bool, MlagOrchError> {
         if self.isl_name.is_none() {
+            let audit_record = AuditRecord::new(
+                AuditCategory::NetworkConfig,
+                "MlagOrch",
+                "set_isl",
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id("ISL")
+            .with_object_type("mlag_isl")
+            .with_error("ISL not set");
+            audit_log!(audit_record);
             return Err(MlagOrchError::IslNotSet);
         }
 
         let old_isl = self.isl_name.take().unwrap();
+
+        let audit_record = AuditRecord::new(
+            AuditCategory::NetworkConfig,
+            "MlagOrch",
+            "set_isl",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&old_isl)
+        .with_object_type("mlag_isl")
+        .with_details(serde_json::json!({
+            "isl_interface": old_isl,
+            "action": "isl_deleted",
+        }));
+        audit_log!(audit_record);
+
         self.stats.isl_deletes += 1;
 
         // Notify observers
@@ -199,8 +246,32 @@ impl MlagOrch {
         let if_name = if_name.into();
 
         if self.mlag_intfs.contains(&if_name) {
+            let audit_record = AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "MlagOrch",
+                "add_mlag_intf",
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&if_name)
+            .with_object_type("mlag_interface")
+            .with_error("Interface already a member");
+            audit_log!(audit_record);
             return Err(MlagOrchError::DuplicateInterface(if_name));
         }
+
+        let audit_record = AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "MlagOrch",
+            "add_mlag_intf",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&if_name)
+        .with_object_type("mlag_interface")
+        .with_details(serde_json::json!({
+            "interface_name": if_name,
+            "total_mlag_members": self.mlag_intfs.len() + 1,
+        }));
+        audit_log!(audit_record);
 
         self.mlag_intfs.insert(if_name.clone());
         self.stats.intf_adds += 1;
@@ -216,8 +287,32 @@ impl MlagOrch {
     /// Returns Ok(true) if the interface was removed, Err if it wasn't found.
     pub fn del_mlag_interface(&mut self, if_name: &str) -> Result<bool, MlagOrchError> {
         if !self.mlag_intfs.remove(if_name) {
+            let audit_record = AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "MlagOrch",
+                "remove_mlag_intf",
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(if_name)
+            .with_object_type("mlag_interface")
+            .with_error("Interface not found");
+            audit_log!(audit_record);
             return Err(MlagOrchError::InterfaceNotFound(if_name.to_string()));
         }
+
+        let audit_record = AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "MlagOrch",
+            "remove_mlag_intf",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(if_name)
+        .with_object_type("mlag_interface")
+        .with_details(serde_json::json!({
+            "interface_name": if_name,
+            "remaining_mlag_members": self.mlag_intfs.len(),
+        }));
+        audit_log!(audit_record);
 
         self.stats.intf_deletes += 1;
 

@@ -1,14 +1,21 @@
 //! Neighbor orchestration logic.
 
 use super::types::{NeighborEntry, NeighborKey, NeighborStats};
+use crate::{audit_log, audit::{AuditCategory, AuditOutcome, AuditRecord}};
 use std::collections::HashMap;
+use thiserror::Error;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum NeighOrchError {
+    #[error("Neighbor not found: {0:?}")]
     NeighborNotFound(NeighborKey),
+    #[error("Invalid MAC address: {0}")]
     InvalidMac(String),
+    #[error("Invalid IP address: {0}")]
     InvalidIp(String),
+    #[error("Interface not found: {0}")]
     InterfaceNotFound(String),
+    #[error("SAI error: {0}")]
     SaiError(String),
 }
 
@@ -64,14 +71,42 @@ impl NeighOrch {
         }
 
         self.stats.stats.neighbors_added = self.stats.stats.neighbors_added.saturating_add(1);
-        self.neighbors.insert(key, entry);
+        self.neighbors.insert(key.clone(), entry.clone());
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "NeighOrch", "add_neighbor")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("{}/{}", key.interface, key.ip))
+                .with_object_type("neighbor_entry")
+                .with_details(serde_json::json!({
+                    "interface": key.interface,
+                    "ip_address": key.ip.to_string(),
+                    "mac_address": format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                        entry.mac.as_bytes()[0], entry.mac.as_bytes()[1], entry.mac.as_bytes()[2],
+                        entry.mac.as_bytes()[3], entry.mac.as_bytes()[4], entry.mac.as_bytes()[5]),
+                    "ip_version": if entry.is_ipv4() { "ipv4" } else { "ipv6" },
+                    "neighbor_type": "dynamic",
+                }))
+        );
 
         Ok(())
     }
 
     pub fn remove_neighbor(&mut self, key: &NeighborKey) -> Result<NeighborEntry, NeighOrchError> {
-        let entry = self.neighbors.remove(key)
-            .ok_or_else(|| NeighOrchError::NeighborNotFound(key.clone()))?;
+        let entry = match self.neighbors.remove(key) {
+            Some(e) => e,
+            None => {
+                let err = NeighOrchError::NeighborNotFound(key.clone());
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "NeighOrch", "remove_neighbor")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(format!("{}/{}", key.interface, key.ip))
+                        .with_object_type("neighbor_entry")
+                        .with_error(err.to_string())
+                );
+                return Err(err);
+            }
+        };
 
         // Update stats based on IP version
         if entry.is_ipv4() {
@@ -82,6 +117,21 @@ impl NeighOrch {
 
         self.stats.stats.neighbors_removed = self.stats.stats.neighbors_removed.saturating_add(1);
 
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceDelete, "NeighOrch", "remove_neighbor")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("{}/{}", key.interface, key.ip))
+                .with_object_type("neighbor_entry")
+                .with_details(serde_json::json!({
+                    "interface": key.interface,
+                    "ip_address": key.ip.to_string(),
+                    "mac_address": format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                        entry.mac.as_bytes()[0], entry.mac.as_bytes()[1], entry.mac.as_bytes()[2],
+                        entry.mac.as_bytes()[3], entry.mac.as_bytes()[4], entry.mac.as_bytes()[5]),
+                    "ip_version": if entry.is_ipv4() { "ipv4" } else { "ipv6" },
+                }))
+        );
+
         Ok(entry)
     }
 
@@ -89,11 +139,34 @@ impl NeighOrch {
         let key = entry.key.clone();
 
         if !self.neighbors.contains_key(&key) {
-            return Err(NeighOrchError::NeighborNotFound(key));
+            let err = NeighOrchError::NeighborNotFound(key.clone());
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceModify, "NeighOrch", "update_neighbor")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(format!("{}/{}", key.interface, key.ip))
+                    .with_object_type("neighbor_entry")
+                    .with_error(err.to_string())
+            );
+            return Err(err);
         }
 
         self.stats.stats.neighbors_updated = self.stats.stats.neighbors_updated.saturating_add(1);
-        self.neighbors.insert(key, entry);
+        self.neighbors.insert(key.clone(), entry.clone());
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceModify, "NeighOrch", "update_neighbor")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("{}/{}", key.interface, key.ip))
+                .with_object_type("neighbor_entry")
+                .with_details(serde_json::json!({
+                    "interface": key.interface,
+                    "ip_address": key.ip.to_string(),
+                    "mac_address": format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                        entry.mac.as_bytes()[0], entry.mac.as_bytes()[1], entry.mac.as_bytes()[2],
+                        entry.mac.as_bytes()[3], entry.mac.as_bytes()[4], entry.mac.as_bytes()[5]),
+                    "state_change": "mac_address_updated",
+                }))
+        );
 
         Ok(())
     }

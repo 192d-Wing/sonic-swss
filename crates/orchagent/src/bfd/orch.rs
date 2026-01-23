@@ -4,6 +4,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use sonic_sai::types::RawSaiObjectId;
+use thiserror::Error;
+
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
 
 use super::types::{
     BfdSessionConfig, BfdSessionInfo, BfdSessionKey, BfdSessionState, BfdSessionType, BfdUpdate,
@@ -11,39 +15,30 @@ use super::types::{
 };
 
 /// BFD orchestrator error type.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum BfdOrchError {
     /// Session not found.
+    #[error("BFD session not found: {0}")]
     SessionNotFound(String),
     /// Session already exists.
+    #[error("BFD session already exists: {0}")]
     SessionExists(String),
     /// Invalid configuration.
+    #[error("Invalid BFD config: {0}")]
     InvalidConfig(String),
     /// SAI error.
+    #[error("SAI error: {0}")]
     SaiError(String),
     /// VRF not found.
+    #[error("VRF not found: {0}")]
     VrfNotFound(String),
     /// Port not found.
+    #[error("Port not found: {0}")]
     PortNotFound(String),
     /// Source port exhausted.
+    #[error("BFD source ports exhausted")]
     SourcePortExhausted,
 }
-
-impl std::fmt::Display for BfdOrchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SessionNotFound(key) => write!(f, "BFD session not found: {}", key),
-            Self::SessionExists(key) => write!(f, "BFD session already exists: {}", key),
-            Self::InvalidConfig(msg) => write!(f, "Invalid BFD config: {}", msg),
-            Self::SaiError(msg) => write!(f, "SAI error: {}", msg),
-            Self::VrfNotFound(name) => write!(f, "VRF not found: {}", name),
-            Self::PortNotFound(name) => write!(f, "Port not found: {}", name),
-            Self::SourcePortExhausted => write!(f, "BFD source ports exhausted"),
-        }
-    }
-}
-
-impl std::error::Error for BfdOrchError {}
 
 /// Callbacks for BfdOrch operations.
 pub trait BfdOrchCallbacks: Send + Sync {
@@ -230,7 +225,18 @@ impl BfdOrch {
 
         // Check if session already exists
         if self.sessions.contains_key(&key) {
-            return Err(BfdOrchError::SessionExists(key));
+            let err = BfdOrchError::SessionExists(key.clone());
+            let audit_record = AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "BfdOrch",
+                "create_session",
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&key)
+            .with_object_type("bfd_session")
+            .with_error("Session already exists");
+            audit_log!(audit_record);
+            return Err(err);
         }
 
         let callbacks = self
@@ -242,12 +248,46 @@ impl BfdOrch {
         if callbacks.is_software_bfd() {
             let state_db_key = config.key.to_state_db_key();
             callbacks.create_software_bfd_session(&state_db_key, &config);
+
+            let audit_record = AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "BfdOrch",
+                "create_session",
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(&key)
+            .with_object_type("bfd_session_software")
+            .with_details(serde_json::json!({
+                "session_key": key,
+                "session_type": config.session_type.config_string(),
+                "tx_interval": config.tx_interval,
+                "rx_interval": config.rx_interval,
+                "multiplier": config.multiplier,
+                "mode": "software",
+            }));
+            audit_log!(audit_record);
             return Ok(());
         }
 
         // Handle TSA - cache and skip if shutdown_bfd_during_tsa is set
         if callbacks.is_tsa_active() && config.shutdown_bfd_during_tsa {
-            self.tsa_cache.insert(key, config);
+            self.tsa_cache.insert(key.clone(), config.clone());
+
+            let audit_record = AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "BfdOrch",
+                "create_session_cached_during_tsa",
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(&key)
+            .with_object_type("bfd_session_cached")
+            .with_details(serde_json::json!({
+                "session_key": key,
+                "session_type": config.session_type.config_string(),
+                "tsa_active": true,
+                "shutdown_during_tsa": config.shutdown_bfd_during_tsa,
+            }));
+            audit_log!(audit_record);
             return Ok(());
         }
 
@@ -286,7 +326,7 @@ impl BfdOrch {
                     );
 
                     self.sessions.insert(key.clone(), info);
-                    self.sai_to_key.insert(sai_oid, key);
+                    self.sai_to_key.insert(sai_oid, key.clone());
                     self.stats.sessions_created += 1;
 
                     if attempt > 0 {
@@ -300,6 +340,34 @@ impl BfdOrch {
                         config.session_type,
                     );
 
+                    // Log successful session creation with NIST AU-3 audit details
+                    let audit_record = AuditRecord::new(
+                        AuditCategory::ResourceCreate,
+                        "BfdOrch",
+                        "create_hardware_session",
+                    )
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_id(&key)
+                    .with_object_type("bfd_session_hardware")
+                    .with_details(serde_json::json!({
+                        "session_key": key,
+                        "local_discriminator": discriminator,
+                        "source_port": src_port,
+                        "sai_oid": format!("0x{:x}", sai_oid),
+                        "session_type": config.session_type.config_string(),
+                        "tx_interval": config.tx_interval,
+                        "rx_interval": config.rx_interval,
+                        "multiplier": config.multiplier,
+                        "tos": config.tos,
+                        "initial_state": "Down",
+                        "remote_peer": config.key.peer_ip.to_string(),
+                        "interface": config.key.interface.as_deref(),
+                        "vrf": config.key.vrf.as_str(),
+                        "retries_attempted": attempt,
+                        "mode": "hardware",
+                    }));
+                    audit_log!(audit_record);
+
                     return Ok(());
                 }
                 Err(e) => {
@@ -309,10 +377,33 @@ impl BfdOrch {
             }
         }
 
-        Err(BfdOrchError::SaiError(format!(
+        let error = BfdOrchError::SaiError(format!(
             "Failed after {} retries: {}",
             NUM_BFD_SRCPORT_RETRIES, last_error
-        )))
+        ));
+
+        // Log failed session creation
+        let audit_record = AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "BfdOrch",
+            "create_hardware_session",
+        )
+        .with_outcome(AuditOutcome::Failure)
+        .with_object_id(&key)
+        .with_object_type("bfd_session_hardware")
+        .with_error(&format!(
+            "Failed after {} retries: {}",
+            NUM_BFD_SRCPORT_RETRIES, last_error
+        ))
+        .with_details(serde_json::json!({
+            "session_key": key,
+            "session_type": config.session_type.config_string(),
+            "remote_peer": config.key.peer_ip.to_string(),
+            "retries_attempted": NUM_BFD_SRCPORT_RETRIES,
+        }));
+        audit_log!(audit_record);
+
+        Err(error)
     }
 
     /// Removes a BFD session.
@@ -324,6 +415,19 @@ impl BfdOrch {
 
         // Check TSA cache first
         if self.tsa_cache.remove(key).is_some() {
+            let audit_record = AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "BfdOrch",
+                "remove_session_from_tsa_cache",
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(key)
+            .with_object_type("bfd_session_cached")
+            .with_details(serde_json::json!({
+                "session_key": key,
+                "removal_source": "tsa_cache",
+            }));
+            audit_log!(audit_record);
             return Ok(());
         }
 
@@ -331,23 +435,70 @@ impl BfdOrch {
         if callbacks.is_software_bfd() {
             if let Some(session_key) = BfdSessionKey::parse(key) {
                 callbacks.remove_software_bfd_session(&session_key.to_state_db_key());
+
+                let audit_record = AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "BfdOrch",
+                    "remove_session_software",
+                )
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(key)
+                .with_object_type("bfd_session_software")
+                .with_details(serde_json::json!({
+                    "session_key": key,
+                    "mode": "software",
+                }));
+                audit_log!(audit_record);
             }
             return Ok(());
         }
 
-        // Get session info
-        let info = self
-            .sessions
-            .get(key)
-            .ok_or_else(|| BfdOrchError::SessionNotFound(key.to_string()))?;
+        // Get session info and extract all needed data before releasing the borrow
+        let (sai_oid, state_db_key, config_copy, local_disc, src_port) = {
+            let info = self
+                .sessions
+                .get(key)
+                .ok_or_else(|| {
+                    let err = BfdOrchError::SessionNotFound(key.to_string());
+                    let audit_record = AuditRecord::new(
+                        AuditCategory::ResourceDelete,
+                        "BfdOrch",
+                        "remove_session",
+                    )
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(key)
+                    .with_object_type("bfd_session")
+                    .with_error("Session not found");
+                    audit_log!(audit_record);
+                    err
+                })?;
 
-        let sai_oid = info.sai_oid;
-        let state_db_key = info.state_db_key.clone();
+            (
+                info.sai_oid,
+                info.state_db_key.clone(),
+                info.config.clone(),
+                info.local_discriminator,
+                info.src_port,
+            )
+        };
 
         // Remove via SAI
         callbacks
             .remove_bfd_session(sai_oid)
-            .map_err(BfdOrchError::SaiError)?;
+            .map_err(|e| {
+                let err = BfdOrchError::SaiError(e.clone());
+                let audit_record = AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "BfdOrch",
+                    "remove_session",
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(key)
+                .with_object_type("bfd_session_hardware")
+                .with_error(&e);
+                audit_log!(audit_record);
+                err
+            })?;
 
         // Clean up internal state
         self.sessions.remove(key);
@@ -356,6 +507,28 @@ impl BfdOrch {
 
         // Remove from state DB
         callbacks.remove_state_db(&state_db_key);
+
+        // Log successful session deletion with NIST AU-3 audit details
+        let audit_record = AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "BfdOrch",
+            "remove_session",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(key)
+        .with_object_type("bfd_session_hardware")
+        .with_details(serde_json::json!({
+            "session_key": key,
+            "sai_oid": format!("0x{:x}", sai_oid),
+            "local_discriminator": local_disc,
+            "source_port": src_port,
+            "session_type": config_copy.session_type.config_string(),
+            "remote_peer": config_copy.key.peer_ip.to_string(),
+            "interface": config_copy.key.interface.as_deref(),
+            "vrf": config_copy.key.vrf.as_str(),
+            "mode": "hardware",
+        }));
+        audit_log!(audit_record);
 
         Ok(())
     }
@@ -413,21 +586,63 @@ impl BfdOrch {
                 .map(|(k, info)| (k.clone(), info.config.clone()))
                 .collect();
 
+            let shutdown_count = sessions_to_shutdown.len();
+            let mut session_keys = Vec::new();
+
             for (key, config) in sessions_to_shutdown {
+                session_keys.push(key.clone());
                 // Remove the session first (ignore errors)
                 let _ = self.remove_session(&key);
                 // Then cache the config for later restoration
                 self.tsa_cache.insert(key, config);
                 self.stats.tsa_shutdowns += 1;
             }
+
+            // Log TSA enabled event with SystemLifecycle category per NIST AU-2
+            let audit_record = AuditRecord::new(
+                AuditCategory::SystemLifecycle,
+                "BfdOrch",
+                "handle_tsa_enabled",
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id("TSA")
+            .with_object_type("traffic_shift_active")
+            .with_details(serde_json::json!({
+                "event": "tsa_enabled",
+                "sessions_shutdown": shutdown_count,
+                "session_keys": session_keys,
+                "action": "BFD sessions with shutdown_bfd_during_tsa=true have been shutdown and cached",
+            }));
+            audit_log!(audit_record);
         } else {
             // TSA disabled - restore cached sessions
             let cached: Vec<_> = self.tsa_cache.drain().collect();
-            for (_, config) in cached {
+            let restore_count = cached.len();
+            let mut session_keys = Vec::new();
+
+            for (key, config) in cached {
+                session_keys.push(key.clone());
                 // Recreate the session (ignore errors)
                 let _ = self.create_session(config);
                 self.stats.tsa_restores += 1;
             }
+
+            // Log TSA disabled event with SystemLifecycle category per NIST AU-2
+            let audit_record = AuditRecord::new(
+                AuditCategory::SystemLifecycle,
+                "BfdOrch",
+                "handle_tsa_disabled",
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id("TSA")
+            .with_object_type("traffic_shift_active")
+            .with_details(serde_json::json!({
+                "event": "tsa_disabled",
+                "sessions_restored": restore_count,
+                "session_keys": session_keys,
+                "action": "Cached BFD sessions have been restored following TSA disable",
+            }));
+            audit_log!(audit_record);
         }
 
         Ok(())

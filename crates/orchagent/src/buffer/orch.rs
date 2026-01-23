@@ -2,13 +2,19 @@
 
 use super::types::{BufferPoolEntry, BufferProfileEntry, BufferStats};
 use std::collections::HashMap;
+use thiserror::Error;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum BufferOrchError {
+    #[error("Pool not found: {0}")]
     PoolNotFound(String),
+    #[error("Profile not found: {0}")]
     ProfileNotFound(String),
+    #[error("Invalid threshold: {0}")]
     InvalidThreshold(String),
+    #[error("SAI error: {0}")]
     SaiError(String),
+    #[error("Reference count error: {0}")]
     RefCountError(String),
 }
 
@@ -60,40 +66,163 @@ impl BufferOrch {
         let name = entry.name.clone();
 
         if self.pools.contains_key(&name) {
+            audit_log!(
+                resource_id: &name,
+                action: "create_buffer_pool",
+                category: "ResourceCreate",
+                outcome: "FAIL",
+                details: serde_json::json!({
+                    "error": "Pool already exists",
+                    "pool_name": name,
+                })
+            );
             return Err(BufferOrchError::SaiError("Pool already exists".to_string()));
         }
 
         self.stats.stats.pools_created = self.stats.stats.pools_created.saturating_add(1);
-        self.pools.insert(name, entry);
+        self.pools.insert(name.clone(), entry.clone());
+
+        audit_log!(
+            resource_id: &name,
+            action: "create_buffer_pool",
+            category: "ResourceCreate",
+            outcome: "SUCCESS",
+            details: serde_json::json!({
+                "pool_name": name,
+                "size": entry.config.size,
+                "pool_type": format!("{:?}", entry.config.pool_type),
+                "mode": format!("{:?}", entry.config.mode),
+                "sai_oid": entry.sai_oid,
+            })
+        );
 
         Ok(())
     }
 
     pub fn remove_pool(&mut self, name: &str) -> Result<BufferPoolEntry, BufferOrchError> {
         let entry = self.pools.get(name)
-            .ok_or_else(|| BufferOrchError::PoolNotFound(name.to_string()))?;
+            .ok_or_else(|| {
+                audit_log!(
+                    resource_id: name,
+                    action: "delete_buffer_pool",
+                    category: "ResourceDelete",
+                    outcome: "FAIL",
+                    details: serde_json::json!({
+                        "error": "Pool not found",
+                        "pool_name": name,
+                    })
+                );
+                BufferOrchError::PoolNotFound(name.to_string())
+            })?;
 
         if entry.ref_count > 0 {
+            audit_log!(
+                resource_id: name,
+                action: "delete_buffer_pool",
+                category: "ResourceDelete",
+                outcome: "FAIL",
+                details: serde_json::json!({
+                    "error": "Pool has references",
+                    "pool_name": name,
+                    "ref_count": entry.ref_count,
+                })
+            );
             return Err(BufferOrchError::RefCountError(
                 format!("Pool {} still has {} references", name, entry.ref_count)
             ));
         }
 
-        self.pools.remove(name)
-            .ok_or_else(|| BufferOrchError::PoolNotFound(name.to_string()))
+        let removed = self.pools.remove(name)
+            .ok_or_else(|| BufferOrchError::PoolNotFound(name.to_string()))?;
+
+        audit_log!(
+            resource_id: name,
+            action: "delete_buffer_pool",
+            category: "ResourceDelete",
+            outcome: "SUCCESS",
+            details: serde_json::json!({
+                "pool_name": name,
+                "size": removed.config.size,
+                "pool_type": format!("{:?}", removed.config.pool_type),
+            })
+        );
+
+        Ok(removed)
     }
 
     pub fn increment_pool_ref(&mut self, name: &str) -> Result<u32, BufferOrchError> {
         let pool = self.pools.get_mut(name)
-            .ok_or_else(|| BufferOrchError::PoolNotFound(name.to_string()))?;
-        Ok(pool.add_ref())
+            .ok_or_else(|| {
+                audit_log!(
+                    resource_id: name,
+                    action: "create_priority_group",
+                    category: "ResourceCreate",
+                    outcome: "FAIL",
+                    details: serde_json::json!({
+                        "error": "Pool not found",
+                        "pool_name": name,
+                    })
+                );
+                BufferOrchError::PoolNotFound(name.to_string())
+            })?;
+        let new_count = pool.add_ref();
+
+        audit_log!(
+            resource_id: name,
+            action: "create_priority_group",
+            category: "ResourceCreate",
+            outcome: "SUCCESS",
+            details: serde_json::json!({
+                "pool_name": name,
+                "ref_count": new_count,
+            })
+        );
+
+        Ok(new_count)
     }
 
     pub fn decrement_pool_ref(&mut self, name: &str) -> Result<u32, BufferOrchError> {
         let pool = self.pools.get_mut(name)
-            .ok_or_else(|| BufferOrchError::PoolNotFound(name.to_string()))?;
+            .ok_or_else(|| {
+                audit_log!(
+                    resource_id: name,
+                    action: "update_pg_configuration",
+                    category: "ResourceModify",
+                    outcome: "FAIL",
+                    details: serde_json::json!({
+                        "error": "Pool not found",
+                        "pool_name": name,
+                    })
+                );
+                BufferOrchError::PoolNotFound(name.to_string())
+            })?;
         pool.remove_ref()
-            .map_err(|e| BufferOrchError::RefCountError(e))
+            .map(|new_count| {
+                audit_log!(
+                    resource_id: name,
+                    action: "update_pg_configuration",
+                    category: "ResourceModify",
+                    outcome: "SUCCESS",
+                    details: serde_json::json!({
+                        "pool_name": name,
+                        "ref_count": new_count,
+                    })
+                );
+                new_count
+            })
+            .map_err(|e| {
+                audit_log!(
+                    resource_id: name,
+                    action: "update_pg_configuration",
+                    category: "ResourceModify",
+                    outcome: "FAIL",
+                    details: serde_json::json!({
+                        "error": e,
+                        "pool_name": name,
+                    })
+                );
+                BufferOrchError::RefCountError(e)
+            })
     }
 
     pub fn get_profile(&self, name: &str) -> Option<&BufferProfileEntry> {
@@ -108,32 +237,103 @@ impl BufferOrch {
         let name = entry.name.clone();
 
         if self.profiles.contains_key(&name) {
+            audit_log!(
+                resource_id: &name,
+                action: "create_buffer_profile",
+                category: "ResourceCreate",
+                outcome: "FAIL",
+                details: serde_json::json!({
+                    "error": "Profile already exists",
+                    "profile_name": name,
+                })
+            );
             return Err(BufferOrchError::SaiError("Profile already exists".to_string()));
         }
 
         // Verify pool exists
         if !self.pools.contains_key(&entry.config.pool_name) {
+            audit_log!(
+                resource_id: &name,
+                action: "create_buffer_profile",
+                category: "ResourceCreate",
+                outcome: "FAIL",
+                details: serde_json::json!({
+                    "error": "Referenced pool not found",
+                    "profile_name": name,
+                    "pool_name": entry.config.pool_name,
+                })
+            );
             return Err(BufferOrchError::PoolNotFound(entry.config.pool_name.clone()));
         }
 
         self.stats.stats.profiles_created = self.stats.stats.profiles_created.saturating_add(1);
-        self.profiles.insert(name, entry);
+        self.profiles.insert(name.clone(), entry.clone());
+
+        audit_log!(
+            resource_id: &name,
+            action: "create_buffer_profile",
+            category: "ResourceCreate",
+            outcome: "SUCCESS",
+            details: serde_json::json!({
+                "profile_name": name,
+                "pool_name": entry.config.pool_name,
+                "size": entry.config.size,
+                "sai_oid": entry.sai_oid,
+            })
+        );
 
         Ok(())
     }
 
     pub fn remove_profile(&mut self, name: &str) -> Result<BufferProfileEntry, BufferOrchError> {
         let entry = self.profiles.get(name)
-            .ok_or_else(|| BufferOrchError::ProfileNotFound(name.to_string()))?;
+            .ok_or_else(|| {
+                audit_log!(
+                    resource_id: name,
+                    action: "delete_buffer_profile",
+                    category: "ResourceDelete",
+                    outcome: "FAIL",
+                    details: serde_json::json!({
+                        "error": "Profile not found",
+                        "profile_name": name,
+                    })
+                );
+                BufferOrchError::ProfileNotFound(name.to_string())
+            })?;
 
         if entry.ref_count > 0 {
+            audit_log!(
+                resource_id: name,
+                action: "delete_buffer_profile",
+                category: "ResourceDelete",
+                outcome: "FAIL",
+                details: serde_json::json!({
+                    "error": "Profile has references",
+                    "profile_name": name,
+                    "ref_count": entry.ref_count,
+                })
+            );
             return Err(BufferOrchError::RefCountError(
                 format!("Profile {} still has {} references", name, entry.ref_count)
             ));
         }
 
-        self.profiles.remove(name)
-            .ok_or_else(|| BufferOrchError::ProfileNotFound(name.to_string()))
+        let removed = self.profiles.remove(name)
+            .ok_or_else(|| BufferOrchError::ProfileNotFound(name.to_string()))?;
+
+        audit_log!(
+            resource_id: name,
+            action: "delete_buffer_profile",
+            category: "ResourceDelete",
+            outcome: "SUCCESS",
+            details: serde_json::json!({
+                "profile_name": name,
+                "pool_name": removed.config.pool_name,
+                "size": removed.config.size,
+            })
+        );
+
+        Ok(removed)
     }
 
     pub fn increment_profile_ref(&mut self, name: &str) -> Result<u32, BufferOrchError> {

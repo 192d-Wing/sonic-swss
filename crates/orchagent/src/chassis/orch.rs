@@ -12,18 +12,26 @@ use super::types::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
+use thiserror::Error;
 
 /// Result type for ChassisOrch operations.
 pub type Result<T> = std::result::Result<T, ChassisOrchError>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum ChassisOrchError {
+    #[error("System port not found: {0:?}")]
     SystemPortNotFound(SystemPortKey),
+    #[error("System port exists: {0:?}")]
     SystemPortExists(SystemPortKey),
+    #[error("Fabric port not found: {0:?}")]
     FabricPortNotFound(FabricPortKey),
+    #[error("Fabric port exists: {0:?}")]
     FabricPortExists(FabricPortKey),
+    #[error("Invalid switch ID: {0}")]
     InvalidSwitchId(u32),
+    #[error("Invalid core index: {0}")]
     InvalidCoreIndex(u32),
+    #[error("SAI error: {0}")]
     SaiError(String),
 }
 
@@ -130,6 +138,17 @@ impl<C: ChassisOrchCallbacks> ChassisOrch<C> {
         let key = SystemPortKey::new(config.system_port_id);
 
         if self.system_ports.contains_key(&key) {
+            audit_log!(
+                resource_id: &format!("system_port_{}", config.system_port_id),
+                action: "add_system_port",
+                category: "ResourceCreate",
+                outcome: "FAIL",
+                details: serde_json::json!({
+                    "error": "System port already exists",
+                    "system_port_id": config.system_port_id,
+                    "switch_id": config.switch_id,
+                })
+            );
             return Err(ChassisOrchError::SystemPortExists(key));
         }
 
@@ -144,7 +163,7 @@ impl<C: ChassisOrchCallbacks> ChassisOrch<C> {
             0x1000 + config.system_port_id as u64
         };
 
-        let mut entry = SystemPortEntry::new(config);
+        let mut entry = SystemPortEntry::new(config.clone());
         entry.sai_oid = sai_oid;
 
         if let Some(ref callbacks) = self.callbacks {
@@ -155,6 +174,21 @@ impl<C: ChassisOrchCallbacks> ChassisOrch<C> {
         self.system_ports.insert(key, entry);
         self.stats.stats.system_ports_created += 1;
 
+        audit_log!(
+            resource_id: &format!("system_port_{}", config.system_port_id),
+            action: "add_system_port",
+            category: "ResourceCreate",
+            outcome: "SUCCESS",
+            details: serde_json::json!({
+                "system_port_id": config.system_port_id,
+                "switch_id": config.switch_id,
+                "core_index": config.core_index,
+                "core_port_index": config.core_port_index,
+                "speed": config.speed,
+                "sai_oid": sai_oid,
+            })
+        );
+
         Ok(())
     }
 
@@ -163,13 +197,37 @@ impl<C: ChassisOrchCallbacks> ChassisOrch<C> {
         let entry = self
             .system_ports
             .remove(key)
-            .ok_or_else(|| ChassisOrchError::SystemPortNotFound(key.clone()))?;
+            .ok_or_else(|| {
+                audit_log!(
+                    resource_id: &format!("system_port_{}", key.system_port_id),
+                    action: "remove_system_port",
+                    category: "ResourceDelete",
+                    outcome: "FAIL",
+                    details: serde_json::json!({
+                        "error": "System port not found",
+                        "system_port_id": key.system_port_id,
+                    })
+                );
+                ChassisOrchError::SystemPortNotFound(key.clone())
+            })?;
 
         if let Some(ref callbacks) = self.callbacks {
             callbacks.remove_system_port(entry.sai_oid)?;
             callbacks.on_system_port_removed(key);
             let _ = callbacks.remove_system_port_state(key);
         }
+
+        audit_log!(
+            resource_id: &format!("system_port_{}", key.system_port_id),
+            action: "remove_system_port",
+            category: "ResourceDelete",
+            outcome: "SUCCESS",
+            details: serde_json::json!({
+                "system_port_id": key.system_port_id,
+                "switch_id": entry.config.switch_id,
+                "speed": entry.config.speed,
+            })
+        );
 
         Ok(())
     }
@@ -258,7 +316,19 @@ impl<C: ChassisOrchCallbacks> ChassisOrch<C> {
         let entry = self
             .fabric_ports
             .get_mut(key)
-            .ok_or_else(|| ChassisOrchError::FabricPortNotFound(key.clone()))?;
+            .ok_or_else(|| {
+                audit_log!(
+                    resource_id: &format!("fabric_port_{}", key.fabric_port_id),
+                    action: "update_fabric_port",
+                    category: "ResourceModify",
+                    outcome: "FAIL",
+                    details: serde_json::json!({
+                        "error": "Fabric port not found",
+                        "fabric_port_id": key.fabric_port_id,
+                    })
+                );
+                ChassisOrchError::FabricPortNotFound(key.clone())
+            })?;
 
         if entry.isolate == isolate {
             return Ok(()); // No change needed
@@ -270,6 +340,19 @@ impl<C: ChassisOrchCallbacks> ChassisOrch<C> {
         }
 
         entry.isolate = isolate;
+
+        audit_log!(
+            resource_id: &format!("fabric_port_{}", key.fabric_port_id),
+            action: "update_fabric_port",
+            category: "ResourceModify",
+            outcome: "SUCCESS",
+            details: serde_json::json!({
+                "fabric_port_id": key.fabric_port_id,
+                "isolate": isolate,
+                "sai_oid": entry.sai_oid,
+            })
+        );
+
         Ok(())
     }
 

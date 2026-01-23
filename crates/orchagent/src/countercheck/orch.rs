@@ -2,10 +2,13 @@
 
 use super::types::{CounterCheckEntry, CounterCheckKey, CounterCheckStats};
 use std::collections::HashMap;
+use thiserror::Error;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum CounterCheckOrchError {
+    #[error("Check not found: {0:?}")]
     CheckNotFound(CounterCheckKey),
+    #[error("Port not found: {0}")]
     PortNotFound(String),
 }
 
@@ -39,15 +42,86 @@ impl CounterCheckOrch {
     }
 
     pub fn add_check(&mut self, key: CounterCheckKey, entry: CounterCheckEntry) {
-        self.checks.insert(key, entry);
+        let resource_id = format!("{}_{}", key.port_name, key.counter_type);
+        self.checks.insert(key.clone(), entry.clone());
+
+        audit_log!(
+            resource_id: &resource_id,
+            action: "add_counter_check",
+            category: "ResourceCreate",
+            outcome: "SUCCESS",
+            details: serde_json::json!({
+                "port_name": key.port_name,
+                "counter_type": key.counter_type,
+                "expected_value": entry.config.expected_value,
+                "tolerance": entry.config.tolerance,
+            })
+        );
     }
 
     pub fn remove_check(&mut self, key: &CounterCheckKey) -> Option<CounterCheckEntry> {
-        self.checks.remove(key)
+        let resource_id = format!("{}_{}", key.port_name, key.counter_type);
+        let removed = self.checks.remove(key);
+
+        if removed.is_some() {
+            audit_log!(
+                resource_id: &resource_id,
+                action: "remove_counter_check",
+                category: "ResourceDelete",
+                outcome: "SUCCESS",
+                details: serde_json::json!({
+                    "port_name": key.port_name,
+                    "counter_type": key.counter_type,
+                })
+            );
+        } else {
+            audit_log!(
+                resource_id: &resource_id,
+                action: "remove_counter_check",
+                category: "ResourceDelete",
+                outcome: "FAIL",
+                details: serde_json::json!({
+                    "error": "Check not found",
+                    "port_name": key.port_name,
+                    "counter_type": key.counter_type,
+                })
+            );
+        }
+
+        removed
     }
 
     pub fn check_count(&self) -> usize {
         self.checks.len()
+    }
+
+    pub fn validate_counters(&mut self) -> Result<usize, CounterCheckOrchError> {
+        let mut validated = 0usize;
+
+        for (key, entry) in &self.checks {
+            let is_valid = entry.is_within_tolerance(entry.last_value);
+
+            audit_log!(
+                resource_id: &format!("{}_{}", key.port_name, key.counter_type),
+                action: "validate_counters",
+                category: "SecurityPolicy",
+                outcome: if is_valid { "SUCCESS" } else { "FAIL" },
+                details: serde_json::json!({
+                    "port_name": key.port_name,
+                    "counter_type": key.counter_type,
+                    "last_value": entry.last_value,
+                    "expected_value": entry.config.expected_value,
+                    "tolerance": entry.config.tolerance,
+                    "within_tolerance": is_valid,
+                })
+            );
+
+            if is_valid {
+                validated += 1;
+            }
+        }
+
+        Ok(validated)
     }
 
     pub fn stats(&self) -> &CounterCheckOrchStats {

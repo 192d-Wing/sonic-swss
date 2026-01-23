@@ -13,6 +13,7 @@ use super::types::{FabricPortState, IsolationState, LinkStatus, PortHealthState}
 use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::Arc;
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome, audit_log};
 
 /// Result type for FabricPortsOrch operations.
 pub type Result<T> = std::result::Result<T, FabricPortsOrchError>;
@@ -223,6 +224,21 @@ impl<C: FabricPortsOrchCallbacks> FabricPortsOrch<C> {
             _ => {}
         }
 
+        let record = AuditRecord::new(
+            AuditCategory::NetworkConfig,
+            "FabricPortsOrch",
+            format!("update_link_status: lane {}", lane),
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("lane_{}", lane))
+        .with_object_type("fabric_port")
+        .with_details(serde_json::json!({
+            "old_status": format!("{:?}", old_status),
+            "new_status": format!("{:?}", new_status),
+            "sai_oid": format!("{:#x}", port.sai_oid),
+        }));
+        audit_log!(record);
+
         if let Some(ref callbacks) = self.callbacks {
             callbacks.on_link_status_changed(lane, old_status, new_status);
             let _ = callbacks.write_state_db(lane, port);
@@ -301,6 +317,21 @@ impl<C: FabricPortsOrchCallbacks> FabricPortsOrch<C> {
             callbacks.on_port_isolated(lane, IsolationState::AutoIsolated);
         }
 
+        let record = AuditRecord::new(
+            AuditCategory::ResourceModify,
+            "FabricPortsOrch",
+            format!("auto_isolate_port: lane {}", lane),
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("lane_{}", lane))
+        .with_object_type("fabric_port")
+        .with_details(serde_json::json!({
+            "isolation_state": "AutoIsolated",
+            "sai_oid": format!("{:#x}", port.sai_oid),
+            "error_threshold": self.config.auto_isolate_threshold,
+        }));
+        audit_log!(record);
+
         port.isolation = IsolationState::AutoIsolated;
         self.stats.auto_isolations += 1;
 
@@ -322,6 +353,20 @@ impl<C: FabricPortsOrchCallbacks> FabricPortsOrch<C> {
             callbacks.set_isolation(port.sai_oid, true)?;
             callbacks.on_port_isolated(lane, IsolationState::ConfigIsolated);
         }
+
+        let record = AuditRecord::new(
+            AuditCategory::ResourceModify,
+            "FabricPortsOrch",
+            format!("config_isolate_port: lane {}", lane),
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("lane_{}", lane))
+        .with_object_type("fabric_port")
+        .with_details(serde_json::json!({
+            "isolation_state": "ConfigIsolated",
+            "sai_oid": format!("{:#x}", port.sai_oid),
+        }));
+        audit_log!(record);
 
         port.isolation = IsolationState::ConfigIsolated;
         self.stats.config_isolations += 1;

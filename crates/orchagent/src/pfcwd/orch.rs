@@ -1,15 +1,21 @@
 //! PFC Watchdog orchestration logic.
 
 use super::types::{DetectionTime, PfcWdAction, PfcWdConfig, PfcWdEntry, PfcWdStats, RestorationTime};
+use crate::{audit_log, audit::{AuditCategory, AuditOutcome, AuditRecord}};
 use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::Arc;
+use thiserror::Error;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum PfcWdOrchError {
+    #[error("Queue already exists: {0}")]
     QueueExists(String),
+    #[error("Queue not found: {0}")]
     QueueNotFound(String),
+    #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
+    #[error("SAI error: {0}")]
     SaiError(String),
 }
 
@@ -68,7 +74,15 @@ impl PfcWdOrch {
 
     pub fn register_queue(&mut self, config: PfcWdConfig) -> Result<(), PfcWdOrchError> {
         if self.queues.contains_key(&config.queue_name) {
-            return Err(PfcWdOrchError::QueueExists(config.queue_name.clone()));
+            let err = PfcWdOrchError::QueueExists(config.queue_name.clone());
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "PfcWdOrch", "set_queue_action")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(config.queue_name.clone())
+                    .with_object_type("pfcwd_queue")
+                    .with_error(err.to_string())
+            );
+            return Err(err);
         }
 
         let callbacks = Arc::clone(
@@ -76,27 +90,79 @@ impl PfcWdOrch {
                 .ok_or_else(|| PfcWdOrchError::InvalidConfig("No callbacks set".to_string()))?,
         );
 
-        let wd_id = callbacks.create_watchdog(&config)
-            .map_err(PfcWdOrchError::SaiError)?;
+        let wd_id = match callbacks.create_watchdog(&config) {
+            Ok(id) => id,
+            Err(e) => {
+                let err = PfcWdOrchError::SaiError(e);
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceCreate, "PfcWdOrch", "set_queue_action")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(config.queue_name.clone())
+                        .with_object_type("pfcwd_queue")
+                        .with_error(err.to_string())
+                );
+                return Err(err);
+            }
+        };
 
         let entry = PfcWdEntry::from_config(config.clone(), wd_id);
-        self.queues.insert(config.queue_name, entry);
+        self.queues.insert(config.queue_name.clone(), entry);
         self.stats.queues_registered += 1;
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceModify, "PfcWdOrch", "set_queue_action")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(config.queue_name)
+                .with_object_type("pfcwd_queue")
+                .with_details(serde_json::json!({
+                    "action": format!("{:?}", config.action),
+                    "detection_time_ms": config.detection_time.as_millis(),
+                    "restoration_time_ms": config.restoration_time.as_millis(),
+                }))
+        );
 
         Ok(())
     }
 
     pub fn unregister_queue(&mut self, queue_name: &str) -> Result<(), PfcWdOrchError> {
-        let entry = self.queues.remove(queue_name)
-            .ok_or_else(|| PfcWdOrchError::QueueNotFound(queue_name.to_string()))?;
+        let entry = match self.queues.remove(queue_name) {
+            Some(e) => e,
+            None => {
+                let err = PfcWdOrchError::QueueNotFound(queue_name.to_string());
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "PfcWdOrch", "set_queue_action")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(queue_name)
+                        .with_object_type("pfcwd_queue")
+                        .with_error(err.to_string())
+                );
+                return Err(err);
+            }
+        };
 
         let callbacks = self.callbacks.as_ref()
             .ok_or_else(|| PfcWdOrchError::InvalidConfig("No callbacks set".to_string()))?;
 
-        callbacks.remove_watchdog(entry.watchdog_id)
-            .map_err(PfcWdOrchError::SaiError)?;
+        if let Err(e) = callbacks.remove_watchdog(entry.watchdog_id) {
+            let err = PfcWdOrchError::SaiError(e);
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceDelete, "PfcWdOrch", "set_queue_action")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(queue_name)
+                    .with_object_type("pfcwd_queue")
+                    .with_error(err.to_string())
+            );
+            return Err(err);
+        }
 
         self.stats.queues_unregistered += 1;
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceDelete, "PfcWdOrch", "set_queue_action")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(queue_name)
+                .with_object_type("pfcwd_queue")
+        );
 
         Ok(())
     }
@@ -135,6 +201,17 @@ impl PfcWdOrch {
         if let Some(entry) = self.queues.get_mut(queue_name) {
             entry.storm_detected = true;
             self.stats.storms_detected += 1;
+
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceModify, "PfcWdOrch", "update_detection_time")
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_id(queue_name)
+                    .with_object_type("pfcwd_queue")
+                    .with_details(serde_json::json!({
+                        "event": "storm_detected",
+                        "detection_time_ms": entry.detection_time.as_millis(),
+                    }))
+            );
         }
     }
 
@@ -142,7 +219,42 @@ impl PfcWdOrch {
         if let Some(entry) = self.queues.get_mut(queue_name) {
             entry.storm_detected = false;
             self.stats.storms_restored += 1;
+
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceModify, "PfcWdOrch", "update_restoration_time")
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_id(queue_name)
+                    .with_object_type("pfcwd_queue")
+                    .with_details(serde_json::json!({
+                        "event": "storm_restored",
+                        "restoration_time_ms": entry.restoration_time.as_millis(),
+                    }))
+            );
         }
+    }
+
+    pub fn get_hw_stats(&self, queue_name: &str) -> Option<serde_json::Value> {
+        if let Some(_entry) = self.queues.get(queue_name) {
+            audit_log!(
+                AuditRecord::new(AuditCategory::Read, "PfcWdOrch", "get_hw_stats")
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_id(queue_name)
+                    .with_object_type("pfcwd_queue_stats")
+                    .with_details(serde_json::json!({
+                        "stats_type": "hardware_statistics",
+                        "queues_registered": self.stats.queues_registered,
+                        "storms_detected": self.stats.storms_detected,
+                    }))
+            );
+
+            return Some(serde_json::json!({
+                "queues_registered": self.stats.queues_registered,
+                "queues_unregistered": self.stats.queues_unregistered,
+                "storms_detected": self.stats.storms_detected,
+                "storms_restored": self.stats.storms_restored,
+            }));
+        }
+        None
     }
 }
 

@@ -4,6 +4,7 @@ use super::types::{DebugCounterConfig, DebugCounterEntry, DebugCounterType, Drop
 use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::Arc;
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome, audit_log};
 
 #[derive(Debug, Clone)]
 pub enum DebugCounterOrchError {
@@ -77,6 +78,17 @@ impl DebugCounterOrch {
 
     pub fn create_debug_counter(&mut self, config: DebugCounterConfig) -> Result<(), DebugCounterOrchError> {
         if self.debug_counters.contains_key(&config.name) {
+            let record = AuditRecord::new(
+                AuditCategory::ErrorCondition,
+                "DebugCounterOrch",
+                format!("create_counter_failed: {}", config.name),
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&config.name)
+            .with_object_type("debug_counter")
+            .with_error("Counter already exists");
+            audit_log!(record);
+
             return Err(DebugCounterOrchError::CounterExists(config.name.clone()));
         }
 
@@ -89,7 +101,7 @@ impl DebugCounterOrch {
             .map_err(DebugCounterOrchError::SaiError)?;
 
         let mut entry = DebugCounterEntry::new(config.name.clone(), config.counter_type, counter_id);
-        entry.description = config.description;
+        entry.description = config.description.clone();
 
         // Add drop reasons
         for reason in &config.drop_reasons {
@@ -106,6 +118,22 @@ impl DebugCounterOrch {
             self.stats.flex_counter_registrations += 1;
         }
 
+        let record = AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "DebugCounterOrch",
+            format!("create_counter: {}", config.name),
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&config.name)
+        .with_object_type("debug_counter")
+        .with_details(serde_json::json!({
+            "counter_type": config.counter_type.as_str(),
+            "counter_id": format!("{:#x}", counter_id),
+            "drop_reasons_count": config.drop_reasons.len(),
+            "flex_counter_enabled": self.config.enable_flex_counter,
+        }));
+        audit_log!(record);
+
         self.debug_counters.insert(config.name.clone(), entry);
         self.stats.counters_created += 1;
 
@@ -114,7 +142,20 @@ impl DebugCounterOrch {
 
     pub fn remove_debug_counter(&mut self, name: &str) -> Result<(), DebugCounterOrchError> {
         let entry = self.debug_counters.remove(name)
-            .ok_or_else(|| DebugCounterOrchError::CounterNotFound(name.to_string()))?;
+            .ok_or_else(|| {
+                let record = AuditRecord::new(
+                    AuditCategory::ErrorCondition,
+                    "DebugCounterOrch",
+                    format!("remove_counter_failed: {}", name),
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(name)
+                .with_object_type("debug_counter")
+                .with_error("Counter not found");
+                audit_log!(record);
+
+                DebugCounterOrchError::CounterNotFound(name.to_string())
+            })?;
 
         let callbacks = self.callbacks.as_ref()
             .ok_or_else(|| DebugCounterOrchError::SaiError("No callbacks set".to_string()))?;
@@ -132,6 +173,20 @@ impl DebugCounterOrch {
         // Remove counter
         callbacks.remove_debug_counter(entry.counter_id)
             .map_err(DebugCounterOrchError::SaiError)?;
+
+        let record = AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "DebugCounterOrch",
+            format!("remove_counter: {}", name),
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(name)
+        .with_object_type("debug_counter")
+        .with_details(serde_json::json!({
+            "counter_id": format!("{:#x}", entry.counter_id),
+            "drop_reasons_removed": entry.drop_reasons.len(),
+        }));
+        audit_log!(record);
 
         self.stats.counters_removed += 1;
 
@@ -198,11 +253,28 @@ impl DebugCounterOrch {
 
         // Remove invalid reasons
         let current_reasons: Vec<String> = entry.drop_reasons.iter().cloned().collect();
+        let mut removed_count = 0;
         for reason in current_reasons {
             if !available_reasons.contains(&reason) {
                 self.remove_drop_reason(counter_name, &reason)?;
+                removed_count += 1;
             }
         }
+
+        let record = AuditRecord::new(
+            AuditCategory::ConfigurationChange,
+            "DebugCounterOrch",
+            format!("reconcile_drop_reasons: {}", counter_name),
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(counter_name)
+        .with_object_type("debug_counter")
+        .with_details(serde_json::json!({
+            "counter_type": entry.counter_type.as_str(),
+            "removed_count": removed_count,
+            "remaining_reasons": entry.drop_reasons.len() - removed_count,
+        }));
+        audit_log!(record);
 
         Ok(())
     }

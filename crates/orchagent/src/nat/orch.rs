@@ -1,15 +1,23 @@
 //! NAT orchestration logic.
 
 use super::types::{NatEntry, NatEntryKey, NatPoolEntry, NatPoolKey, NatStats};
+use crate::{audit_log, audit::{AuditCategory, AuditOutcome, AuditRecord}};
 use std::collections::HashMap;
+use thiserror::Error;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum NatOrchError {
+    #[error("NAT entry not found: {0:?}")]
     EntryNotFound(NatEntryKey),
+    #[error("NAT pool not found: {0:?}")]
     PoolNotFound(NatPoolKey),
+    #[error("ACL not found: {0}")]
     AclNotFound(String),
+    #[error("Invalid IP range: {0}")]
     InvalidIpRange(String),
+    #[error("Invalid port range: {0}")]
     InvalidPortRange(String),
+    #[error("SAI error: {0}")]
     SaiError(String),
 }
 
@@ -66,18 +74,68 @@ impl NatOrch {
         let key = entry.key.clone();
 
         if self.entries.contains_key(&key) {
-            return Err(NatOrchError::SaiError("NAT entry already exists".to_string()));
+            let err = NatOrchError::SaiError("NAT entry already exists".to_string());
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "NatOrch", "add_entry")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(format!("{:?}", key))
+                    .with_object_type("nat_entry")
+                    .with_error(err.to_string())
+                    .with_details(serde_json::json!({
+                        "nat_type": format!("{:?}", entry.config.nat_type),
+                        "src_ip": entry.key.src_ip.to_string(),
+                        "dst_ip": entry.key.dst_ip.to_string(),
+                    }))
+            );
+            return Err(err);
         }
 
         self.stats.stats.entries_created = self.stats.stats.entries_created.saturating_add(1);
-        self.entries.insert(key, entry);
+        self.entries.insert(key.clone(), entry.clone());
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "NatOrch", "add_entry")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("{:?}", key))
+                .with_object_type("nat_entry")
+                .with_details(serde_json::json!({
+                    "nat_type": format!("{:?}", entry.config.nat_type),
+                    "src_ip": entry.key.src_ip.to_string(),
+                    "dst_ip": entry.key.dst_ip.to_string(),
+                }))
+        );
 
         Ok(())
     }
 
     pub fn remove_entry(&mut self, key: &NatEntryKey) -> Result<NatEntry, NatOrchError> {
-        self.entries.remove(key)
-            .ok_or_else(|| NatOrchError::EntryNotFound(key.clone()))
+        match self.entries.remove(key) {
+            Some(entry) => {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "NatOrch", "remove_entry")
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_id(format!("{:?}", key))
+                        .with_object_type("nat_entry")
+                        .with_details(serde_json::json!({
+                            "nat_type": format!("{:?}", entry.config.nat_type),
+                            "src_ip": entry.key.src_ip.to_string(),
+                            "dst_ip": entry.key.dst_ip.to_string(),
+                        }))
+                );
+                Ok(entry)
+            }
+            None => {
+                let err = NatOrchError::EntryNotFound(key.clone());
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "NatOrch", "remove_entry")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(format!("{:?}", key))
+                        .with_object_type("nat_entry")
+                        .with_error(err.to_string())
+                );
+                Err(err)
+            }
+        }
     }
 
     pub fn get_snat_entries(&self) -> Vec<&NatEntry> {
@@ -109,35 +167,103 @@ impl NatOrch {
         let key = entry.key.clone();
 
         if self.pools.contains_key(&key) {
-            return Err(NatOrchError::SaiError("NAT pool already exists".to_string()));
+            let err = NatOrchError::SaiError("NAT pool already exists".to_string());
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "NatOrch", "add_pool")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(key.pool_name.clone())
+                    .with_object_type("nat_pool")
+                    .with_error(err.to_string())
+            );
+            return Err(err);
         }
 
         // Validate IP range
         let (start, end) = entry.config.ip_range;
         if start > end {
-            return Err(NatOrchError::InvalidIpRange(
+            let err = NatOrchError::InvalidIpRange(
                 format!("Start IP {} > End IP {}", start, end)
-            ));
+            );
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "NatOrch", "add_pool")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(key.pool_name.clone())
+                    .with_object_type("nat_pool")
+                    .with_error(err.to_string())
+                    .with_details(serde_json::json!({
+                        "start_ip": start.to_string(),
+                        "end_ip": end.to_string(),
+                    }))
+            );
+            return Err(err);
         }
 
         // Validate port range if present
         if let Some((start_port, end_port)) = entry.config.port_range {
             if start_port > end_port {
-                return Err(NatOrchError::InvalidPortRange(
+                let err = NatOrchError::InvalidPortRange(
                     format!("Start port {} > End port {}", start_port, end_port)
-                ));
+                );
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceCreate, "NatOrch", "add_pool")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(key.pool_name.clone())
+                        .with_object_type("nat_pool")
+                        .with_error(err.to_string())
+                        .with_details(serde_json::json!({
+                            "start_port": start_port,
+                            "end_port": end_port,
+                        }))
+                );
+                return Err(err);
             }
         }
 
         self.stats.stats.pools_created = self.stats.stats.pools_created.saturating_add(1);
-        self.pools.insert(key, entry);
+        self.pools.insert(key.clone(), entry.clone());
+
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "NatOrch", "add_pool")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(key.pool_name.clone())
+                .with_object_type("nat_pool")
+                .with_details(serde_json::json!({
+                    "start_ip": entry.config.ip_range.0.to_string(),
+                    "end_ip": entry.config.ip_range.1.to_string(),
+                    "port_range": entry.config.port_range.map(|(s, e)| format!("{}-{}", s, e)),
+                }))
+        );
 
         Ok(())
     }
 
     pub fn remove_pool(&mut self, key: &NatPoolKey) -> Result<NatPoolEntry, NatOrchError> {
-        self.pools.remove(key)
-            .ok_or_else(|| NatOrchError::PoolNotFound(key.clone()))
+        match self.pools.remove(key) {
+            Some(entry) => {
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "NatOrch", "remove_pool")
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_id(key.pool_name.clone())
+                        .with_object_type("nat_pool")
+                        .with_details(serde_json::json!({
+                            "start_ip": entry.config.ip_range.0.to_string(),
+                            "end_ip": entry.config.ip_range.1.to_string(),
+                        }))
+                );
+                Ok(entry)
+            }
+            None => {
+                let err = NatOrchError::PoolNotFound(key.clone());
+                audit_log!(
+                    AuditRecord::new(AuditCategory::ResourceDelete, "NatOrch", "remove_pool")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(key.pool_name.clone())
+                        .with_object_type("nat_pool")
+                        .with_error(err.to_string())
+                );
+                Err(err)
+            }
+        }
     }
 
     pub fn entry_count(&self) -> usize {

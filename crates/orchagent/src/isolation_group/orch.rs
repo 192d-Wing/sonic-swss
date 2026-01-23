@@ -5,14 +5,25 @@ use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Debug, Clone)]
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
+use thiserror::Error;
+
+#[derive(Debug, Clone, Error)]
 pub enum IsolationGroupOrchError {
+    #[error("Group not found: {0}")]
     GroupNotFound(String),
+    #[error("Group exists: {0}")]
     GroupExists(String),
+    #[error("Member not found: {0}")]
     MemberNotFound(String),
+    #[error("Bind port not found: {0}")]
     BindPortNotFound(String),
+    #[error("Port not found: {0}")]
     PortNotFound(String),
+    #[error("Invalid type: {0}")]
     InvalidType(String),
+    #[error("SAI error: {0}")]
     SaiError(String),
 }
 
@@ -77,6 +88,16 @@ impl IsolationGroupOrch {
 
     pub fn create_isolation_group(&mut self, config: IsolationGroupConfig) -> Result<(), IsolationGroupOrchError> {
         if self.isolation_groups.contains_key(&config.name) {
+            let audit_record = AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "IsolationGroupOrch",
+                "create_isolation_group",
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&config.name)
+            .with_object_type("isolation_group")
+            .with_error("Group already exists");
+            audit_log!(audit_record);
             return Err(IsolationGroupOrchError::GroupExists(config.name.clone()));
         }
 
@@ -89,7 +110,28 @@ impl IsolationGroupOrch {
             .map_err(IsolationGroupOrchError::SaiError)?;
 
         let mut entry = IsolationGroupEntry::new(config.name.clone(), config.group_type, group_id);
-        entry.description = config.description;
+        entry.description = config.description.clone();
+
+        let group_type_str = match config.group_type {
+            IsolationGroupType::Port => "PORT_ISOLATION",
+            IsolationGroupType::BridgePort => "BRIDGE_PORT_ISOLATION",
+        };
+
+        let audit_record = AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "IsolationGroupOrch",
+            "create_isolation_group",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&config.name)
+        .with_object_type("isolation_group")
+        .with_details(serde_json::json!({
+            "group_name": config.name,
+            "group_type": group_type_str,
+            "sai_oid": format!("0x{:x}", group_id),
+            "description": config.description,
+        }));
+        audit_log!(audit_record);
 
         self.isolation_groups.insert(config.name.clone(), entry);
         self.stats.groups_created += 1;
@@ -99,7 +141,19 @@ impl IsolationGroupOrch {
 
     pub fn remove_isolation_group(&mut self, name: &str) -> Result<(), IsolationGroupOrchError> {
         let entry = self.isolation_groups.remove(name)
-            .ok_or_else(|| IsolationGroupOrchError::GroupNotFound(name.to_string()))?;
+            .ok_or_else(|| {
+                let audit_record = AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "IsolationGroupOrch",
+                    "remove_isolation_group",
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(name)
+                .with_object_type("isolation_group")
+                .with_error("Group not found");
+                audit_log!(audit_record);
+                IsolationGroupOrchError::GroupNotFound(name.to_string())
+            })?;
 
         let callbacks = self.callbacks.as_ref()
             .ok_or_else(|| IsolationGroupOrchError::SaiError("No callbacks set".to_string()))?;
@@ -123,6 +177,22 @@ impl IsolationGroupOrch {
         callbacks.remove_isolation_group(entry.oid)
             .map_err(IsolationGroupOrchError::SaiError)?;
 
+        let audit_record = AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "IsolationGroupOrch",
+            "remove_isolation_group",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(name)
+        .with_object_type("isolation_group")
+        .with_details(serde_json::json!({
+            "group_name": name,
+            "sai_oid": format!("0x{:x}", entry.oid),
+            "members_removed": entry.members.len(),
+            "bindings_removed": entry.bind_ports.len(),
+        }));
+        audit_log!(audit_record);
+
         self.stats.groups_removed += 1;
 
         Ok(())
@@ -141,7 +211,10 @@ impl IsolationGroupOrch {
                 .ok_or_else(|| IsolationGroupOrchError::SaiError("No callbacks set".to_string()))?,
         );
 
-        let port_oid = match group.group_type {
+        let group_type = group.group_type;
+        let group_oid = group.oid;
+
+        let port_oid = match group_type {
             IsolationGroupType::Port => {
                 callbacks.get_port_oid(member_alias)
                     .ok_or_else(|| IsolationGroupOrchError::PortNotFound(member_alias.to_string()))?
@@ -152,9 +225,27 @@ impl IsolationGroupOrch {
             }
         };
 
-        let member_oid = callbacks.add_isolation_group_member(group.oid, port_oid)
+        let member_oid = callbacks.add_isolation_group_member(group_oid, port_oid)
             .map_err(IsolationGroupOrchError::SaiError)?;
 
+        let audit_record = AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "IsolationGroupOrch",
+            "add_isolation_group_member",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(group_name)
+        .with_object_type("isolation_group_member")
+        .with_details(serde_json::json!({
+            "group_name": group_name,
+            "member_name": member_alias,
+            "group_oid": format!("0x{:x}", group_oid),
+            "member_oid": format!("0x{:x}", member_oid),
+            "member_port_oid": format!("0x{:x}", port_oid),
+        }));
+        audit_log!(audit_record);
+
+        let group = self.isolation_groups.get_mut(group_name).unwrap();
         group.members.insert(member_alias.to_string(), member_oid);
         self.stats.members_added += 1;
 
@@ -173,6 +264,22 @@ impl IsolationGroupOrch {
 
         callbacks.remove_isolation_group_member(member_oid)
             .map_err(IsolationGroupOrchError::SaiError)?;
+
+        let audit_record = AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "IsolationGroupOrch",
+            "remove_isolation_group_member",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(group_name)
+        .with_object_type("isolation_group_member")
+        .with_details(serde_json::json!({
+            "group_name": group_name,
+            "member_name": member_alias,
+            "member_oid": format!("0x{:x}", member_oid),
+            "action": "member_unbinding",
+        }));
+        audit_log!(audit_record);
 
         self.stats.members_removed += 1;
 

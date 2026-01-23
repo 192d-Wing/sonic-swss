@@ -41,6 +41,22 @@ impl std::fmt::Display for CrmOrchError {
 
 impl std::error::Error for CrmOrchError {}
 
+// Audit logging macro for CRM operations
+macro_rules! audit_log {
+    (
+        resource_id: $rid:expr,
+        action: $act:expr,
+        category: $cat:expr,
+        outcome: $out:expr,
+        details: $det:expr
+    ) => {
+        // This is a placeholder for actual audit logging
+        // In production, this would log to syslog, audit trails, or security logging system
+        eprintln!("[AUDIT] Resource: {}, Action: {}, Category: {}, Outcome: {}, Details: {}",
+            $rid, $act, $cat, $out, $det);
+    };
+}
+
 /// Callbacks for CrmOrch operations.
 pub trait CrmOrchCallbacks: Send + Sync {
     /// Publishes a threshold event.
@@ -187,6 +203,16 @@ impl CrmOrch {
     pub fn set_polling_interval(&mut self, interval: Duration) {
         self.config.polling_interval = interval;
         self.stats.config_updates += 1;
+
+        audit_log!(
+            resource_id: "crm_config",
+            action: "set_polling_interval",
+            category: "ConfigurationChange",
+            outcome: "SUCCESS",
+            details: serde_json::json!({
+                "polling_interval_seconds": interval.as_secs(),
+            })
+        );
     }
 
     /// Returns the statistics.
@@ -224,11 +250,37 @@ impl CrmOrch {
         let entry = self
             .resources
             .get_mut(&resource_type)
-            .ok_or(CrmOrchError::ResourceNotFound(resource_type))?;
+            .ok_or_else(|| {
+                audit_log!(
+                    resource_id: &resource_type.name().to_string(),
+                    action: "increment_used",
+                    category: "ResourceModify",
+                    outcome: "FAIL",
+                    details: serde_json::json!({
+                        "error": "Resource not found",
+                        "resource_type": resource_type.name(),
+                    })
+                );
+                CrmOrchError::ResourceNotFound(resource_type)
+            })?;
 
         let counter = entry.get_or_create_counter(CRM_COUNTERS_TABLE_KEY);
+        let new_used = counter.increment_used();
         self.stats.increments += 1;
-        Ok(counter.increment_used())
+
+        audit_log!(
+            resource_id: &resource_type.name().to_string(),
+            action: "increment_used",
+            category: "ResourceModify",
+            outcome: "SUCCESS",
+            details: serde_json::json!({
+                "resource_type": resource_type.name(),
+                "used": new_used,
+                "available": counter.available,
+            })
+        );
+
+        Ok(new_used)
     }
 
     /// Decrements the used counter for a global resource.
@@ -236,16 +288,65 @@ impl CrmOrch {
         let entry = self
             .resources
             .get_mut(&resource_type)
-            .ok_or(CrmOrchError::ResourceNotFound(resource_type))?;
+            .ok_or_else(|| {
+                audit_log!(
+                    resource_id: &resource_type.name().to_string(),
+                    action: "decrement_used",
+                    category: "ResourceModify",
+                    outcome: "FAIL",
+                    details: serde_json::json!({
+                        "error": "Resource not found",
+                        "resource_type": resource_type.name(),
+                    })
+                );
+                CrmOrchError::ResourceNotFound(resource_type)
+            })?;
 
         let counter = entry
             .get_counter_mut(CRM_COUNTERS_TABLE_KEY)
-            .ok_or_else(|| CrmOrchError::CounterNotFound(CRM_COUNTERS_TABLE_KEY.to_string()))?;
+            .ok_or_else(|| {
+                audit_log!(
+                    resource_id: &resource_type.name().to_string(),
+                    action: "decrement_used",
+                    category: "ResourceModify",
+                    outcome: "FAIL",
+                    details: serde_json::json!({
+                        "error": "Counter not found",
+                        "resource_type": resource_type.name(),
+                    })
+                );
+                CrmOrchError::CounterNotFound(CRM_COUNTERS_TABLE_KEY.to_string())
+            })?;
 
         self.stats.decrements += 1;
         counter
             .decrement_used()
-            .ok_or_else(|| CrmOrchError::InvalidThreshold("Counter underflow".to_string()))
+            .ok_or_else(|| {
+                audit_log!(
+                    resource_id: &resource_type.name().to_string(),
+                    action: "decrement_used",
+                    category: "ResourceModify",
+                    outcome: "FAIL",
+                    details: serde_json::json!({
+                        "error": "Counter underflow",
+                        "resource_type": resource_type.name(),
+                    })
+                );
+                CrmOrchError::InvalidThreshold("Counter underflow".to_string())
+            })
+            .map(|new_used| {
+                audit_log!(
+                    resource_id: &resource_type.name().to_string(),
+                    action: "decrement_used",
+                    category: "ResourceModify",
+                    outcome: "SUCCESS",
+                    details: serde_json::json!({
+                        "resource_type": resource_type.name(),
+                        "used": new_used,
+                    })
+                );
+                new_used
+            })
     }
 
     /// Increments the used counter for an ACL resource (table/group).
@@ -616,6 +717,20 @@ impl CrmOrch {
                     let counter = entry.get_or_create_counter(CRM_COUNTERS_TABLE_KEY);
                     counter.available = available;
                     // Don't overwrite used - it's tracked by increment/decrement
+
+                    // Log successful query for critical resources
+                    audit_log!(
+                        resource_id: &res_type.name().to_string(),
+                        action: "query_resource_availability",
+                        category: "Read",
+                        outcome: "SUCCESS",
+                        details: serde_json::json!({
+                            "resource_type": res_type.name(),
+                            "used": used,
+                            "available": available,
+                            "utilization_percent": counter.utilization_percent(),
+                        })
+                    );
                 }
             }
         }

@@ -4,14 +4,23 @@ use super::types::{MplsRouteEntry, MplsRouteKey, MplsRouteStats, MplsRouteConfig
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
+use thiserror::Error;
+
 pub type Result<T> = std::result::Result<T, MplsRouteOrchError>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum MplsRouteOrchError {
+    #[error("Route not found: {:?}", .0)]
     RouteNotFound(MplsRouteKey),
+    #[error("Invalid label: {0}")]
     InvalidLabel(u32),
+    #[error("Route exists: {:?}", .0)]
     RouteExists(MplsRouteKey),
+    #[error("SAI error: {0}")]
     SaiError(String),
+    #[error("Configuration error: {0}")]
     ConfigurationError(String),
 }
 
@@ -62,6 +71,16 @@ impl<C: MplsRouteOrchCallbacks> MplsRouteOrch<C> {
             .map_err(|_| MplsRouteOrchError::InvalidLabel(key.label))?;
 
         if self.routes.contains_key(&key) {
+            let audit_record = AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "MplsRouteOrch",
+                "create_mpls_route",
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&key.label.to_string())
+            .with_object_type("mpls_route")
+            .with_error("Route already exists");
+            audit_log!(audit_record);
             return Err(MplsRouteOrchError::RouteExists(key));
         }
 
@@ -77,6 +96,22 @@ impl<C: MplsRouteOrchCallbacks> MplsRouteOrch<C> {
             nh_oid = callbacks.create_next_hop(next_hop)?;
         }
 
+        let audit_record = AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "MplsRouteOrch",
+            "create_mpls_route",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&key.label.to_string())
+        .with_object_type("mpls_route")
+        .with_details(serde_json::json!({
+            "label": key.label,
+            "route_oid": format!("0x{:x}", route_oid),
+            "next_hop": config.next_hop.as_deref(),
+            "nh_oid": if nh_oid != 0 { Some(format!("0x{:x}", nh_oid)) } else { None },
+        }));
+        audit_log!(audit_record);
+
         let mut entry = MplsRouteEntry::new(key.clone(), config);
         entry.route_oid = route_oid;
         entry.nh_oid = nh_oid;
@@ -91,7 +126,19 @@ impl<C: MplsRouteOrchCallbacks> MplsRouteOrch<C> {
 
     pub fn remove_route(&mut self, key: &MplsRouteKey) -> Result<()> {
         let entry = self.routes.remove(key)
-            .ok_or_else(|| MplsRouteOrchError::RouteNotFound(key.clone()))?;
+            .ok_or_else(|| {
+                let audit_record = AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "MplsRouteOrch",
+                    "remove_mpls_route",
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(&key.label.to_string())
+                .with_object_type("mpls_route")
+                .with_error("Route not found");
+                audit_log!(audit_record);
+                MplsRouteOrchError::RouteNotFound(key.clone())
+            })?;
 
         let callbacks = self.callbacks.as_ref()
             .ok_or(MplsRouteOrchError::SaiError("No callbacks registered".into()))?;
@@ -103,6 +150,21 @@ impl<C: MplsRouteOrchCallbacks> MplsRouteOrch<C> {
 
         // Remove the route
         callbacks.remove_mpls_route(key.label, entry.route_oid)?;
+
+        let audit_record = AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "MplsRouteOrch",
+            "remove_mpls_route",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&key.label.to_string())
+        .with_object_type("mpls_route")
+        .with_details(serde_json::json!({
+            "label": key.label,
+            "route_oid": format!("0x{:x}", entry.route_oid),
+            "nh_oid_removed": entry.nh_oid,
+        }));
+        audit_log!(audit_record);
 
         self.stats.stats.routes_removed += 1;
         callbacks.on_route_removed(key.label);
@@ -120,6 +182,8 @@ impl<C: MplsRouteOrchCallbacks> MplsRouteOrch<C> {
 
         let callbacks = self.callbacks.as_ref()
             .ok_or(MplsRouteOrchError::SaiError("No callbacks registered".into()))?;
+
+        let old_next_hop = entry.config.next_hop.clone();
 
         // Update the route through SAI
         callbacks.update_mpls_route(key.label, entry.route_oid, &config)?;
@@ -140,6 +204,22 @@ impl<C: MplsRouteOrchCallbacks> MplsRouteOrch<C> {
             callbacks.remove_next_hop(entry.nh_oid)?;
             entry.nh_oid = 0;
         }
+
+        let audit_record = AuditRecord::new(
+            AuditCategory::ResourceModify,
+            "MplsRouteOrch",
+            "update_mpls_route",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&key.label.to_string())
+        .with_object_type("mpls_route")
+        .with_details(serde_json::json!({
+            "label": key.label,
+            "route_oid": format!("0x{:x}", entry.route_oid),
+            "old_next_hop": old_next_hop,
+            "new_next_hop": config.next_hop,
+        }));
+        audit_log!(audit_record);
 
         entry.config = config;
 
