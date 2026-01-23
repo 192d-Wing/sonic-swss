@@ -171,10 +171,30 @@ impl OrchDaemon {
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc as StdArc;
 
     struct TestOrch {
         name: String,
         priority: i32,
+        task_count: StdArc<AtomicU32>,
+        has_pending: bool,
+    }
+
+    impl TestOrch {
+        fn new(name: &str, priority: i32) -> Self {
+            Self {
+                name: name.to_string(),
+                priority,
+                task_count: StdArc::new(AtomicU32::new(0)),
+                has_pending: false,
+            }
+        }
+
+        fn with_pending(mut self) -> Self {
+            self.has_pending = true;
+            self
+        }
     }
 
     #[async_trait]
@@ -184,39 +204,309 @@ mod tests {
         }
 
         async fn do_task(&mut self) {
-            // No-op for test
+            self.task_count.fetch_add(1, Ordering::SeqCst);
         }
 
         fn priority(&self) -> i32 {
             self.priority
         }
+
+        fn has_pending_tasks(&self) -> bool {
+            self.has_pending
+        }
+    }
+
+    // ============================================================================
+    // 1. Configuration Tests
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_orchdaemon_default_config() {
+        let config = OrchDaemonConfig::default();
+        assert_eq!(config.heartbeat_interval_ms, 1000);
+        assert_eq!(config.batch_size, 128);
+        assert!(!config.warm_boot);
     }
 
     #[tokio::test]
-    async fn test_orchdaemon_registration() {
+    async fn test_orchdaemon_custom_config() {
+        let config = OrchDaemonConfig {
+            heartbeat_interval_ms: 500,
+            batch_size: 256,
+            warm_boot: true,
+        };
+        let daemon = OrchDaemon::new(config.clone());
+        assert_eq!(daemon.config.heartbeat_interval_ms, 500);
+        assert_eq!(daemon.config.batch_size, 256);
+        assert!(daemon.config.warm_boot);
+    }
+
+    #[tokio::test]
+    async fn test_orchdaemon_new_empty() {
+        let daemon = OrchDaemon::new(OrchDaemonConfig::default());
+        assert_eq!(daemon.orchs.len(), 0);
+        assert!(!daemon.running);
+    }
+
+    // ============================================================================
+    // 2. Orch Registration Tests
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_orchdaemon_register_single_orch() {
+        let mut daemon = OrchDaemon::new(OrchDaemonConfig::default());
+        daemon.register_orch(Box::new(TestOrch::new("PortsOrch", 0)));
+
+        assert_eq!(daemon.orchs.len(), 1);
+        assert_eq!(daemon.orchs.get(&0).map(|v| v.len()), Some(1));
+    }
+
+    #[tokio::test]
+    async fn test_orchdaemon_register_multiple_same_priority() {
         let mut daemon = OrchDaemon::new(OrchDaemonConfig::default());
 
-        daemon.register_orch(Box::new(TestOrch {
-            name: "PortsOrch".to_string(),
-            priority: 0,
-        }));
-        daemon.register_orch(Box::new(TestOrch {
-            name: "RouteOrch".to_string(),
-            priority: 10,
-        }));
-        daemon.register_orch(Box::new(TestOrch {
-            name: "AclOrch".to_string(),
-            priority: 0,
-        }));
+        daemon.register_orch(Box::new(TestOrch::new("PortsOrch", 0)));
+        daemon.register_orch(Box::new(TestOrch::new("AclOrch", 0)));
+        daemon.register_orch(Box::new(TestOrch::new("VlanOrch", 0)));
 
-        // Priority 0 should have 2 orchs, priority 10 should have 1
+        assert_eq!(daemon.orchs.get(&0).map(|v| v.len()), Some(3));
+    }
+
+    #[tokio::test]
+    async fn test_orchdaemon_register_different_priorities() {
+        let mut daemon = OrchDaemon::new(OrchDaemonConfig::default());
+
+        daemon.register_orch(Box::new(TestOrch::new("PortsOrch", 0)));
+        daemon.register_orch(Box::new(TestOrch::new("RouteOrch", 10)));
+        daemon.register_orch(Box::new(TestOrch::new("AclOrch", 0)));
+        daemon.register_orch(Box::new(TestOrch::new("QosOrch", 20)));
+
+        // Priority 0 should have 2 orchs, priority 10 should have 1, priority 20 should have 1
         assert_eq!(daemon.orchs.get(&0).map(|v| v.len()), Some(2));
         assert_eq!(daemon.orchs.get(&10).map(|v| v.len()), Some(1));
+        assert_eq!(daemon.orchs.get(&20).map(|v| v.len()), Some(1));
+        assert_eq!(daemon.orchs.len(), 3); // 3 priority levels
     }
 
     #[tokio::test]
-    async fn test_orchdaemon_init() {
+    async fn test_orchdaemon_register_negative_priority() {
+        let mut daemon = OrchDaemon::new(OrchDaemonConfig::default());
+        daemon.register_orch(Box::new(TestOrch::new("CriticalOrch", -10)));
+
+        assert_eq!(daemon.orchs.get(&-10).map(|v| v.len()), Some(1));
+    }
+
+    #[tokio::test]
+    async fn test_orchdaemon_priority_ordering() {
+        let mut daemon = OrchDaemon::new(OrchDaemonConfig::default());
+
+        daemon.register_orch(Box::new(TestOrch::new("LowPriority", 100)));
+        daemon.register_orch(Box::new(TestOrch::new("HighPriority", -10)));
+        daemon.register_orch(Box::new(TestOrch::new("MediumPriority", 50)));
+
+        // BTreeMap should maintain sorted order (lowest priority number first)
+        let priorities: Vec<i32> = daemon.orchs.keys().copied().collect();
+        assert_eq!(priorities, vec![-10, 50, 100]);
+    }
+
+    // ============================================================================
+    // 3. Context Tests
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_orchdaemon_context_access() {
+        let daemon = OrchDaemon::new(OrchDaemonConfig::default());
+        let ctx = daemon.context();
+
+        // Should be able to access context
+        let read_ctx = ctx.read().await;
+        assert!(!read_ctx.warm_boot_in_progress);
+    }
+
+    #[tokio::test]
+    async fn test_orchdaemon_context_shared() {
+        let daemon = OrchDaemon::new(OrchDaemonConfig::default());
+        let ctx1 = daemon.context();
+        let ctx2 = daemon.context();
+
+        // Both should point to the same context
+        assert!(StdArc::ptr_eq(&ctx1.as_ref(), &ctx2.as_ref()));
+    }
+
+    // ============================================================================
+    // 4. Initialization Tests
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_orchdaemon_init_success() {
         let mut daemon = OrchDaemon::new(OrchDaemonConfig::default());
         assert!(daemon.init().await);
+    }
+
+    #[tokio::test]
+    async fn test_orchdaemon_init_with_orchs() {
+        let mut daemon = OrchDaemon::new(OrchDaemonConfig::default());
+        daemon.register_orch(Box::new(TestOrch::new("PortsOrch", 0)));
+        daemon.register_orch(Box::new(TestOrch::new("RouteOrch", 10)));
+
+        assert!(daemon.init().await);
+    }
+
+    // ============================================================================
+    // 5. Stop Tests
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_orchdaemon_stop() {
+        let mut daemon = OrchDaemon::new(OrchDaemonConfig::default());
+        assert!(!daemon.running);
+
+        daemon.running = true; // Simulate running state
+        daemon.stop();
+
+        assert!(!daemon.running);
+    }
+
+    #[tokio::test]
+    async fn test_orchdaemon_stop_when_not_running() {
+        let mut daemon = OrchDaemon::new(OrchDaemonConfig::default());
+        assert!(!daemon.running);
+
+        daemon.stop();
+        assert!(!daemon.running); // Should remain false
+    }
+
+    // ============================================================================
+    // 6. Warm Boot Tests
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_orchdaemon_prepare_warm_boot_empty() {
+        let mut daemon = OrchDaemon::new(OrchDaemonConfig::default());
+        assert!(daemon.prepare_warm_boot().await);
+    }
+
+    #[tokio::test]
+    async fn test_orchdaemon_on_warm_boot_end() {
+        let mut daemon = OrchDaemon::new(OrchDaemonConfig::default());
+
+        // Set warm boot in progress
+        {
+            let mut ctx = daemon.context.write().await;
+            ctx.warm_boot_in_progress = true;
+        }
+
+        daemon.on_warm_boot_end().await;
+
+        // Should be cleared
+        let ctx = daemon.context.read().await;
+        assert!(!ctx.warm_boot_in_progress);
+    }
+
+    #[tokio::test]
+    async fn test_orchdaemon_warm_boot_config() {
+        let config = OrchDaemonConfig {
+            heartbeat_interval_ms: 1000,
+            batch_size: 128,
+            warm_boot: true,
+        };
+        let daemon = OrchDaemon::new(config);
+        assert!(daemon.config.warm_boot);
+    }
+
+    // ============================================================================
+    // 7. Dump Tests
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_orchdaemon_dump_empty() {
+        let daemon = OrchDaemon::new(OrchDaemonConfig::default());
+        let lines = daemon.dump();
+
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("OrchDaemon running: false"));
+    }
+
+    #[tokio::test]
+    async fn test_orchdaemon_dump_with_orchs() {
+        let mut daemon = OrchDaemon::new(OrchDaemonConfig::default());
+        daemon.register_orch(Box::new(TestOrch::new("PortsOrch", 0)));
+        daemon.register_orch(Box::new(TestOrch::new("RouteOrch", 10)));
+
+        let lines = daemon.dump();
+
+        // Should have 1 header + 2 orch lines
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].contains("OrchDaemon running: false"));
+        assert!(lines[1].contains("PortsOrch") || lines[2].contains("PortsOrch"));
+        assert!(lines[1].contains("RouteOrch") || lines[2].contains("RouteOrch"));
+    }
+
+    #[tokio::test]
+    async fn test_orchdaemon_dump_shows_running_state() {
+        let mut daemon = OrchDaemon::new(OrchDaemonConfig::default());
+        daemon.running = true;
+
+        let lines = daemon.dump();
+        assert!(lines[0].contains("OrchDaemon running: true"));
+    }
+
+    // ============================================================================
+    // 8. Edge Cases Tests
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_orchdaemon_register_many_orchs() {
+        let mut daemon = OrchDaemon::new(OrchDaemonConfig::default());
+
+        // Register 100 orchs with various priorities
+        for i in 0..100 {
+            daemon.register_orch(Box::new(TestOrch::new(
+                &format!("Orch{}", i),
+                (i % 10) as i32, // Priorities 0-9
+            )));
+        }
+
+        assert_eq!(daemon.orchs.len(), 10); // 10 different priorities
+
+        // Each priority should have 10 orchs
+        for priority in 0..10 {
+            assert_eq!(daemon.orchs.get(&priority).map(|v| v.len()), Some(10));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_orchdaemon_extreme_priority_values() {
+        let mut daemon = OrchDaemon::new(OrchDaemonConfig::default());
+
+        daemon.register_orch(Box::new(TestOrch::new("MaxPriority", i32::MAX)));
+        daemon.register_orch(Box::new(TestOrch::new("MinPriority", i32::MIN)));
+
+        assert_eq!(daemon.orchs.get(&i32::MAX).map(|v| v.len()), Some(1));
+        assert_eq!(daemon.orchs.get(&i32::MIN).map(|v| v.len()), Some(1));
+    }
+
+    #[tokio::test]
+    async fn test_orchdaemon_config_extreme_values() {
+        let config = OrchDaemonConfig {
+            heartbeat_interval_ms: u64::MAX,
+            batch_size: usize::MAX,
+            warm_boot: true,
+        };
+        let daemon = OrchDaemon::new(config);
+        assert_eq!(daemon.config.heartbeat_interval_ms, u64::MAX);
+        assert_eq!(daemon.config.batch_size, usize::MAX);
+    }
+
+    #[tokio::test]
+    async fn test_orchdaemon_config_zero_values() {
+        let config = OrchDaemonConfig {
+            heartbeat_interval_ms: 0,
+            batch_size: 0,
+            warm_boot: false,
+        };
+        let daemon = OrchDaemon::new(config);
+        assert_eq!(daemon.config.heartbeat_interval_ms, 0);
+        assert_eq!(daemon.config.batch_size, 0);
     }
 }
