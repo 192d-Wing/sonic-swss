@@ -58,6 +58,13 @@ pub enum SaiObjectType {
     IsolationGroup,
     IsolationGroupMember,
     TunnelTermEntry,
+    Switch,
+    SystemPort,
+    FabricPort,
+    CoppTrap,
+    CoppTrapGroup,
+    MplsRoute,
+    IcmpEchoSession,
 }
 
 impl MockSai {
@@ -9345,5 +9352,1638 @@ mod integration_tests {
             // Cleanup
             sai.clear();
         }
+
+    // SwitchOrch integration tests
+    mod switch_orch_tests {
+        use super::*;
+        use sonic_orchagent::switch::SwitchOrch;
+        use sonic_orchagent::switch::SwitchOrchConfig;
+
+        /// Test creating a basic SwitchOrch instance with default configuration
+        #[test]
+        fn test_switch_config_creation_integration() {
+            let sai = MockSai::new();
+            let config = SwitchOrchConfig::default();
+            let orch = SwitchOrch::new(config);
+
+            assert!(!orch.is_initialized());
+            assert!(orch.get_state().is_none());
+
+            let stats = orch.stats();
+            assert_eq!(stats.hash_updates, 0);
+            assert_eq!(stats.capability_queries, 0);
+            assert_eq!(stats.warm_restarts, 0);
+
+            let switch_oid = sai.create_object(
+                SaiObjectType::Switch,
+                vec![
+                    ("type".to_string(), "switch".to_string()),
+                    ("default_vlan_priority".to_string(), "0".to_string()),
+                ],
+            ).unwrap();
+
+            assert_eq!(switch_oid, 1);
+            assert_eq!(sai.count_objects(SaiObjectType::Switch), 1);
+
+            let switch_obj = sai.get_object(switch_oid).unwrap();
+            assert_eq!(switch_obj.object_type, SaiObjectType::Switch);
+            assert_eq!(switch_obj.attributes.len(), 2);
+
+            sai.clear();
+        }
+
+        /// Test updating switch attributes through configuration changes
+        #[test]
+        fn test_switch_attribute_updates_integration() {
+            let sai = MockSai::new();
+
+            let config = SwitchOrchConfig {
+                enable_warm_restart: true,
+                warm_restart_read_timer: 60,
+                warm_restart_timer: 120,
+            };
+            let orch = SwitchOrch::new(config);
+
+            let switch_oid = sai.create_object(
+                SaiObjectType::Switch,
+                vec![
+                    ("type".to_string(), "switch".to_string()),
+                    ("warm_restart_enabled".to_string(), "true".to_string()),
+                    ("warm_restart_read_timer".to_string(), "60".to_string()),
+                    ("warm_restart_timer".to_string(), "120".to_string()),
+                ],
+            ).unwrap();
+
+            let switch_obj = sai.get_object(switch_oid).unwrap();
+            assert_eq!(switch_obj.attributes.len(), 4);
+
+            let attr_values: Vec<_> = switch_obj.attributes.iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+
+            assert!(attr_values.contains(&("warm_restart_enabled", "true")));
+            assert!(attr_values.contains(&("warm_restart_read_timer", "60")));
+            assert!(attr_values.contains(&("warm_restart_timer", "120")));
+
+            let updated_switch_oid = sai.create_object(
+                SaiObjectType::Switch,
+                vec![
+                    ("type".to_string(), "switch".to_string()),
+                    ("warm_restart_enabled".to_string(), "true".to_string()),
+                    ("warm_restart_read_timer".to_string(), "90".to_string()),
+                    ("warm_restart_timer".to_string(), "150".to_string()),
+                ],
+            ).unwrap();
+
+            let updated_switch = sai.get_object(updated_switch_oid).unwrap();
+            let updated_attr_values: Vec<_> = updated_switch.attributes.iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+
+            assert!(updated_attr_values.contains(&("warm_restart_read_timer", "90")));
+            assert!(updated_attr_values.contains(&("warm_restart_timer", "150")));
+
+            assert_eq!(sai.count_objects(SaiObjectType::Switch), 2);
+
+            sai.clear();
+        }
+
+        /// Test multiple switch configuration operations in sequence
+        #[test]
+        fn test_multiple_switch_operations_integration() {
+            let sai = MockSai::new();
+
+            let config1 = SwitchOrchConfig::default();
+            let orch1 = SwitchOrch::new(config1);
+
+            let switch_oid_1 = sai.create_object(
+                SaiObjectType::Switch,
+                vec![
+                    ("id".to_string(), "1".to_string()),
+                    ("fdb_aging_time".to_string(), "600".to_string()),
+                ],
+            ).unwrap();
+
+            let config2 = SwitchOrchConfig {
+                enable_warm_restart: true,
+                warm_restart_read_timer: 45,
+                warm_restart_timer: 90,
+            };
+            let orch2 = SwitchOrch::new(config2);
+
+            let switch_oid_2 = sai.create_object(
+                SaiObjectType::Switch,
+                vec![
+                    ("id".to_string(), "2".to_string()),
+                    ("fdb_aging_time".to_string(), "300".to_string()),
+                    ("warm_restart_enabled".to_string(), "true".to_string()),
+                ],
+            ).unwrap();
+
+            assert_eq!(switch_oid_1, 1);
+            assert_eq!(switch_oid_2, 2);
+            assert_ne!(switch_oid_1, switch_oid_2);
+
+            assert!(!orch1.is_initialized());
+            assert!(!orch2.is_initialized());
+
+            assert_eq!(sai.count_objects(SaiObjectType::Switch), 2);
+
+            let sw1 = sai.get_object(switch_oid_1).unwrap();
+            assert_eq!(sw1.attributes[0].0, "id");
+            assert_eq!(sw1.attributes[0].1, "1");
+
+            let sw2 = sai.get_object(switch_oid_2).unwrap();
+            assert_eq!(sw2.attributes[0].0, "id");
+            assert_eq!(sw2.attributes[0].1, "2");
+
+            sai.clear();
+        }
+
+        /// Test switch configuration removal and cleanup
+        #[test]
+        fn test_switch_removal_and_cleanup_integration() {
+            let sai = MockSai::new();
+
+            let switch_oid = sai.create_object(
+                SaiObjectType::Switch,
+                vec![
+                    ("type".to_string(), "switch".to_string()),
+                    ("cpu_port".to_string(), "CPU".to_string()),
+                    ("default_vlan".to_string(), "1".to_string()),
+                ],
+            ).unwrap();
+
+            assert_eq!(sai.count_objects(SaiObjectType::Switch), 1);
+
+            let cpu_port_oid = sai.create_object(
+                SaiObjectType::Port,
+                vec![
+                    ("type".to_string(), "cpu".to_string()),
+                    ("switch_id".to_string(), switch_oid.to_string()),
+                ],
+            ).unwrap();
+
+            let vlan_oid = sai.create_object(
+                SaiObjectType::Route,
+                vec![
+                    ("type".to_string(), "default_vlan".to_string()),
+                    ("switch_id".to_string(), switch_oid.to_string()),
+                ],
+            ).unwrap();
+
+            assert_eq!(sai.count_objects(SaiObjectType::Switch), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::Port), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::Route), 1);
+
+            sai.remove_object(cpu_port_oid).unwrap();
+            sai.remove_object(vlan_oid).unwrap();
+
+            assert_eq!(sai.count_objects(SaiObjectType::Port), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::Route), 0);
+
+            sai.remove_object(switch_oid).unwrap();
+
+            assert_eq!(sai.count_objects(SaiObjectType::Switch), 0);
+            assert!(sai.get_object(switch_oid).is_none());
+
+            assert_eq!(sai.count_objects(SaiObjectType::Switch), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::Port), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::Route), 0);
+
+            sai.clear();
+        }
     }
 
+    // MplsrouteOrch integration tests
+    mod mplsroute_orch_tests {
+        use super::*;
+        use sonic_orchagent::mplsroute::{
+            MplsRouteOrch, MplsRouteOrchConfig, MplsRouteEntry, MplsRouteKey,
+            MplsRouteConfig, MplsAction,
+        };
+
+        fn create_mpls_route_with_sai(
+            label: u32,
+            action: MplsAction,
+            next_hop: &str,
+            sai: &MockSai,
+        ) -> (MplsRouteEntry, u64) {
+            let mut entry = MplsRouteEntry::new(
+                MplsRouteKey::new(label),
+                MplsRouteConfig {
+                    action,
+                    next_hop: Some(next_hop.to_string()),
+                    swap_label: if action == MplsAction::Swap { Some(label + 1000) } else { None },
+                    push_labels: if action == MplsAction::Push { vec![label + 100, label + 200] } else { vec![] },
+                },
+            );
+
+            // Create SAI MPLS route object
+            let oid = sai.create_object(
+                SaiObjectType::MplsRoute,
+                vec![
+                    ("label".to_string(), label.to_string()),
+                    ("action".to_string(), format!("{:?}", action)),
+                    ("next_hop".to_string(), next_hop.to_string()),
+                ]
+            ).unwrap();
+
+            entry.route_oid = oid;
+            (entry, oid)
+        }
+
+        #[test]
+        fn test_mplsroute_label_entry_integration() {
+            let sai = MockSai::new();
+
+            // Create an MPLS label entry with Pop action
+            let (route, oid) = create_mpls_route_with_sai(100, MplsAction::Pop, "10.0.0.1", &sai);
+            let key = route.key.clone();
+
+            // Verify SAI object was created
+            assert_eq!(sai.count_objects(SaiObjectType::MplsRoute), 1);
+
+            // Add route to orchestrator (simulating internal storage)
+            let mut routes = std::collections::HashMap::new();
+            routes.insert(key.clone(), route);
+
+            // Verify route is accessible
+            let sai_obj = sai.get_object(oid).unwrap();
+            assert_eq!(sai_obj.object_type, SaiObjectType::MplsRoute);
+            assert_eq!(sai_obj.attributes[0].1, "100");
+            assert_eq!(sai_obj.attributes[2].1, "10.0.0.1");
+        }
+
+        #[test]
+        fn test_mplsroute_route_configuration_integration() {
+            let sai = MockSai::new();
+
+            // Create MPLS routes with different actions: Pop, Swap, Push
+            let (_pop_route, pop_oid) = create_mpls_route_with_sai(100, MplsAction::Pop, "10.0.0.1", &sai);
+            let (swap_route, swap_oid) = create_mpls_route_with_sai(200, MplsAction::Swap, "10.0.0.2", &sai);
+            let (push_route, push_oid) = create_mpls_route_with_sai(300, MplsAction::Push, "10.0.0.3", &sai);
+
+            // Verify all routes were created in SAI
+            assert_eq!(sai.count_objects(SaiObjectType::MplsRoute), 3);
+
+            // Verify Pop action
+            let pop_obj = sai.get_object(pop_oid).unwrap();
+            assert_eq!(pop_obj.attributes[1], ("action".to_string(), "Pop".to_string()));
+
+            // Verify Swap action with swap label
+            let swap_obj = sai.get_object(swap_oid).unwrap();
+            assert_eq!(swap_obj.attributes[1], ("action".to_string(), "Swap".to_string()));
+            assert_eq!(swap_route.config.swap_label, Some(1200));
+
+            // Verify Push action with label stack
+            let push_obj = sai.get_object(push_oid).unwrap();
+            assert_eq!(push_obj.attributes[1], ("action".to_string(), "Push".to_string()));
+            assert_eq!(push_route.config.push_labels.len(), 2);
+            assert_eq!(push_route.config.push_labels[0], 400);
+            assert_eq!(push_route.config.push_labels[1], 500);
+        }
+
+        #[test]
+        fn test_mplsroute_multiple_routes_management_integration() {
+            let sai = MockSai::new();
+
+            // Create multiple MPLS routes
+            let mut route_oids = Vec::new();
+            for i in 0..5 {
+                let label = 100 + (i as u32);
+                let (_, oid) = create_mpls_route_with_sai(label, MplsAction::Pop, &format!("10.0.0.{}", i + 1), &sai);
+                route_oids.push(oid);
+            }
+
+            // Verify all routes are tracked in SAI
+            assert_eq!(sai.count_objects(SaiObjectType::MplsRoute), 5);
+
+            // Verify each route has unique OID
+            for (i, oid) in route_oids.iter().enumerate() {
+                let obj = sai.get_object(*oid).unwrap();
+                assert_eq!(obj.object_type, SaiObjectType::MplsRoute);
+                assert_eq!(obj.oid, (i as u64) + 1);
+            }
+
+            // Verify we can retrieve specific routes
+            let route3 = sai.get_object(route_oids[2]).unwrap();
+            assert_eq!(route3.attributes[0].1, "102");
+        }
+
+        #[test]
+        fn test_mplsroute_removal_and_cleanup_integration() {
+            let sai = MockSai::new();
+
+            // Create MPLS routes
+            let (_, oid1) = create_mpls_route_with_sai(100, MplsAction::Pop, "10.0.0.1", &sai);
+            let (_, oid2) = create_mpls_route_with_sai(200, MplsAction::Swap, "10.0.0.2", &sai);
+            let (_, oid3) = create_mpls_route_with_sai(300, MplsAction::Push, "10.0.0.3", &sai);
+
+            // Verify all routes are created
+            assert_eq!(sai.count_objects(SaiObjectType::MplsRoute), 3);
+
+            // Remove individual routes
+            sai.remove_object(oid1).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::MplsRoute), 2);
+
+            // Verify the removed route is gone
+            assert!(sai.get_object(oid1).is_none());
+
+            // Verify other routes still exist
+            assert!(sai.get_object(oid2).is_some());
+            assert!(sai.get_object(oid3).is_some());
+
+            // Remove remaining routes
+            sai.remove_object(oid2).unwrap();
+            sai.remove_object(oid3).unwrap();
+
+            // Verify all routes are removed
+            assert_eq!(sai.count_objects(SaiObjectType::MplsRoute), 0);
+
+            // Clean up and verify state is reset
+            sai.clear();
+            assert_eq!(sai.count_objects(SaiObjectType::MplsRoute), 0);
+        }
+    }
+
+    // CountercheckOrch integration tests
+    mod countercheck_orch_tests {
+        use super::*;
+        use sonic_orchagent::countercheck::{
+            CounterCheckOrch, CounterCheckOrchConfig, CounterCheckEntry, CounterCheckKey,
+            CounterCheckConfig,
+        };
+
+        /// Helper function to create a counter check entry with SAI object
+        fn create_counter_check_with_sai(
+            port_name: &str,
+            counter_type: &str,
+            expected_value: u64,
+            tolerance: u64,
+            sai: &MockSai,
+        ) -> (CounterCheckEntry, u64) {
+            let config = CounterCheckConfig {
+                port_name: port_name.to_string(),
+                counter_type: counter_type.to_string(),
+                expected_value,
+                tolerance,
+            };
+
+            let entry = CounterCheckEntry::new(config);
+
+            // Create SAI counter object to track the check
+            let oid = sai
+                .create_object(
+                    SaiObjectType::PortCounter,
+                    vec![
+                        ("port".to_string(), port_name.to_string()),
+                        ("counter_type".to_string(), counter_type.to_string()),
+                        ("expected_value".to_string(), expected_value.to_string()),
+                        ("tolerance".to_string(), tolerance.to_string()),
+                    ],
+                )
+                .unwrap();
+
+            (entry, oid)
+        }
+
+        /// Test counter check with threshold validation (within tolerance)
+        #[test]
+        fn test_countercheck_threshold_validation_integration() {
+            let sai = MockSai::new();
+            let mut orch = CounterCheckOrch::new(CounterCheckOrchConfig::default());
+
+            // Create a counter check for RX_PACKETS with expected value 1000 and tolerance 100
+            let (entry, oid) = create_counter_check_with_sai("Ethernet0", "RX_PACKETS", 1000, 100, &sai);
+            let key = entry.key.clone();
+
+            // Add the counter check to the orchestrator
+            orch.add_check(key.clone(), entry);
+
+            // Verify the check was added
+            assert_eq!(orch.check_count(), 1);
+            assert!(orch.get_check(&key).is_some());
+
+            // Verify SAI object was created
+            assert_eq!(sai.count_objects(SaiObjectType::PortCounter), 1);
+
+            // Verify the counter entry is within tolerance
+            let check = orch.get_check(&key).unwrap();
+            assert!(check.is_within_tolerance(1000)); // Exact match
+            assert!(check.is_within_tolerance(1050)); // Within upper bound
+            assert!(check.is_within_tolerance(950)); // Within lower bound
+            assert!(!check.is_within_tolerance(1101)); // Exceeds upper bound
+            assert!(!check.is_within_tolerance(899)); // Exceeds lower bound
+
+            // Verify SAI object details
+            let sai_obj = sai.get_object(oid).unwrap();
+            assert_eq!(sai_obj.object_type, SaiObjectType::PortCounter);
+            assert_eq!(sai_obj.attributes[0], ("port".to_string(), "Ethernet0".to_string()));
+
+            sai.clear();
+        }
+
+        /// Test multiple counter checks with different types
+        #[test]
+        fn test_countercheck_multiple_types_integration() {
+            let sai = MockSai::new();
+            let mut orch = CounterCheckOrch::new(CounterCheckOrchConfig::default());
+
+            // Create multiple counter checks for different counter types on the same port
+            let (rx_packets_entry, _rx_packets_oid) =
+                create_counter_check_with_sai("Ethernet0", "RX_PACKETS", 1000, 100, &sai);
+            let (tx_packets_entry, _tx_packets_oid) =
+                create_counter_check_with_sai("Ethernet0", "TX_PACKETS", 2000, 200, &sai);
+            let (rx_bytes_entry, _rx_bytes_oid) =
+                create_counter_check_with_sai("Ethernet0", "RX_BYTES", 1500000, 10000, &sai);
+            let (rx_errors_entry, _rx_errors_oid) =
+                create_counter_check_with_sai("Ethernet0", "RX_ERRORS", 0, 5, &sai);
+
+            let rx_packets_key = rx_packets_entry.key.clone();
+            let tx_packets_key = tx_packets_entry.key.clone();
+            let rx_bytes_key = rx_bytes_entry.key.clone();
+            let rx_errors_key = rx_errors_entry.key.clone();
+
+            // Add all counter checks to the orchestrator
+            orch.add_check(rx_packets_key.clone(), rx_packets_entry);
+            orch.add_check(tx_packets_key.clone(), tx_packets_entry);
+            orch.add_check(rx_bytes_key.clone(), rx_bytes_entry);
+            orch.add_check(rx_errors_key.clone(), rx_errors_entry);
+
+            // Verify all checks were added
+            assert_eq!(orch.check_count(), 4);
+            assert!(orch.get_check(&rx_packets_key).is_some());
+            assert!(orch.get_check(&tx_packets_key).is_some());
+            assert!(orch.get_check(&rx_bytes_key).is_some());
+            assert!(orch.get_check(&rx_errors_key).is_some());
+
+            // Verify SAI objects were created for each counter type
+            assert_eq!(sai.count_objects(SaiObjectType::PortCounter), 4);
+
+            // Validate each counter type's threshold
+            let rx_packets = orch.get_check(&rx_packets_key).unwrap();
+            assert_eq!(rx_packets.key.counter_type, "RX_PACKETS");
+            assert_eq!(rx_packets.config.expected_value, 1000);
+            assert!(rx_packets.is_within_tolerance(1050));
+
+            let tx_packets = orch.get_check(&tx_packets_key).unwrap();
+            assert_eq!(tx_packets.key.counter_type, "TX_PACKETS");
+            assert_eq!(tx_packets.config.expected_value, 2000);
+            assert!(tx_packets.is_within_tolerance(2150));
+
+            let rx_bytes = orch.get_check(&rx_bytes_key).unwrap();
+            assert_eq!(rx_bytes.key.counter_type, "RX_BYTES");
+            assert_eq!(rx_bytes.config.expected_value, 1500000);
+            assert!(rx_bytes.is_within_tolerance(1505000));
+
+            let rx_errors = orch.get_check(&rx_errors_key).unwrap();
+            assert_eq!(rx_errors.key.counter_type, "RX_ERRORS");
+            assert_eq!(rx_errors.config.expected_value, 0);
+            assert!(rx_errors.is_within_tolerance(5));
+
+            sai.clear();
+        }
+
+        /// Test counter validation state management across multiple ports
+        #[test]
+        fn test_countercheck_validation_state_management_integration() {
+            let sai = MockSai::new();
+            let mut orch = CounterCheckOrch::new(CounterCheckOrchConfig::default());
+
+            // Create counter checks for multiple ports
+            let (eth0_entry, eth0_oid) =
+                create_counter_check_with_sai("Ethernet0", "RX_PACKETS", 1000, 100, &sai);
+            let (eth1_entry, eth1_oid) =
+                create_counter_check_with_sai("Ethernet1", "RX_PACKETS", 2000, 200, &sai);
+            let (eth2_entry, eth2_oid) =
+                create_counter_check_with_sai("Ethernet2", "RX_PACKETS", 3000, 300, &sai);
+
+            let eth0_key = eth0_entry.key.clone();
+            let eth1_key = eth1_entry.key.clone();
+            let eth2_key = eth2_entry.key.clone();
+
+            // Add all counter checks to the orchestrator
+            orch.add_check(eth0_key.clone(), eth0_entry);
+            orch.add_check(eth1_key.clone(), eth1_entry);
+            orch.add_check(eth2_key.clone(), eth2_entry);
+
+            // Verify all checks are in the orchestrator
+            assert_eq!(orch.check_count(), 3);
+
+            // Verify each port has its own counter check state
+            let eth0_check = orch.get_check(&eth0_key).unwrap();
+            let eth1_check = orch.get_check(&eth1_key).unwrap();
+            let eth2_check = orch.get_check(&eth2_key).unwrap();
+
+            assert_eq!(eth0_check.key.port_name, "Ethernet0");
+            assert_eq!(eth1_check.key.port_name, "Ethernet1");
+            assert_eq!(eth2_check.key.port_name, "Ethernet2");
+
+            // Verify independent tolerance validation for each port
+            assert!(eth0_check.is_within_tolerance(1050));
+            assert!(eth1_check.is_within_tolerance(2100));
+            assert!(eth2_check.is_within_tolerance(3150));
+
+            assert!(!eth0_check.is_within_tolerance(1101));
+            assert!(!eth1_check.is_within_tolerance(2201));
+            assert!(!eth2_check.is_within_tolerance(3301));
+
+            // Verify SAI objects track all counter validations
+            assert_eq!(sai.count_objects(SaiObjectType::PortCounter), 3);
+
+            // Verify each SAI object has correct port information
+            let eth0_sai = sai.get_object(eth0_oid).unwrap();
+            let eth1_sai = sai.get_object(eth1_oid).unwrap();
+            let eth2_sai = sai.get_object(eth2_oid).unwrap();
+
+            assert_eq!(eth0_sai.attributes[0], ("port".to_string(), "Ethernet0".to_string()));
+            assert_eq!(eth1_sai.attributes[0], ("port".to_string(), "Ethernet1".to_string()));
+            assert_eq!(eth2_sai.attributes[0], ("port".to_string(), "Ethernet2".to_string()));
+
+            sai.clear();
+        }
+
+        /// Test counter check removal and cleanup
+        #[test]
+        fn test_countercheck_removal_and_cleanup_integration() {
+            let sai = MockSai::new();
+            let mut orch = CounterCheckOrch::new(CounterCheckOrchConfig::default());
+
+            // Create multiple counter checks
+            let (entry1, oid1) =
+                create_counter_check_with_sai("Ethernet0", "RX_PACKETS", 1000, 100, &sai);
+            let (entry2, oid2) =
+                create_counter_check_with_sai("Ethernet1", "RX_PACKETS", 2000, 200, &sai);
+            let (entry3, oid3) =
+                create_counter_check_with_sai("Ethernet2", "TX_PACKETS", 1500, 150, &sai);
+
+            let key1 = entry1.key.clone();
+            let key2 = entry2.key.clone();
+            let key3 = entry3.key.clone();
+
+            // Add all counter checks
+            orch.add_check(key1.clone(), entry1);
+            orch.add_check(key2.clone(), entry2);
+            orch.add_check(key3.clone(), entry3);
+
+            assert_eq!(orch.check_count(), 3);
+            assert_eq!(sai.count_objects(SaiObjectType::PortCounter), 3);
+
+            // Remove the first counter check
+            orch.remove_check(&key1);
+            sai.remove_object(oid1).unwrap();
+
+            assert_eq!(orch.check_count(), 2);
+            assert_eq!(sai.count_objects(SaiObjectType::PortCounter), 2);
+            assert!(orch.get_check(&key1).is_none());
+            assert!(orch.get_check(&key2).is_some());
+            assert!(orch.get_check(&key3).is_some());
+
+            // Remove the second counter check
+            orch.remove_check(&key2);
+            sai.remove_object(oid2).unwrap();
+
+            assert_eq!(orch.check_count(), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::PortCounter), 1);
+            assert!(orch.get_check(&key2).is_none());
+            assert!(orch.get_check(&key3).is_some());
+
+            // Remove the last counter check
+            orch.remove_check(&key3);
+            sai.remove_object(oid3).unwrap();
+
+            assert_eq!(orch.check_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::PortCounter), 0);
+            assert!(orch.get_check(&key3).is_none());
+
+            // Verify all SAI objects were cleaned up
+            assert!(sai.get_object(oid1).is_none());
+            assert!(sai.get_object(oid2).is_none());
+            assert!(sai.get_object(oid3).is_none());
+
+            sai.clear();
+        }
+    }
+
+    mod chassis_orch_tests {
+        use super::*;
+        use sonic_orchagent::chassis::{ChassisOrch, ChassisOrchConfig, ChassisOrchStats, SystemPortEntry, SystemPortKey, SystemPortConfig};
+
+        /// Test system port configuration and initialization
+        #[test]
+        fn test_chassis_port_config_integration() {
+            let sai = MockSai::new();
+            let config = ChassisOrchConfig::default();
+            let mut orch = ChassisOrch::new(config);
+
+            // Create system port SAI objects
+            let port_oid_1 = sai.create_object(
+                SaiObjectType::SystemPort,
+                vec![
+                    ("system_port_id".to_string(), "100".to_string()),
+                    ("switch_id".to_string(), "1".to_string()),
+                    ("core_index".to_string(), "0".to_string()),
+                    ("core_port_index".to_string(), "0".to_string()),
+                    ("speed".to_string(), "100000".to_string()),
+                ],
+            ).unwrap();
+
+            let port_oid_2 = sai.create_object(
+                SaiObjectType::SystemPort,
+                vec![
+                    ("system_port_id".to_string(), "101".to_string()),
+                    ("switch_id".to_string(), "1".to_string()),
+                    ("core_index".to_string(), "1".to_string()),
+                    ("core_port_index".to_string(), "0".to_string()),
+                    ("speed".to_string(), "100000".to_string()),
+                ],
+            ).unwrap();
+
+            assert_eq!(port_oid_1, 1);
+            assert_eq!(port_oid_2, 2);
+            assert_eq!(sai.count_objects(SaiObjectType::SystemPort), 2);
+
+            // Create port entries
+            let sys_port_config_1 = SystemPortConfig {
+                system_port_id: 100,
+                switch_id: 1,
+                core_index: 0,
+                core_port_index: 0,
+                speed: 100000,
+            };
+
+            let sys_port_entry_1 = SystemPortEntry::new(sys_port_config_1);
+            let key_1 = sys_port_entry_1.key.clone();
+
+            // Verify port configuration matches
+            assert_eq!(sys_port_entry_1.config.system_port_id, 100);
+            assert_eq!(sys_port_entry_1.config.switch_id, 1);
+            assert_eq!(sys_port_entry_1.config.speed, 100000);
+
+            // Verify SAI object attributes
+            let port_obj_1 = sai.get_object(port_oid_1).unwrap();
+            assert_eq!(port_obj_1.object_type, SaiObjectType::SystemPort);
+            assert_eq!(port_obj_1.attributes.len(), 5);
+
+            let port_obj_2 = sai.get_object(port_oid_2).unwrap();
+            assert_eq!(port_obj_2.object_type, SaiObjectType::SystemPort);
+
+            sai.clear();
+        }
+
+        /// Test chassis state management with multiple ports
+        #[test]
+        fn test_chassis_state_management_integration() {
+            let sai = MockSai::new();
+            let config = ChassisOrchConfig::default();
+            let mut orch = ChassisOrch::new(config);
+
+            // Verify initial state
+            let initial_stats = orch.stats();
+            assert_eq!(initial_stats.stats.system_ports_created, 0);
+            assert_eq!(initial_stats.stats.fabric_ports_created, 0);
+            assert_eq!(initial_stats.errors, 0);
+
+            // Create system ports in SAI
+            let port_configs = vec![
+                ("100", "1", "0", "0", "100000"),
+                ("101", "1", "1", "0", "100000"),
+                ("102", "1", "2", "0", "200000"),
+            ];
+
+            let mut port_oids = Vec::new();
+            for (port_id, switch_id, core_idx, core_port_idx, speed) in port_configs {
+                let oid = sai.create_object(
+                    SaiObjectType::SystemPort,
+                    vec![
+                        ("system_port_id".to_string(), port_id.to_string()),
+                        ("switch_id".to_string(), switch_id.to_string()),
+                        ("core_index".to_string(), core_idx.to_string()),
+                        ("core_port_index".to_string(), core_port_idx.to_string()),
+                        ("speed".to_string(), speed.to_string()),
+                    ],
+                ).unwrap();
+                port_oids.push(oid);
+            }
+
+            // Verify all ports created in SAI
+            assert_eq!(sai.count_objects(SaiObjectType::SystemPort), 3);
+
+            // Create and track system port entries
+            let mut port_entries = Vec::new();
+            for (idx, (port_id, switch_id, core_idx, core_port_idx, speed)) in
+                [("100", "1", "0", "0", "100000"),
+                 ("101", "1", "1", "0", "100000"),
+                 ("102", "1", "2", "0", "200000")].iter().enumerate() {
+                let config = SystemPortConfig {
+                    system_port_id: port_id.parse().unwrap(),
+                    switch_id: switch_id.parse().unwrap(),
+                    core_index: core_idx.parse().unwrap(),
+                    core_port_index: core_port_idx.parse().unwrap(),
+                    speed: speed.parse().unwrap(),
+                };
+                let entry = SystemPortEntry::new(config);
+                port_entries.push(entry);
+            }
+
+            // Verify port entry properties
+            assert_eq!(port_entries.len(), 3);
+            assert_eq!(port_entries[0].config.system_port_id, 100);
+            assert_eq!(port_entries[1].config.system_port_id, 101);
+            assert_eq!(port_entries[2].config.system_port_id, 102);
+            assert_eq!(port_entries[2].config.speed, 200000);
+
+            sai.clear();
+        }
+
+        /// Test multiple port operations in sequence
+        #[test]
+        fn test_multiple_port_operations_integration() {
+            let sai = MockSai::new();
+            let config = ChassisOrchConfig::default();
+            let mut orch = ChassisOrch::new(config);
+
+            // Create initial batch of system ports
+            let mut initial_oids = Vec::new();
+            for i in 0..5 {
+                let oid = sai.create_object(
+                    SaiObjectType::SystemPort,
+                    vec![
+                        ("system_port_id".to_string(), (100 + i).to_string()),
+                        ("switch_id".to_string(), "1".to_string()),
+                        ("core_index".to_string(), i.to_string()),
+                        ("core_port_index".to_string(), "0".to_string()),
+                        ("speed".to_string(), "100000".to_string()),
+                    ],
+                ).unwrap();
+                initial_oids.push(oid);
+            }
+
+            assert_eq!(sai.count_objects(SaiObjectType::SystemPort), 5);
+
+            // Create port entries and verify retrieval
+            let mut port_entries = HashMap::new();
+            for i in 0..5 {
+                let config = SystemPortConfig {
+                    system_port_id: 100 + i,
+                    switch_id: 1,
+                    core_index: i,
+                    core_port_index: 0,
+                    speed: 100000,
+                };
+                let entry = SystemPortEntry::new(config);
+                let key = entry.key.clone();
+                port_entries.insert(key, entry);
+            }
+
+            assert_eq!(port_entries.len(), 5);
+
+            // Verify all ports can be retrieved by key
+            for i in 0..5 {
+                let key = SystemPortKey::new(100 + i);
+                assert!(port_entries.contains_key(&key));
+
+                let entry = &port_entries[&key];
+                assert_eq!(entry.config.system_port_id, 100 + i);
+                assert_eq!(entry.config.core_index, i);
+            }
+
+            // Create fabric ports alongside system ports
+            let fabric_oid_1 = sai.create_object(
+                SaiObjectType::FabricPort,
+                vec![
+                    ("fabric_port_id".to_string(), "1".to_string()),
+                    ("isolate".to_string(), "false".to_string()),
+                ],
+            ).unwrap();
+
+            let fabric_oid_2 = sai.create_object(
+                SaiObjectType::FabricPort,
+                vec![
+                    ("fabric_port_id".to_string(), "2".to_string()),
+                    ("isolate".to_string(), "false".to_string()),
+                ],
+            ).unwrap();
+
+            assert_eq!(sai.count_objects(SaiObjectType::SystemPort), 5);
+            assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 2);
+
+            sai.clear();
+        }
+
+        /// Test port removal and cleanup operations
+        #[test]
+        fn test_port_removal_and_cleanup_integration() {
+            let sai = MockSai::new();
+            let config = ChassisOrchConfig::default();
+            let orch = ChassisOrch::new(config);
+
+            // Create system ports
+            let sys_port_oids: Vec<u64> = (0..4)
+                .map(|i| {
+                    sai.create_object(
+                        SaiObjectType::SystemPort,
+                        vec![
+                            ("system_port_id".to_string(), (100 + i).to_string()),
+                            ("switch_id".to_string(), "1".to_string()),
+                            ("core_index".to_string(), i.to_string()),
+                            ("core_port_index".to_string(), "0".to_string()),
+                            ("speed".to_string(), "100000".to_string()),
+                        ],
+                    ).unwrap()
+                })
+                .collect();
+
+            let fabric_port_oids: Vec<u64> = (0..2)
+                .map(|i| {
+                    sai.create_object(
+                        SaiObjectType::FabricPort,
+                        vec![
+                            ("fabric_port_id".to_string(), (1 + i).to_string()),
+                            ("isolate".to_string(), "false".to_string()),
+                        ],
+                    ).unwrap()
+                })
+                .collect();
+
+            // Verify initial state
+            assert_eq!(sai.count_objects(SaiObjectType::SystemPort), 4);
+            assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 2);
+
+            // Remove some system ports
+            sai.remove_object(sys_port_oids[0]).unwrap();
+            sai.remove_object(sys_port_oids[1]).unwrap();
+
+            assert_eq!(sai.count_objects(SaiObjectType::SystemPort), 2);
+            assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 2);
+
+            // Remove remaining system ports
+            sai.remove_object(sys_port_oids[2]).unwrap();
+            sai.remove_object(sys_port_oids[3]).unwrap();
+
+            assert_eq!(sai.count_objects(SaiObjectType::SystemPort), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 2);
+
+            // Remove fabric ports
+            for fabric_oid in &fabric_port_oids {
+                sai.remove_object(*fabric_oid).unwrap();
+            }
+
+            assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::SystemPort), 0);
+
+            // Verify removed objects return None
+            for sys_port_oid in &sys_port_oids {
+                assert!(sai.get_object(*sys_port_oid).is_none());
+            }
+
+            for fabric_oid in &fabric_port_oids {
+                assert!(sai.get_object(*fabric_oid).is_none());
+            }
+
+            sai.clear();
+        }
+    }
+
+
+    // CoppOrch integration tests
+    mod copp_orch_tests {
+        use super::*;
+        use sonic_orchagent::copp::{CoppOrch, CoppOrchConfig, CoppOrchCallbacks, CoppTrapKey, CoppTrapEntry, CoppTrapConfig, CoppTrapAction};
+
+        struct MockCoppCallbacks {
+            sai: Arc<MockSai>,
+        }
+
+        impl MockCoppCallbacks {
+            fn new(sai: Arc<MockSai>) -> Self {
+                Self { sai }
+            }
+        }
+
+        impl CoppOrchCallbacks for MockCoppCallbacks {}
+
+        fn create_trap_config(
+            trap_action: CoppTrapAction,
+            priority: u32,
+            queue: u8,
+            cir: u64,
+            cbs: u64,
+        ) -> CoppTrapConfig {
+            CoppTrapConfig {
+                trap_action,
+                trap_priority: Some(priority),
+                queue: Some(queue),
+                meter_type: Some("packets".to_string()),
+                mode: Some("sr_tcm".to_string()),
+                color: Some("aware".to_string()),
+                cbs: Some(cbs),
+                cir: Some(cir),
+                pbs: Some(cbs),
+                pir: Some(cir),
+            }
+        }
+
+        #[test]
+        fn test_copp_trap_config_integration() {
+            let sai = Arc::new(MockSai::new());
+            let _callbacks = Arc::new(MockCoppCallbacks::new(sai.clone()));
+            let mut orch = CoppOrch::new(CoppOrchConfig::default());
+
+            // Verify no traps exist initially
+            assert_eq!(orch.stats().stats.traps_created, 0);
+            assert_eq!(sai.count_objects(SaiObjectType::CoppTrap), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::CoppTrapGroup), 0);
+
+            // Create a trap configuration
+            let key = CoppTrapKey::new("bgp".to_string());
+            let config = create_trap_config(CoppTrapAction::Trap, 4, 4, 600, 600);
+            let mut entry = CoppTrapEntry::new(key.clone(), config);
+
+            // Simulate SAI object creation for trap and trap group
+            let trap_oid = sai
+                .create_object(
+                    SaiObjectType::CoppTrap,
+                    vec![
+                        ("trap_id".to_string(), "bgp".to_string()),
+                        ("action".to_string(), "trap".to_string()),
+                        ("priority".to_string(), "4".to_string()),
+                    ],
+                )
+                .unwrap();
+
+            let trap_group_oid = sai
+                .create_object(
+                    SaiObjectType::CoppTrapGroup,
+                    vec![
+                        ("queue".to_string(), "4".to_string()),
+                        ("policer".to_string(), "1".to_string()),
+                    ],
+                )
+                .unwrap();
+
+            entry.trap_oid = trap_oid;
+            entry.trap_group_oid = trap_group_oid;
+
+            // Verify SAI objects were created
+            assert_eq!(sai.count_objects(SaiObjectType::CoppTrap), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::CoppTrapGroup), 1);
+
+            // Verify trap object attributes
+            let trap_obj = sai.get_object(trap_oid).unwrap();
+            assert_eq!(trap_obj.object_type, SaiObjectType::CoppTrap);
+            assert_eq!(trap_obj.attributes.len(), 3);
+            assert_eq!(trap_obj.attributes[0].0, "trap_id");
+            assert_eq!(trap_obj.attributes[0].1, "bgp");
+
+            // Verify trap group object attributes
+            let trap_group_obj = sai.get_object(trap_group_oid).unwrap();
+            assert_eq!(trap_group_obj.object_type, SaiObjectType::CoppTrapGroup);
+            assert_eq!(trap_group_obj.attributes.len(), 2);
+            assert_eq!(trap_group_obj.attributes[0].0, "queue");
+            assert_eq!(trap_group_obj.attributes[0].1, "4");
+        }
+
+        #[test]
+        fn test_copp_trap_group_management_integration() {
+            let sai = Arc::new(MockSai::new());
+            let _callbacks = Arc::new(MockCoppCallbacks::new(sai.clone()));
+
+            // Create multiple trap group objects
+            let trap_group_oid1 = sai
+                .create_object(
+                    SaiObjectType::CoppTrapGroup,
+                    vec![
+                        ("group_id".to_string(), "1".to_string()),
+                        ("queue".to_string(), "4".to_string()),
+                        ("policer_oid".to_string(), "10".to_string()),
+                    ],
+                )
+                .unwrap();
+
+            let trap_group_oid2 = sai
+                .create_object(
+                    SaiObjectType::CoppTrapGroup,
+                    vec![
+                        ("group_id".to_string(), "2".to_string()),
+                        ("queue".to_string(), "5".to_string()),
+                        ("policer_oid".to_string(), "11".to_string()),
+                    ],
+                )
+                .unwrap();
+
+            let trap_group_oid3 = sai
+                .create_object(
+                    SaiObjectType::CoppTrapGroup,
+                    vec![
+                        ("group_id".to_string(), "3".to_string()),
+                        ("queue".to_string(), "6".to_string()),
+                        ("policer_oid".to_string(), "12".to_string()),
+                    ],
+                )
+                .unwrap();
+
+            // Verify all trap groups were created
+            assert_eq!(sai.count_objects(SaiObjectType::CoppTrapGroup), 3);
+
+            // Verify each trap group can be retrieved
+            let group1 = sai.get_object(trap_group_oid1).unwrap();
+            assert_eq!(group1.object_type, SaiObjectType::CoppTrapGroup);
+            assert_eq!(group1.attributes[0].1, "1");
+
+            let group2 = sai.get_object(trap_group_oid2).unwrap();
+            assert_eq!(group2.object_type, SaiObjectType::CoppTrapGroup);
+            assert_eq!(group2.attributes[0].1, "2");
+
+            let group3 = sai.get_object(trap_group_oid3).unwrap();
+            assert_eq!(group3.object_type, SaiObjectType::CoppTrapGroup);
+            assert_eq!(group3.attributes[0].1, "3");
+
+            // Verify queue assignments
+            assert_eq!(group1.attributes[1].1, "4");
+            assert_eq!(group2.attributes[1].1, "5");
+            assert_eq!(group3.attributes[1].1, "6");
+        }
+
+        #[test]
+        fn test_copp_multiple_traps_configuration_integration() {
+            let sai = Arc::new(MockSai::new());
+            let _callbacks = Arc::new(MockCoppCallbacks::new(sai.clone()));
+            let mut orch = CoppOrch::new(CoppOrchConfig::default());
+
+            // Define multiple trap types with different configurations
+            let trap_configs = vec![
+                ("bgp", CoppTrapAction::Trap, 4, 4, 600, 600),
+                ("arp", CoppTrapAction::Trap, 3, 3, 500, 500),
+                ("lacp", CoppTrapAction::Copy, 2, 2, 400, 400),
+                ("lldp", CoppTrapAction::Copy, 1, 1, 300, 300),
+                ("dhcp", CoppTrapAction::Trap, 5, 5, 700, 700),
+            ];
+
+            let mut trap_entries = Vec::new();
+
+            // Create trap configurations and SAI objects
+            for (trap_name, action, priority, queue, cir, cbs) in trap_configs.iter() {
+                let key = CoppTrapKey::new(trap_name.to_string());
+                let config = create_trap_config(*action, *priority, *queue, *cir, *cbs);
+                let mut entry = CoppTrapEntry::new(key, config);
+
+                // Create trap SAI object
+                let trap_oid = sai
+                    .create_object(
+                        SaiObjectType::CoppTrap,
+                        vec![
+                            ("trap_id".to_string(), trap_name.to_string()),
+                            ("action".to_string(), format!("{:?}", action)),
+                            ("priority".to_string(), priority.to_string()),
+                        ],
+                    )
+                    .unwrap();
+
+                // Create trap group SAI object
+                let trap_group_oid = sai
+                    .create_object(
+                        SaiObjectType::CoppTrapGroup,
+                        vec![
+                            ("queue".to_string(), queue.to_string()),
+                            ("cir".to_string(), cir.to_string()),
+                            ("cbs".to_string(), cbs.to_string()),
+                        ],
+                    )
+                    .unwrap();
+
+                entry.trap_oid = trap_oid;
+                entry.trap_group_oid = trap_group_oid;
+                trap_entries.push(entry);
+            }
+
+            // Verify all traps were created
+            assert_eq!(sai.count_objects(SaiObjectType::CoppTrap), 5);
+            assert_eq!(sai.count_objects(SaiObjectType::CoppTrapGroup), 5);
+
+            // Verify each trap entry
+            for entry in &trap_entries {
+                let trap_obj = sai.get_object(entry.trap_oid).unwrap();
+                assert_eq!(trap_obj.object_type, SaiObjectType::CoppTrap);
+
+                let trap_group_obj = sai.get_object(entry.trap_group_oid).unwrap();
+                assert_eq!(trap_group_obj.object_type, SaiObjectType::CoppTrapGroup);
+
+                // Verify trap action is correctly set
+                assert_eq!(
+                    trap_obj.attributes[0].0,
+                    "trap_id"
+                );
+            }
+
+            // Verify trap priority ordering
+            let bgp_entry = &trap_entries[0];
+            let arp_entry = &trap_entries[1];
+            let bgp_trap = sai.get_object(bgp_entry.trap_oid).unwrap();
+            let arp_trap = sai.get_object(arp_entry.trap_oid).unwrap();
+
+            assert_eq!(bgp_trap.attributes[2].1, "4");
+            assert_eq!(arp_trap.attributes[2].1, "3");
+
+            // Verify queue assignments match configured values
+            let expected_queues = vec!["4", "3", "2", "1", "5"];
+            for (i, entry) in trap_entries.iter().enumerate() {
+                let trap_group = sai.get_object(entry.trap_group_oid).unwrap();
+                assert_eq!(trap_group.attributes[0].1, expected_queues[i]);
+            }
+        }
+
+        #[test]
+        fn test_copp_trap_configuration_removal_and_cleanup_integration() {
+            let sai = Arc::new(MockSai::new());
+            let _callbacks = Arc::new(MockCoppCallbacks::new(sai.clone()));
+
+            // Create initial trap configuration
+            let trap_oid = sai
+                .create_object(
+                    SaiObjectType::CoppTrap,
+                    vec![
+                        ("trap_id".to_string(), "bgp".to_string()),
+                        ("action".to_string(), "trap".to_string()),
+                        ("priority".to_string(), "4".to_string()),
+                    ],
+                )
+                .unwrap();
+
+            let trap_group_oid = sai
+                .create_object(
+                    SaiObjectType::CoppTrapGroup,
+                    vec![
+                        ("queue".to_string(), "4".to_string()),
+                        ("policer_oid".to_string(), "1".to_string()),
+                    ],
+                )
+                .unwrap();
+
+            let policer_oid = sai
+                .create_object(
+                    SaiObjectType::Policer,
+                    vec![
+                        ("mode".to_string(), "sr_tcm".to_string()),
+                        ("cir".to_string(), "600".to_string()),
+                        ("cbs".to_string(), "600".to_string()),
+                    ],
+                )
+                .unwrap();
+
+            // Verify all objects were created
+            assert_eq!(sai.count_objects(SaiObjectType::CoppTrap), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::CoppTrapGroup), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 1);
+
+            // Remove trap configuration in reverse order (policer -> trap group -> trap)
+            sai.remove_object(policer_oid).unwrap();
+            sai.remove_object(trap_group_oid).unwrap();
+            sai.remove_object(trap_oid).unwrap();
+
+            // Verify all objects were cleaned up
+            assert_eq!(sai.count_objects(SaiObjectType::CoppTrap), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::CoppTrapGroup), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 0);
+
+            // Verify objects are no longer retrievable
+            assert!(sai.get_object(trap_oid).is_none());
+            assert!(sai.get_object(trap_group_oid).is_none());
+            assert!(sai.get_object(policer_oid).is_none());
+
+            // Clear for next test
+            sai.clear();
+            assert_eq!(sai.count_objects(SaiObjectType::CoppTrap), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::CoppTrapGroup), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::Policer), 0);
+        }
+    }
+
+    // IcmpOrch integration tests
+    mod icmp_orch_tests {
+        use super::*;
+        use sonic_orchagent::icmp::{IcmpOrch, IcmpOrchConfig, IcmpEchoEntry, IcmpEchoKey, IcmpMode};
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+        fn create_icmp_echo_session_with_sai(
+            vrf_name: &str,
+            ip: IpAddr,
+            mode: IcmpMode,
+            sai: &MockSai,
+        ) -> (IcmpEchoEntry, u64) {
+            let key = IcmpEchoKey::new(vrf_name.to_string(), ip);
+            let entry = IcmpEchoEntry::new(key, mode);
+
+            let mode_str = match mode {
+                IcmpMode::Enabled => "enabled",
+                IcmpMode::Disabled => "disabled",
+            };
+
+            let oid = sai
+                .create_object(
+                    SaiObjectType::IcmpEchoSession,
+                    vec![
+                        ("vrf".to_string(), vrf_name.to_string()),
+                        ("ip".to_string(), ip.to_string()),
+                        ("mode".to_string(), mode_str.to_string()),
+                    ],
+                )
+                .unwrap();
+
+            (entry, oid)
+        }
+
+        #[test]
+        fn test_icmp_echo_session_integration() {
+            let sai = MockSai::new();
+            let config = IcmpOrchConfig::default();
+            let orch = IcmpOrch::new(config);
+
+            // Verify no ICMP echo sessions exist initially
+            assert_eq!(sai.count_objects(SaiObjectType::IcmpEchoSession), 0);
+            assert_eq!(orch.stats().stats.entries_added, 0);
+            assert_eq!(orch.stats().stats.entries_removed, 0);
+
+            // Create an ICMP echo session with IPv4 address
+            let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+            let (entry, oid) = create_icmp_echo_session_with_sai("default", ip, IcmpMode::Enabled, &sai);
+
+            // Verify SAI object was created
+            assert_eq!(sai.count_objects(SaiObjectType::IcmpEchoSession), 1);
+
+            // Verify SAI object attributes
+            let sai_obj = sai.get_object(oid).unwrap();
+            assert_eq!(sai_obj.object_type, SaiObjectType::IcmpEchoSession);
+            assert_eq!(sai_obj.attributes.len(), 3);
+            assert_eq!(sai_obj.attributes[0].0, "vrf");
+            assert_eq!(sai_obj.attributes[0].1, "default");
+            assert_eq!(sai_obj.attributes[1].0, "ip");
+            assert_eq!(sai_obj.attributes[1].1, "10.0.0.1");
+            assert_eq!(sai_obj.attributes[2].0, "mode");
+            assert_eq!(sai_obj.attributes[2].1, "enabled");
+
+            // Verify entry key properties
+            assert_eq!(entry.key.vrf_name, "default");
+            assert_eq!(entry.key.ip, ip);
+            assert_eq!(entry.mode, IcmpMode::Enabled);
+        }
+
+        #[test]
+        fn test_icmp_echo_configuration_integration() {
+            let sai = MockSai::new();
+            let config = IcmpOrchConfig::default();
+            let orch = IcmpOrch::new(config);
+
+            // Create multiple ICMP echo sessions with different configurations
+            let ipv4_enabled = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+            let ipv6_disabled = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+
+            // Create first session (IPv4, Enabled)
+            let (_entry1, oid1) = create_icmp_echo_session_with_sai("default", ipv4_enabled, IcmpMode::Enabled, &sai);
+
+            // Verify first session created
+            assert_eq!(sai.count_objects(SaiObjectType::IcmpEchoSession), 1);
+
+            // Create second session (IPv6, Disabled)
+            let (_entry2, oid2) = create_icmp_echo_session_with_sai("Vrf-RED", ipv6_disabled, IcmpMode::Disabled, &sai);
+
+            // Verify both sessions exist
+            assert_eq!(sai.count_objects(SaiObjectType::IcmpEchoSession), 2);
+
+            // Verify first session attributes
+            let sai_obj1 = sai.get_object(oid1).unwrap();
+            assert_eq!(sai_obj1.attributes[2].1, "enabled");
+            assert_eq!(sai_obj1.attributes[0].1, "default");
+
+            // Verify second session attributes
+            let sai_obj2 = sai.get_object(oid2).unwrap();
+            assert_eq!(sai_obj2.attributes[2].1, "disabled");
+            assert_eq!(sai_obj2.attributes[0].1, "Vrf-RED");
+
+            // Verify orchestrator state
+            assert!(orch.get_entry(&IcmpEchoKey::new("default".to_string(), ipv4_enabled)).is_none());
+        }
+
+        #[test]
+        fn test_multiple_icmp_echo_sessions_integration() {
+            let sai = MockSai::new();
+            let config = IcmpOrchConfig::default();
+            let orch = IcmpOrch::new(config);
+
+            // Create multiple ICMP echo sessions in default VRF
+            let ips = vec![
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1)),
+            ];
+
+            let session_oids: Vec<u64> = ips
+                .iter()
+                .enumerate()
+                .map(|(idx, ip)| {
+                    let mode = if idx % 2 == 0 {
+                        IcmpMode::Enabled
+                    } else {
+                        IcmpMode::Disabled
+                    };
+                    let (_, oid) = create_icmp_echo_session_with_sai("default", *ip, mode, &sai);
+                    oid
+                })
+                .collect();
+
+            // Verify all sessions were created
+            assert_eq!(sai.count_objects(SaiObjectType::IcmpEchoSession), 3);
+            assert_eq!(session_oids.len(), 3);
+
+            // Verify all sessions exist in SAI
+            for (idx, oid) in session_oids.iter().enumerate() {
+                let sai_obj = sai.get_object(*oid).unwrap();
+                assert_eq!(sai_obj.object_type, SaiObjectType::IcmpEchoSession);
+                assert_eq!(sai_obj.attributes[0].1, "default");
+
+                let expected_mode = if idx % 2 == 0 { "enabled" } else { "disabled" };
+                assert_eq!(sai_obj.attributes[2].1, expected_mode);
+            }
+
+            // Verify sessions can be individually accessed
+            for oid in &session_oids {
+                assert!(sai.get_object(*oid).is_some());
+            }
+        }
+
+        #[test]
+        fn test_icmp_echo_removal_and_cleanup_integration() {
+            let sai = MockSai::new();
+            let config = IcmpOrchConfig::default();
+            let orch = IcmpOrch::new(config);
+
+            // Create initial ICMP echo sessions
+            let ip1 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+            let ip2 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+
+            let (_, oid1) = create_icmp_echo_session_with_sai("default", ip1, IcmpMode::Enabled, &sai);
+            let (_, oid2) = create_icmp_echo_session_with_sai("default", ip2, IcmpMode::Enabled, &sai);
+
+            // Verify both sessions created
+            assert_eq!(sai.count_objects(SaiObjectType::IcmpEchoSession), 2);
+
+            // Remove first session
+            sai.remove_object(oid1).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::IcmpEchoSession), 1);
+
+            // Verify removed session no longer exists
+            assert!(sai.get_object(oid1).is_none());
+
+            // Verify remaining session still exists
+            assert!(sai.get_object(oid2).is_some());
+
+            // Remove second session
+            sai.remove_object(oid2).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::IcmpEchoSession), 0);
+
+            // Verify complete cleanup
+            assert!(sai.get_object(oid1).is_none());
+            assert!(sai.get_object(oid2).is_none());
+
+            // Attempt to remove non-existent session should fail gracefully
+            let result = sai.remove_object(999);
+            assert!(result.is_err());
+
+            // Clear and verify final state
+            sai.clear();
+            assert_eq!(sai.count_objects(SaiObjectType::IcmpEchoSession), 0);
+            assert_eq!(orch.stats().stats.entries_added, 0);
+            assert_eq!(orch.stats().stats.entries_removed, 0);
+        }
+    }
+
+    // FabricPortsOrch integration tests
+    mod fabric_ports_orch_tests {
+        use super::*;
+
+        fn create_fabric_port_with_sai(
+            lane: u32,
+            status: &str,
+            isolate: bool,
+            sai: &MockSai,
+        ) -> (u64, String) {
+            let oid = sai.create_object(
+                SaiObjectType::FabricPort,
+                vec![
+                    ("lane".to_string(), lane.to_string()),
+                    ("status".to_string(), status.to_string()),
+                    ("isolate".to_string(), isolate.to_string()),
+                    ("attached".to_string(), "true".to_string()),
+                    ("remote_mod".to_string(), "1".to_string()),
+                    ("remote_port".to_string(), (lane as u32).to_string()),
+                ],
+            ).unwrap();
+
+            let key = format!("PORT{}", lane);
+            (oid, key)
+        }
+
+        /// Test fabric port creation and configuration
+        #[test]
+        fn test_fabric_port_creation_integration() {
+            let sai = MockSai::new();
+
+            // Verify initial state - no fabric ports
+            assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 0);
+
+            // Create a single fabric port with configuration
+            let (oid, key) = create_fabric_port_with_sai(0, "up", false, &sai);
+
+            assert_eq!(oid, 1);
+            assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 1);
+
+            // Verify the created object has correct attributes
+            let obj = sai.get_object(oid).unwrap();
+            assert_eq!(obj.object_type, SaiObjectType::FabricPort);
+            assert_eq!(obj.attributes.len(), 6);
+
+            // Verify specific attributes
+            let status_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "status")
+                .map(|(_, v)| v.clone());
+            assert_eq!(status_attr, Some("up".to_string()));
+
+            let isolate_attr = obj.attributes.iter()
+                .find(|(k, _)| k == "isolate")
+                .map(|(_, v)| v.clone());
+            assert_eq!(isolate_attr, Some("false".to_string()));
+
+            // Verify key matches expected format
+            assert_eq!(key, "PORT0");
+
+            sai.clear();
+        }
+
+        /// Test fabric port state management
+        #[test]
+        fn test_fabric_port_state_management_integration() {
+            let sai = MockSai::new();
+
+            // Create a fabric port in "up" state
+            let (oid_up, _) = create_fabric_port_with_sai(1, "up", false, &sai);
+
+            // Verify port is created with up status
+            let obj_up = sai.get_object(oid_up).unwrap();
+            let status = obj_up.attributes.iter()
+                .find(|(k, _)| k == "status")
+                .map(|(_, v)| v.clone());
+            assert_eq!(status, Some("up".to_string()));
+
+            // Create another fabric port in "down" state
+            let (oid_down, _) = create_fabric_port_with_sai(2, "down", false, &sai);
+
+            // Verify second port is created with down status
+            let obj_down = sai.get_object(oid_down).unwrap();
+            let status_down = obj_down.attributes.iter()
+                .find(|(k, _)| k == "status")
+                .map(|(_, v)| v.clone());
+            assert_eq!(status_down, Some("down".to_string()));
+
+            // Verify both ports exist
+            assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 2);
+
+            // Create an isolated port
+            let (oid_isolated, _) = create_fabric_port_with_sai(3, "up", true, &sai);
+
+            // Verify isolated port has isolation flag set
+            let obj_isolated = sai.get_object(oid_isolated).unwrap();
+            let isolate = obj_isolated.attributes.iter()
+                .find(|(k, _)| k == "isolate")
+                .map(|(_, v)| v.clone());
+            assert_eq!(isolate, Some("true".to_string()));
+
+            // Verify all three ports exist with different states
+            assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 3);
+
+            sai.clear();
+        }
+
+        /// Test multiple fabric port operations
+        #[test]
+        fn test_multiple_fabric_port_operations_integration() {
+            let sai = MockSai::new();
+
+            // Create a batch of fabric ports
+            let mut fabric_port_oids = Vec::new();
+            let mut fabric_port_keys = Vec::new();
+
+            for i in 0..5 {
+                let status = if i % 2 == 0 { "up" } else { "down" };
+                let isolate = i >= 3;
+                let (oid, key) = create_fabric_port_with_sai(i, status, isolate, &sai);
+                fabric_port_oids.push(oid);
+                fabric_port_keys.push(key);
+            }
+
+            // Verify all ports were created
+            assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 5);
+            assert_eq!(fabric_port_oids.len(), 5);
+            assert_eq!(fabric_port_keys.len(), 5);
+
+            // Verify each port can be retrieved and has correct attributes
+            for (idx, oid) in fabric_port_oids.iter().enumerate() {
+                let obj = sai.get_object(*oid).unwrap();
+                assert_eq!(obj.object_type, SaiObjectType::FabricPort);
+
+                let lane_attr = obj.attributes.iter()
+                    .find(|(k, _)| k == "lane")
+                    .map(|(_, v)| v.clone());
+                assert_eq!(lane_attr, Some((idx as u32).to_string()));
+
+                let expected_status = if idx % 2 == 0 { "up" } else { "down" };
+                let status_attr = obj.attributes.iter()
+                    .find(|(k, _)| k == "status")
+                    .map(|(_, v)| v.clone());
+                assert_eq!(status_attr, Some(expected_status.to_string()));
+
+                let expected_isolate = idx >= 3;
+                let isolate_attr = obj.attributes.iter()
+                    .find(|(k, _)| k == "isolate")
+                    .map(|(_, v)| v.clone());
+                assert_eq!(isolate_attr, Some(expected_isolate.to_string()));
+            }
+
+            // Verify port keys are correctly formatted
+            for (idx, key) in fabric_port_keys.iter().enumerate() {
+                assert_eq!(key, &format!("PORT{}", idx));
+            }
+
+            // Perform bulk operations: retrieve all ports
+            let all_ports: Vec<_> = fabric_port_oids.iter()
+                .map(|oid| sai.get_object(*oid).unwrap())
+                .collect();
+
+            assert_eq!(all_ports.len(), 5);
+            for port in &all_ports {
+                assert_eq!(port.object_type, SaiObjectType::FabricPort);
+                assert!(!port.attributes.is_empty());
+            }
+
+            sai.clear();
+        }
+
+        /// Test fabric port removal and cleanup
+        #[test]
+        fn test_fabric_port_removal_and_cleanup_integration() {
+            let sai = MockSai::new();
+
+            // Create initial set of fabric ports
+            let fabric_port_oids: Vec<u64> = (0..4)
+                .map(|i| {
+                    let (oid, _) = create_fabric_port_with_sai(
+                        i,
+                        if i % 2 == 0 { "up" } else { "down" },
+                        false,
+                        &sai,
+                    );
+                    oid
+                })
+                .collect();
+
+            // Verify all ports were created
+            assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 4);
+
+            // Remove first port
+            sai.remove_object(fabric_port_oids[0]).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 3);
+
+            // Verify removed port returns None
+            assert!(sai.get_object(fabric_port_oids[0]).is_none());
+
+            // Verify other ports still exist
+            assert!(sai.get_object(fabric_port_oids[1]).is_some());
+            assert!(sai.get_object(fabric_port_oids[2]).is_some());
+            assert!(sai.get_object(fabric_port_oids[3]).is_some());
+
+            // Remove remaining ports in sequence
+            sai.remove_object(fabric_port_oids[1]).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 2);
+
+            sai.remove_object(fabric_port_oids[2]).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 1);
+
+            sai.remove_object(fabric_port_oids[3]).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 0);
+
+            // Verify all removed ports return None
+            for oid in &fabric_port_oids {
+                assert!(sai.get_object(*oid).is_none());
+            }
+
+            // Attempt to remove non-existent port should fail
+            let result = sai.remove_object(999);
+            assert!(result.is_err());
+
+            // Clear and verify clean state
+            sai.clear();
+            assert_eq!(sai.count_objects(SaiObjectType::FabricPort), 0);
+        }
+    }
+
+}
