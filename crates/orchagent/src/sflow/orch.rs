@@ -809,4 +809,649 @@ mod tests {
         assert_eq!(stats.ports_unconfigured, 1);
         assert_eq!(stats.rate_updates, 1);
     }
+
+    // ==================== Additional Comprehensive Tests ====================
+
+    // 1. sFlow Session Management Tests
+
+    #[test]
+    fn test_session_creation_with_sample_rate() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(8192);
+
+        orch.configure_port("Ethernet0", config).unwrap();
+
+        assert_eq!(orch.session_count(), 1);
+        let created = callbacks.created_sessions.lock().unwrap();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].1, NonZeroU32::new(8192).unwrap());
+    }
+
+    #[test]
+    fn test_session_sharing_multiple_ports_same_rate() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+        orch.configure_port("Ethernet4", config).unwrap();
+
+        // Only one session should be created
+        assert_eq!(orch.session_count(), 1);
+        let created = callbacks.created_sessions.lock().unwrap();
+        assert_eq!(created.len(), 1);
+
+        // Verify both ports share the same session
+        let port0_info = orch.get_port_info(0x100).unwrap();
+        let port1_info = orch.get_port_info(0x104).unwrap();
+        assert_eq!(port0_info.session_id, port1_info.session_id);
+    }
+
+    #[test]
+    fn test_session_reference_counting_increment() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+        let session = orch.sessions.get(&NonZeroU32::new(4096).unwrap()).unwrap();
+        assert_eq!(session.ref_count, 1);
+
+        orch.configure_port("Ethernet4", config).unwrap();
+        let session = orch.sessions.get(&NonZeroU32::new(4096).unwrap()).unwrap();
+        assert_eq!(session.ref_count, 2);
+    }
+
+    #[test]
+    fn test_session_removal_when_refcount_zero() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        orch.configure_port("Ethernet0", config).unwrap();
+        assert_eq!(orch.session_count(), 1);
+
+        orch.remove_port("Ethernet0").unwrap();
+        assert_eq!(orch.session_count(), 0);
+
+        let removed = callbacks.removed_sessions.lock().unwrap();
+        assert_eq!(removed.len(), 1);
+    }
+
+    #[test]
+    fn test_unique_sessions_for_different_rates() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config1 = SflowConfig::new();
+        config1.rate = NonZeroU32::new(4096);
+
+        let mut config2 = SflowConfig::new();
+        config2.rate = NonZeroU32::new(8192);
+
+        orch.configure_port("Ethernet0", config1).unwrap();
+        orch.configure_port("Ethernet4", config2).unwrap();
+
+        // Two different sessions should be created
+        assert_eq!(orch.session_count(), 2);
+        let created = callbacks.created_sessions.lock().unwrap();
+        assert_eq!(created.len(), 2);
+
+        // Verify different session IDs
+        let port0_info = orch.get_port_info(0x100).unwrap();
+        let port1_info = orch.get_port_info(0x104).unwrap();
+        assert_ne!(port0_info.session_id, port1_info.session_id);
+    }
+
+    // 2. Port Sampling Configuration Tests
+
+    #[test]
+    fn test_enable_rx_sampling_on_port() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+        config.direction = SampleDirection::Rx;
+
+        orch.configure_port("Ethernet0", config).unwrap();
+
+        let ops = callbacks.port_ops.lock().unwrap();
+        assert!(ops.iter().any(|s| s.starts_with("enable_ingress:")));
+        assert!(!ops.iter().any(|s| s.starts_with("enable_egress:")));
+    }
+
+    #[test]
+    fn test_enable_tx_sampling_on_port() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+        config.direction = SampleDirection::Tx;
+
+        orch.configure_port("Ethernet0", config).unwrap();
+
+        let ops = callbacks.port_ops.lock().unwrap();
+        assert!(!ops.iter().any(|s| s.starts_with("enable_ingress:")));
+        assert!(ops.iter().any(|s| s.starts_with("enable_egress:")));
+    }
+
+    #[test]
+    fn test_enable_both_directions_sampling() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+        config.direction = SampleDirection::Both;
+
+        orch.configure_port("Ethernet0", config).unwrap();
+
+        let ops = callbacks.port_ops.lock().unwrap();
+        assert!(ops.iter().any(|s| s.starts_with("enable_ingress:")));
+        assert!(ops.iter().any(|s| s.starts_with("enable_egress:")));
+    }
+
+    #[test]
+    fn test_disable_sampling_on_port() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+        config.direction = SampleDirection::Both;
+
+        orch.configure_port("Ethernet0", config).unwrap();
+        orch.remove_port("Ethernet0").unwrap();
+
+        let ops = callbacks.port_ops.lock().unwrap();
+        assert!(ops.iter().any(|s| s.starts_with("disable_ingress:")));
+        assert!(ops.iter().any(|s| s.starts_with("disable_egress:")));
+    }
+
+    #[test]
+    fn test_update_sampling_direction_rx_to_tx() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+        config.direction = SampleDirection::Rx;
+
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+
+        config.direction = SampleDirection::Tx;
+        orch.configure_port("Ethernet0", config).unwrap();
+
+        let ops = callbacks.port_ops.lock().unwrap();
+        assert!(ops.iter().any(|s| s.starts_with("disable_ingress:")));
+        assert!(ops.iter().any(|s| s.starts_with("enable_egress:")));
+    }
+
+    #[test]
+    fn test_update_sampling_direction_tx_to_both() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+        config.direction = SampleDirection::Tx;
+
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+
+        config.direction = SampleDirection::Both;
+        orch.configure_port("Ethernet0", config).unwrap();
+
+        assert_eq!(orch.stats().direction_updates, 1);
+    }
+
+    #[test]
+    fn test_changing_rate_triggers_session_change() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+        let old_session_id = orch.get_port_info(0x100).unwrap().session_id;
+
+        config.rate = NonZeroU32::new(8192);
+        orch.configure_port("Ethernet0", config).unwrap();
+        let new_session_id = orch.get_port_info(0x100).unwrap().session_id;
+
+        assert_ne!(old_session_id, new_session_id);
+    }
+
+    #[test]
+    fn test_multiple_ports_share_same_session() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+        orch.configure_port("Ethernet4", config).unwrap();
+
+        let port0_session = orch.get_port_info(0x100).unwrap().session_id;
+        let port1_session = orch.get_port_info(0x104).unwrap().session_id;
+
+        assert_eq!(port0_session, port1_session);
+        assert_eq!(orch.session_count(), 1);
+    }
+
+    // 3. Global Enable/Disable Tests
+
+    #[test]
+    fn test_global_enable_disable() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        assert!(!orch.is_enabled());
+
+        orch.set_enabled(true);
+        assert!(orch.is_enabled());
+
+        orch.set_enabled(false);
+        assert!(!orch.is_enabled());
+    }
+
+    #[test]
+    fn test_global_disable_prevents_port_sampling() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.set_enabled(false);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        let result = orch.configure_port("Ethernet0", config);
+        assert!(result.is_ok());
+        assert_eq!(orch.port_count(), 0);
+        assert_eq!(orch.session_count(), 0);
+    }
+
+    #[test]
+    fn test_reenabling_global_allows_port_config() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        orch.set_enabled(false);
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+        assert_eq!(orch.port_count(), 0);
+
+        orch.set_enabled(true);
+        orch.configure_port("Ethernet0", config).unwrap();
+        assert_eq!(orch.port_count(), 1);
+    }
+
+    // 4. Reference Counting Tests
+
+    #[test]
+    fn test_session_refcount_increment_decrement() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+        let session = orch.sessions.get(&NonZeroU32::new(4096).unwrap()).unwrap();
+        assert_eq!(session.ref_count, 1);
+
+        orch.configure_port("Ethernet4", config).unwrap();
+        let session = orch.sessions.get(&NonZeroU32::new(4096).unwrap()).unwrap();
+        assert_eq!(session.ref_count, 2);
+
+        orch.remove_port("Ethernet0").unwrap();
+        let session = orch.sessions.get(&NonZeroU32::new(4096).unwrap()).unwrap();
+        assert_eq!(session.ref_count, 1);
+
+        orch.remove_port("Ethernet4").unwrap();
+        assert_eq!(orch.session_count(), 0);
+    }
+
+    #[test]
+    fn test_session_persists_with_active_ports() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+        orch.configure_port("Ethernet4", config).unwrap();
+
+        orch.remove_port("Ethernet0").unwrap();
+
+        // Session should still exist
+        assert_eq!(orch.session_count(), 1);
+        let removed = callbacks.removed_sessions.lock().unwrap();
+        assert_eq!(removed.len(), 0);
+    }
+
+    #[test]
+    fn test_session_cleanup_when_last_port_removed() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+        orch.configure_port("Ethernet4", config).unwrap();
+
+        orch.remove_port("Ethernet0").unwrap();
+        orch.remove_port("Ethernet4").unwrap();
+
+        assert_eq!(orch.session_count(), 0);
+        let removed = callbacks.removed_sessions.lock().unwrap();
+        assert_eq!(removed.len(), 1);
+    }
+
+    #[test]
+    fn test_multiple_ports_increment_same_session_refcount() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+        orch.configure_port("Ethernet4", config).unwrap();
+
+        let session = orch.sessions.get(&NonZeroU32::new(4096).unwrap()).unwrap();
+        assert_eq!(session.ref_count, 2);
+    }
+
+    // 5. Error Handling Tests
+
+    #[test]
+    fn test_invalid_port_reference() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        let result = orch.configure_port("InvalidPort", config);
+        assert!(matches!(result, Err(SflowOrchError::PortNotFound(_))));
+    }
+
+    #[test]
+    fn test_remove_nonexistent_port() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.set_enabled(true);
+
+        let result = orch.remove_port("Ethernet0");
+        assert!(matches!(result, Err(SflowOrchError::PortNotFound(_))));
+    }
+
+    #[test]
+    fn test_configure_port_without_rate() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.set_enabled(true);
+
+        let config = SflowConfig::new(); // No rate set
+
+        let result = orch.configure_port("Ethernet0", config);
+        assert!(matches!(result, Err(SflowOrchError::InvalidConfig(_))));
+    }
+
+    #[test]
+    fn test_configure_port_without_callbacks() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        let result = orch.configure_port("Ethernet0", config);
+        assert!(matches!(result, Err(SflowOrchError::InvalidConfig(_))));
+    }
+
+    // 6. Edge Cases Tests
+
+    #[test]
+    fn test_changing_rate_multiple_times() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+
+        config.rate = NonZeroU32::new(8192);
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+
+        config.rate = NonZeroU32::new(16384);
+        orch.configure_port("Ethernet0", config).unwrap();
+
+        assert_eq!(orch.stats().rate_updates, 2);
+        assert_eq!(orch.session_count(), 1);
+
+        let removed = callbacks.removed_sessions.lock().unwrap();
+        assert_eq!(removed.len(), 2); // 4096 and 8192 removed
+    }
+
+    #[test]
+    fn test_session_reuse_optimization() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+        let session_id_1 = orch.get_port_info(0x100).unwrap().session_id;
+
+        orch.configure_port("Ethernet4", config).unwrap();
+        let session_id_2 = orch.get_port_info(0x104).unwrap().session_id;
+
+        assert_eq!(session_id_1, session_id_2);
+        let created = callbacks.created_sessions.lock().unwrap();
+        assert_eq!(created.len(), 1); // Only one session created
+    }
+
+    #[test]
+    fn test_empty_session_cleanup_after_rate_change() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+        assert_eq!(orch.session_count(), 1);
+
+        config.rate = NonZeroU32::new(8192);
+        orch.configure_port("Ethernet0", config).unwrap();
+
+        assert_eq!(orch.session_count(), 1);
+        let removed = callbacks.removed_sessions.lock().unwrap();
+        assert_eq!(removed.len(), 1); // Old session removed
+    }
+
+    #[test]
+    fn test_direction_update_from_both_to_rx() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+        config.direction = SampleDirection::Both;
+
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+
+        config.direction = SampleDirection::Rx;
+        orch.configure_port("Ethernet0", config).unwrap();
+
+        let ops = callbacks.port_ops.lock().unwrap();
+        assert!(ops.iter().any(|s| s.starts_with("disable_ingress:")));
+        assert!(ops.iter().any(|s| s.starts_with("disable_egress:")));
+    }
+
+    #[test]
+    fn test_port_info_retrieval() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+        config.direction = SampleDirection::Both;
+        config.admin_state = true;
+
+        orch.configure_port("Ethernet0", config).unwrap();
+
+        let info = orch.get_port_info(0x100).unwrap();
+        assert_eq!(info.admin_state, true);
+        assert_eq!(info.direction, SampleDirection::Both);
+    }
+
+    #[test]
+    fn test_session_rate_lookup() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        orch.configure_port("Ethernet0", config).unwrap();
+
+        let session_id = orch.get_port_info(0x100).unwrap().session_id;
+        let rate = orch.get_session_rate(session_id).unwrap();
+        assert_eq!(rate, NonZeroU32::new(4096).unwrap());
+    }
+
+    #[test]
+    fn test_admin_state_update() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+        config.admin_state = false;
+
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+        let info = orch.get_port_info(0x100).unwrap();
+        assert_eq!(info.admin_state, false);
+
+        config.admin_state = true;
+        orch.configure_port("Ethernet0", config).unwrap();
+        let info = orch.get_port_info(0x100).unwrap();
+        assert_eq!(info.admin_state, true);
+    }
+
+    #[test]
+    fn test_multiple_rate_changes_with_shared_session() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.set_enabled(true);
+
+        let mut config = SflowConfig::new();
+        config.rate = NonZeroU32::new(4096);
+
+        orch.configure_port("Ethernet0", config.clone()).unwrap();
+        orch.configure_port("Ethernet4", config.clone()).unwrap();
+
+        // Change rate on one port
+        config.rate = NonZeroU32::new(8192);
+        orch.configure_port("Ethernet0", config).unwrap();
+
+        // Two sessions should exist
+        assert_eq!(orch.session_count(), 2);
+
+        // First session should have ref_count of 1
+        let session_4096 = orch.sessions.get(&NonZeroU32::new(4096).unwrap()).unwrap();
+        assert_eq!(session_4096.ref_count, 1);
+
+        // Second session should have ref_count of 1
+        let session_8192 = orch.sessions.get(&NonZeroU32::new(8192).unwrap()).unwrap();
+        assert_eq!(session_8192.ref_count, 1);
+    }
+
+    #[test]
+    fn test_initialized_state() {
+        let mut orch = SflowOrch::new(SflowOrchConfig::default());
+        assert!(!orch.is_initialized());
+
+        orch.set_initialized();
+        assert!(orch.is_initialized());
+    }
+
+    #[test]
+    fn test_get_session_rate_for_nonexistent_session() {
+        let orch = SflowOrch::new(SflowOrchConfig::default());
+        let rate = orch.get_session_rate(0x9999);
+        assert!(rate.is_none());
+    }
 }

@@ -746,4 +746,594 @@ mod tests {
         assert!(orch.has_pending_tasks());
         assert_eq!(orch.dump_pending_tasks().len(), 1);
     }
+
+    // Counter Group Management Tests
+
+    #[test]
+    fn test_create_multiple_counter_groups() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Add multiple counter groups
+        orch.group_map.set_enabled(FlexCounterGroup::Port, true);
+        orch.group_map.set_enabled(FlexCounterGroup::Queue, true);
+        orch.group_map.set_enabled(FlexCounterGroup::Rif, true);
+
+        assert!(orch.group_map.is_enabled(FlexCounterGroup::Port));
+        assert!(orch.group_map.is_enabled(FlexCounterGroup::Queue));
+        assert!(orch.group_map.is_enabled(FlexCounterGroup::Rif));
+        assert!(!orch.group_map.is_enabled(FlexCounterGroup::PgDrop));
+
+        // Count enabled groups
+        let enabled_count = orch.group_map.enabled_groups().count();
+        assert_eq!(enabled_count, 3);
+    }
+
+    #[test]
+    fn test_remove_counter_groups() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Enable groups
+        orch.group_map.set_enabled(FlexCounterGroup::Port, true);
+        orch.group_map.set_enabled(FlexCounterGroup::Queue, true);
+
+        assert!(orch.group_map.is_enabled(FlexCounterGroup::Port));
+        assert!(orch.group_map.is_enabled(FlexCounterGroup::Queue));
+
+        // Disable/remove a group
+        orch.group_map.set_enabled(FlexCounterGroup::Port, false);
+
+        assert!(!orch.group_map.is_enabled(FlexCounterGroup::Port));
+        assert!(orch.group_map.is_enabled(FlexCounterGroup::Queue));
+    }
+
+    #[test]
+    fn test_enable_disable_counter_collection() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Initially disabled
+        assert!(!orch.port_counters_enabled());
+        assert!(!orch.queue_counters_enabled());
+
+        // Enable port counters
+        orch.update_state_flags(FlexCounterGroup::Port, true);
+        assert!(orch.port_counters_enabled());
+
+        // Enable queue counters
+        orch.update_state_flags(FlexCounterGroup::Queue, true);
+        assert!(orch.queue_counters_enabled());
+
+        // Disable port counters
+        orch.update_state_flags(FlexCounterGroup::Port, false);
+        assert!(!orch.port_counters_enabled());
+        assert!(orch.queue_counters_enabled());
+    }
+
+    #[test]
+    fn test_group_configuration_updates() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Set initial configuration
+        orch.group_map.set_enabled(FlexCounterGroup::Port, true);
+        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 5000);
+
+        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(5000));
+
+        // Update configuration
+        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 10000);
+        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(10000));
+    }
+
+    #[test]
+    fn test_all_counter_group_types() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Test enabling various counter group types
+        let test_groups = vec![
+            FlexCounterGroup::Port,
+            FlexCounterGroup::PortRates,
+            FlexCounterGroup::PortBufferDrop,
+            FlexCounterGroup::Queue,
+            FlexCounterGroup::QueueWatermark,
+            FlexCounterGroup::PgDrop,
+            FlexCounterGroup::PgWatermark,
+            FlexCounterGroup::Rif,
+            FlexCounterGroup::RifRates,
+            FlexCounterGroup::WredEcnQueue,
+            FlexCounterGroup::WredEcnPort,
+        ];
+
+        for group in test_groups {
+            orch.group_map.set_enabled(group, true);
+            assert!(orch.group_map.is_enabled(group));
+        }
+    }
+
+    // Polling Configuration Tests
+
+    #[test]
+    fn test_set_polling_interval() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Set different polling intervals for different groups
+        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 1000);
+        orch.group_map.set_poll_interval(FlexCounterGroup::Queue, 5000);
+        orch.group_map.set_poll_interval(FlexCounterGroup::Rif, 10000);
+
+        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(1000));
+        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Queue), Some(5000));
+        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Rif), Some(10000));
+    }
+
+    #[test]
+    fn test_polling_interval_not_set() {
+        let orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Poll interval should be None when not configured
+        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), None);
+        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Queue), None);
+    }
+
+    #[test]
+    fn test_update_polling_interval() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Set initial interval
+        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 2000);
+        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(2000));
+
+        // Update interval
+        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 8000);
+        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(8000));
+
+        // Update again
+        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 15000);
+        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(15000));
+    }
+
+    #[test]
+    fn test_bulk_chunk_size_configuration() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Set bulk chunk size
+        orch.group_map.set_bulk_chunk_size(FlexCounterGroup::Port, 100);
+        assert_eq!(orch.group_map.bulk_chunk_size(FlexCounterGroup::Port), Some(100));
+
+        // Update bulk chunk size
+        orch.group_map.set_bulk_chunk_size(FlexCounterGroup::Port, 200);
+        assert_eq!(orch.group_map.bulk_chunk_size(FlexCounterGroup::Port), Some(200));
+
+        // Clear bulk chunk size
+        orch.group_map.clear_bulk_chunk_size(FlexCounterGroup::Port);
+        assert_eq!(orch.group_map.bulk_chunk_size(FlexCounterGroup::Port), None);
+    }
+
+    #[test]
+    fn test_bulk_chunk_size_tracking() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Track groups with bulk chunk size
+        orch.group_map.set_bulk_chunk_size(FlexCounterGroup::Port, 50);
+        orch.state.groups_with_bulk_chunk_size.insert(FlexCounterGroup::Port);
+
+        assert!(orch.state.groups_with_bulk_chunk_size.contains(&FlexCounterGroup::Port));
+
+        // Remove from tracking
+        orch.state.groups_with_bulk_chunk_size.remove(&FlexCounterGroup::Port);
+        assert!(!orch.state.groups_with_bulk_chunk_size.contains(&FlexCounterGroup::Port));
+    }
+
+    // Counter Object Tracking Tests
+
+    #[test]
+    fn test_buffer_queue_config_single_port() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        orch.load_buffer_queue_config("Ethernet0:0-7");
+
+        let configs = orch.buffer_queue_configs.get("Ethernet0").unwrap();
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0], (0, 7));
+    }
+
+    #[test]
+    fn test_buffer_queue_config_multiple_ports() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        orch.load_buffer_queue_config("Ethernet0,Ethernet4,Ethernet8:0-3");
+
+        assert!(orch.buffer_queue_configs.contains_key("Ethernet0"));
+        assert!(orch.buffer_queue_configs.contains_key("Ethernet4"));
+        assert!(orch.buffer_queue_configs.contains_key("Ethernet8"));
+
+        for port in &["Ethernet0", "Ethernet4", "Ethernet8"] {
+            let configs = orch.buffer_queue_configs.get(*port).unwrap();
+            assert_eq!(configs[0], (0, 3));
+        }
+    }
+
+    #[test]
+    fn test_buffer_queue_config_multiple_ranges() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        orch.load_buffer_queue_config("Ethernet0:0-3");
+        orch.load_buffer_queue_config("Ethernet0:4-7");
+
+        let configs = orch.buffer_queue_configs.get("Ethernet0").unwrap();
+        assert_eq!(configs.len(), 2);
+        assert_eq!(configs[0], (0, 3));
+        assert_eq!(configs[1], (4, 7));
+    }
+
+    #[test]
+    fn test_buffer_queue_config_invalid_format() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Should not panic, just ignore invalid config
+        orch.load_buffer_queue_config("InvalidFormat");
+        orch.load_buffer_queue_config("Ethernet0");
+        orch.load_buffer_queue_config("Ethernet0:invalid-range");
+
+        assert!(!orch.buffer_queue_configs.contains_key("InvalidFormat"));
+        assert!(!orch.buffer_queue_configs.contains_key("Ethernet0"));
+    }
+
+    #[test]
+    fn test_buffer_pg_config_single_port() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        orch.load_buffer_pg_config("Ethernet0:0-7");
+
+        let configs = orch.buffer_pg_configs.get("Ethernet0").unwrap();
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0], (0, 7));
+    }
+
+    #[test]
+    fn test_buffer_pg_config_multiple_ports() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        orch.load_buffer_pg_config("Ethernet0,Ethernet4:0-7");
+
+        assert!(orch.buffer_pg_configs.contains_key("Ethernet0"));
+        assert!(orch.buffer_pg_configs.contains_key("Ethernet4"));
+    }
+
+    #[test]
+    fn test_buffer_pg_config_invalid_format() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Should not panic, just ignore invalid config
+        orch.load_buffer_pg_config("InvalidFormat");
+        orch.load_buffer_pg_config("Ethernet0:abc-xyz");
+
+        assert!(!orch.buffer_pg_configs.contains_key("InvalidFormat"));
+    }
+
+    #[test]
+    fn test_get_pg_configurations_all_buffers() {
+        let orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        let configs = orch.get_pg_configurations();
+        assert!(configs.contains_key(CREATE_ALL_AVAILABLE_BUFFERS));
+    }
+
+    #[test]
+    fn test_get_pg_configurations_selective() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+        orch.set_create_only_config_db_buffers(true);
+        orch.load_buffer_pg_config("Ethernet0:0-3");
+
+        let configs = orch.get_pg_configurations();
+        assert!(!configs.contains_key(CREATE_ALL_AVAILABLE_BUFFERS));
+
+        let eth0_states = configs.get("Ethernet0").unwrap();
+        assert!(eth0_states.is_pg_counter_enabled(0));
+        assert!(eth0_states.is_pg_counter_enabled(3));
+        assert!(!eth0_states.is_pg_counter_enabled(4));
+    }
+
+    // State Management Tests
+
+    #[test]
+    fn test_all_state_flags() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Test all state flags
+        orch.update_state_flags(FlexCounterGroup::Port, true);
+        assert!(orch.port_counters_enabled());
+
+        orch.update_state_flags(FlexCounterGroup::PortBufferDrop, true);
+        assert!(orch.port_buffer_drop_counters_enabled());
+
+        orch.update_state_flags(FlexCounterGroup::Queue, true);
+        assert!(orch.queue_counters_enabled());
+
+        orch.update_state_flags(FlexCounterGroup::QueueWatermark, true);
+        assert!(orch.queue_watermark_counters_enabled());
+
+        orch.update_state_flags(FlexCounterGroup::PgDrop, true);
+        assert!(orch.pg_counters_enabled());
+
+        orch.update_state_flags(FlexCounterGroup::PgWatermark, true);
+        assert!(orch.pg_watermark_counters_enabled());
+
+        orch.update_state_flags(FlexCounterGroup::FlowCntTrap, true);
+        assert!(orch.hostif_trap_counters_enabled());
+
+        orch.update_state_flags(FlexCounterGroup::FlowCntRoute, true);
+        assert!(orch.route_flow_counters_enabled());
+
+        orch.update_state_flags(FlexCounterGroup::WredEcnQueue, true);
+        assert!(orch.wred_queue_counters_enabled());
+
+        orch.update_state_flags(FlexCounterGroup::WredEcnPort, true);
+        assert!(orch.wred_port_counters_enabled());
+    }
+
+    #[test]
+    fn test_state_flag_independence() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Enable some flags
+        orch.update_state_flags(FlexCounterGroup::Port, true);
+        orch.update_state_flags(FlexCounterGroup::Queue, true);
+
+        assert!(orch.port_counters_enabled());
+        assert!(orch.queue_counters_enabled());
+        assert!(!orch.pg_counters_enabled());
+
+        // Disable one flag shouldn't affect others
+        orch.update_state_flags(FlexCounterGroup::Port, false);
+
+        assert!(!orch.port_counters_enabled());
+        assert!(orch.queue_counters_enabled());
+    }
+
+    #[test]
+    fn test_create_only_config_db_buffers_flag() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Default is false
+        assert!(!orch.is_create_only_config_db_buffers());
+
+        // Set to true
+        orch.set_create_only_config_db_buffers(true);
+        assert!(orch.is_create_only_config_db_buffers());
+
+        // Set back to false
+        orch.set_create_only_config_db_buffers(false);
+        assert!(!orch.is_create_only_config_db_buffers());
+    }
+
+    #[test]
+    fn test_startup_delay_configuration() {
+        let config = FlexCounterOrchConfig {
+            startup_delay_secs: 60,
+            ..Default::default()
+        };
+        let orch = FlexCounterOrch::new(config);
+
+        assert!(orch.startup_time.is_some());
+        assert!(!orch.delay_expired);
+    }
+
+    #[test]
+    fn test_no_startup_delay() {
+        let config = FlexCounterOrchConfig {
+            startup_delay_secs: 0,
+            ..Default::default()
+        };
+        let orch = FlexCounterOrch::new(config);
+
+        assert!(orch.startup_time.is_none());
+        assert!(orch.delay_expired);
+    }
+
+    // Configuration Tests
+
+    #[test]
+    fn test_custom_config() {
+        let config = FlexCounterOrchConfig {
+            startup_delay_secs: 30,
+            default_max_queues: 16,
+            default_max_pgs: 16,
+        };
+        let orch = FlexCounterOrch::new(config);
+
+        assert_eq!(orch.config.startup_delay_secs, 30);
+        assert_eq!(orch.config.default_max_queues, 16);
+        assert_eq!(orch.config.default_max_pgs, 16);
+    }
+
+    #[test]
+    fn test_queue_config_uses_default_max() {
+        let config = FlexCounterOrchConfig {
+            startup_delay_secs: 0,
+            default_max_queues: 16,
+            default_max_pgs: 8,
+        };
+        let mut orch = FlexCounterOrch::new(config);
+        orch.set_create_only_config_db_buffers(true);
+        orch.load_buffer_queue_config("Ethernet0:0-3");
+
+        let configs = orch.get_queue_configurations();
+        let eth0_states = configs.get("Ethernet0").unwrap();
+
+        // Should have 16 queues (default_max_queues)
+        assert_eq!(eth0_states.len(), 16);
+    }
+
+    #[test]
+    fn test_pg_config_uses_default_max() {
+        let config = FlexCounterOrchConfig {
+            startup_delay_secs: 0,
+            default_max_queues: 8,
+            default_max_pgs: 16,
+        };
+        let mut orch = FlexCounterOrch::new(config);
+        orch.set_create_only_config_db_buffers(true);
+        orch.load_buffer_pg_config("Ethernet0:0-3");
+
+        let configs = orch.get_pg_configurations();
+        let eth0_states = configs.get("Ethernet0").unwrap();
+
+        // Should have 16 PGs (default_max_pgs)
+        assert_eq!(eth0_states.len(), 16);
+    }
+
+    // Task Management Tests
+
+    #[test]
+    fn test_multiple_pending_tasks() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        let mut fields1 = HashMap::new();
+        fields1.insert(fields::STATUS.to_string(), fields::STATUS_ENABLE.to_string());
+
+        let mut fields2 = HashMap::new();
+        fields2.insert(fields::POLL_INTERVAL.to_string(), "5000".to_string());
+
+        orch.add_task("PORT".to_string(), Operation::Set, fields1);
+        orch.add_task("QUEUE".to_string(), Operation::Set, fields2);
+
+        assert!(orch.has_pending_tasks());
+        assert_eq!(orch.dump_pending_tasks().len(), 2);
+    }
+
+    #[test]
+    fn test_task_with_delete_operation() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        orch.add_task("PORT".to_string(), Operation::Del, HashMap::new());
+
+        assert!(orch.has_pending_tasks());
+        let tasks = orch.dump_pending_tasks();
+        assert!(tasks[0].contains("Del"));
+    }
+
+    #[test]
+    fn test_orch_priority() {
+        let orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // FlexCounterOrch should have low priority (100)
+        assert_eq!(orch.priority(), 100);
+    }
+
+    // Integration Tests
+
+    #[test]
+    fn test_complete_port_counter_workflow() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Enable port counters
+        orch.group_map.set_enabled(FlexCounterGroup::Port, true);
+        orch.update_state_flags(FlexCounterGroup::Port, true);
+        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 10000);
+
+        assert!(orch.port_counters_enabled());
+        assert!(orch.group_map.is_enabled(FlexCounterGroup::Port));
+        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(10000));
+
+        // Disable port counters
+        orch.group_map.set_enabled(FlexCounterGroup::Port, false);
+        orch.update_state_flags(FlexCounterGroup::Port, false);
+
+        assert!(!orch.port_counters_enabled());
+        assert!(!orch.group_map.is_enabled(FlexCounterGroup::Port));
+    }
+
+    #[test]
+    fn test_complete_queue_counter_workflow() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+        orch.set_create_only_config_db_buffers(true);
+
+        // Load queue configurations
+        orch.load_buffer_queue_config("Ethernet0:0-3");
+        orch.load_buffer_queue_config("Ethernet0:4-7");
+
+        // Enable queue counters
+        orch.group_map.set_enabled(FlexCounterGroup::Queue, true);
+        orch.update_state_flags(FlexCounterGroup::Queue, true);
+        orch.group_map.set_poll_interval(FlexCounterGroup::Queue, 5000);
+
+        assert!(orch.queue_counters_enabled());
+
+        // Verify configurations
+        let configs = orch.get_queue_configurations();
+        let eth0_states = configs.get("Ethernet0").unwrap();
+        assert!(eth0_states.is_queue_counter_enabled(0));
+        assert!(eth0_states.is_queue_counter_enabled(7));
+    }
+
+    #[test]
+    fn test_multiple_groups_with_different_configs() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Configure multiple groups with different settings
+        orch.group_map.set_enabled(FlexCounterGroup::Port, true);
+        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 1000);
+        orch.group_map.set_bulk_chunk_size(FlexCounterGroup::Port, 50);
+
+        orch.group_map.set_enabled(FlexCounterGroup::Queue, true);
+        orch.group_map.set_poll_interval(FlexCounterGroup::Queue, 5000);
+        orch.group_map.set_bulk_chunk_size(FlexCounterGroup::Queue, 100);
+
+        orch.group_map.set_enabled(FlexCounterGroup::Rif, true);
+        orch.group_map.set_poll_interval(FlexCounterGroup::Rif, 10000);
+
+        // Verify each group has correct config
+        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(1000));
+        assert_eq!(orch.group_map.bulk_chunk_size(FlexCounterGroup::Port), Some(50));
+
+        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Queue), Some(5000));
+        assert_eq!(orch.group_map.bulk_chunk_size(FlexCounterGroup::Queue), Some(100));
+
+        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Rif), Some(10000));
+        assert_eq!(orch.group_map.bulk_chunk_size(FlexCounterGroup::Rif), None);
+    }
+
+    #[test]
+    fn test_counter_group_lifecycle() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Create and enable a group
+        orch.group_map.set_enabled(FlexCounterGroup::Port, true);
+        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 5000);
+        orch.update_state_flags(FlexCounterGroup::Port, true);
+
+        assert!(orch.group_map.is_enabled(FlexCounterGroup::Port));
+        assert!(orch.port_counters_enabled());
+
+        // Update configuration
+        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 10000);
+        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(10000));
+
+        // Disable group
+        orch.group_map.set_enabled(FlexCounterGroup::Port, false);
+        orch.update_state_flags(FlexCounterGroup::Port, false);
+
+        assert!(!orch.group_map.is_enabled(FlexCounterGroup::Port));
+        assert!(!orch.port_counters_enabled());
+    }
+
+    #[test]
+    fn test_enabled_groups_count() {
+        let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+
+        // Enable several groups
+        orch.group_map.set_enabled(FlexCounterGroup::Port, true);
+        orch.group_map.set_enabled(FlexCounterGroup::Queue, true);
+        orch.group_map.set_enabled(FlexCounterGroup::Rif, true);
+        orch.group_map.set_enabled(FlexCounterGroup::PgDrop, true);
+
+        let enabled_count = orch.group_map.enabled_groups().count();
+        assert_eq!(enabled_count, 4);
+
+        // Disable some groups
+        orch.group_map.set_enabled(FlexCounterGroup::Port, false);
+        orch.group_map.set_enabled(FlexCounterGroup::Queue, false);
+
+        let enabled_count = orch.group_map.enabled_groups().count();
+        assert_eq!(enabled_count, 2);
+    }
 }

@@ -561,6 +561,8 @@ impl VrfOrch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vrf::types::PacketAction;
+    use sonic_types::MacAddress;
 
     #[test]
     fn test_vrf_orch_new() {
@@ -714,5 +716,560 @@ mod tests {
 
         let names: Vec<_> = orch.vrf_names().collect();
         assert_eq!(names.len(), 3);
+    }
+
+    // ========== VRF Creation and Management Tests ==========
+
+    #[test]
+    fn test_create_vrf_with_default_vni() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        // VRF without explicit VNI (VNI defaults to None)
+        let config = VrfConfig::new("Vrf1").with_v4(true).with_v6(true);
+        let vrf_id = orch.add_vrf(&config).unwrap();
+
+        assert!(vrf_id != 0);
+        assert!(orch.vrf_exists("Vrf1"));
+        assert_eq!(orch.get_vrf_mapped_vni("Vrf1"), 0);
+    }
+
+    #[test]
+    fn test_create_vrf_with_custom_vni() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        // Mock callbacks with EVPN VTEP support
+        struct MockCallbacks;
+        impl VrfOrchCallbacks for MockCallbacks {
+            fn has_evpn_vtep(&self) -> bool {
+                true
+            }
+            fn get_vlan_mapped_to_vni(&self, vni: Vni) -> Option<VrfVlanId> {
+                if vni == 10000 {
+                    Some(100)
+                } else {
+                    None
+                }
+            }
+        }
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = VrfConfig::new("Vrf1").with_vni(10000);
+        let vrf_id = orch.add_vrf(&config).unwrap();
+
+        assert!(vrf_id != 0);
+        assert_eq!(orch.get_vrf_mapped_vni("Vrf1"), 10000);
+        assert_eq!(orch.get_l3_vni_vlan(10000), Some(100));
+        assert_eq!(orch.stats().vni_mappings_created, 1);
+    }
+
+    #[test]
+    fn test_duplicate_vrf_update() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        let config1 = VrfConfig::new("Vrf1").with_v4(true);
+        orch.add_vrf(&config1).unwrap();
+
+        // Adding same VRF again updates it
+        let config2 = VrfConfig::new("Vrf1").with_v6(false);
+        let _vrf_id2 = orch.add_vrf(&config2).unwrap();
+
+        // Should still be 1 VRF
+        assert_eq!(orch.vrf_count(), 1);
+        let entry = orch.get_vrf("Vrf1").unwrap();
+        assert!(!entry.admin_v6_state);
+        assert_eq!(orch.stats().vrfs_created, 1);
+        assert_eq!(orch.stats().vrfs_updated, 1);
+    }
+
+    #[test]
+    fn test_remove_nonexistent_vrf() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        let result = orch.remove_vrf("NonExistent");
+        assert!(matches!(result, Err(VrfOrchError::VrfNotFound(_))));
+    }
+
+    #[test]
+    fn test_vrf_name_validation() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        // Empty name
+        let config = VrfConfig::new("");
+        let result = orch.add_vrf(&config);
+        assert!(result.is_ok()); // Empty names are allowed
+
+        // Special characters
+        let config = VrfConfig::new("Vrf-Test_123");
+        let result = orch.add_vrf(&config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_multiple_vrf_creation() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        let vrf1_id = orch.add_vrf(&VrfConfig::new("Vrf1")).unwrap();
+        let vrf2_id = orch.add_vrf(&VrfConfig::new("Vrf2")).unwrap();
+        let vrf3_id = orch.add_vrf(&VrfConfig::new("Vrf3")).unwrap();
+
+        assert_eq!(orch.vrf_count(), 3);
+        assert!(vrf1_id != vrf2_id);
+        assert!(vrf2_id != vrf3_id);
+        assert_eq!(orch.stats().vrfs_created, 3);
+    }
+
+    // ========== Router Interface Management Tests ==========
+
+    #[test]
+    fn test_rif_reference_counting() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        orch.add_vrf(&VrfConfig::new("Vrf1")).unwrap();
+
+        // Simulate adding router interfaces
+        assert_eq!(orch.get_vrf_ref_count("Vrf1"), 0);
+
+        orch.increase_vrf_ref_count("Vrf1").unwrap();
+        assert_eq!(orch.get_vrf_ref_count("Vrf1"), 1);
+
+        orch.increase_vrf_ref_count("Vrf1").unwrap();
+        assert_eq!(orch.get_vrf_ref_count("Vrf1"), 2);
+
+        orch.increase_vrf_ref_count("Vrf1").unwrap();
+        assert_eq!(orch.get_vrf_ref_count("Vrf1"), 3);
+
+        orch.decrease_vrf_ref_count("Vrf1").unwrap();
+        assert_eq!(orch.get_vrf_ref_count("Vrf1"), 2);
+    }
+
+    #[test]
+    fn test_rif_in_default_vs_custom_vrf() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::new(0x1000));
+
+        // Default VRF ref count operations (should be no-op)
+        assert_eq!(orch.increase_vrf_ref_count_by_id(0x1000).unwrap(), 0);
+        assert_eq!(orch.decrease_vrf_ref_count_by_id(0x1000).unwrap(), 0);
+
+        // Custom VRF
+        let vrf_id = orch.add_vrf(&VrfConfig::new("Vrf1")).unwrap();
+        assert_eq!(orch.increase_vrf_ref_count_by_id(vrf_id).unwrap(), 1);
+        assert_eq!(orch.decrease_vrf_ref_count_by_id(vrf_id).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_multiple_rifs_per_vrf() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        orch.add_vrf(&VrfConfig::new("Vrf1")).unwrap();
+
+        // Simulate multiple RIFs
+        for _ in 0..10 {
+            orch.increase_vrf_ref_count("Vrf1").unwrap();
+        }
+
+        assert_eq!(orch.get_vrf_ref_count("Vrf1"), 10);
+
+        // Remove half
+        for _ in 0..5 {
+            orch.decrease_vrf_ref_count("Vrf1").unwrap();
+        }
+
+        assert_eq!(orch.get_vrf_ref_count("Vrf1"), 5);
+    }
+
+    // ========== VRF Tables Tests ==========
+
+    #[test]
+    fn test_vrf_table_oid_assignment() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        let vrf1_id = orch.add_vrf(&VrfConfig::new("Vrf1")).unwrap();
+        let vrf2_id = orch.add_vrf(&VrfConfig::new("Vrf2")).unwrap();
+
+        // Each VRF should have unique ID
+        assert!(vrf1_id != vrf2_id);
+        assert!(vrf1_id != 0);
+        assert!(vrf2_id != 0);
+
+        // IDs should be retrievable by name
+        assert_eq!(orch.get_vrf_id("Vrf1"), vrf1_id);
+        assert_eq!(orch.get_vrf_id("Vrf2"), vrf2_id);
+
+        // Names should be retrievable by ID
+        assert_eq!(orch.get_vrf_name(vrf1_id), "Vrf1");
+        assert_eq!(orch.get_vrf_name(vrf2_id), "Vrf2");
+    }
+
+    #[test]
+    fn test_default_vrf_tables() {
+        let orch = VrfOrch::new(VrfOrchConfig::new(0x1000));
+
+        // Default VRF should return global VRF ID
+        assert_eq!(orch.get_vrf_id(""), 0x1000);
+        assert_eq!(orch.get_vrf_id("NonExistent"), 0x1000);
+        assert_eq!(orch.get_vrf_name(0x1000), "");
+    }
+
+    #[test]
+    fn test_ipv4_ipv6_route_table_per_vrf() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        let config = VrfConfig::new("Vrf1")
+            .with_v4(true)
+            .with_v6(false);
+        orch.add_vrf(&config).unwrap();
+
+        let entry = orch.get_vrf("Vrf1").unwrap();
+        assert!(entry.admin_v4_state);
+        assert!(!entry.admin_v6_state);
+
+        // Update to enable IPv6
+        let config2 = VrfConfig::new("Vrf1").with_v6(true);
+        orch.add_vrf(&config2).unwrap();
+
+        let entry = orch.get_vrf("Vrf1").unwrap();
+        assert!(entry.admin_v4_state); // Still enabled
+        assert!(entry.admin_v6_state); // Now enabled
+    }
+
+    // ========== Reference Counting Tests ==========
+
+    #[test]
+    fn test_cannot_remove_vrf_with_active_rifs() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        orch.add_vrf(&VrfConfig::new("Vrf1")).unwrap();
+        orch.increase_vrf_ref_count("Vrf1").unwrap();
+
+        // Should fail to remove
+        let result = orch.remove_vrf("Vrf1");
+        assert!(matches!(result, Err(VrfOrchError::VrfInUse(_, 1))));
+
+        // After removing RIF, should succeed
+        orch.decrease_vrf_ref_count("Vrf1").unwrap();
+        assert!(orch.remove_vrf("Vrf1").is_ok());
+    }
+
+    #[test]
+    fn test_ref_count_cleanup_on_removal() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        let vrf_id = orch.add_vrf(&VrfConfig::new("Vrf1")).unwrap();
+        orch.remove_vrf("Vrf1").unwrap();
+
+        // After removal, lookups should fail
+        assert!(!orch.vrf_exists("Vrf1"));
+        assert_eq!(orch.get_vrf_ref_count("Vrf1"), -1);
+        assert_eq!(orch.get_vrf_name(vrf_id), "");
+    }
+
+    #[test]
+    fn test_ref_count_underflow_protection() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        orch.add_vrf(&VrfConfig::new("Vrf1")).unwrap();
+
+        // Cannot decrease below 0
+        let result = orch.decrease_vrf_ref_count("Vrf1");
+        assert!(matches!(result, Err(VrfOrchError::InvalidConfig(_))));
+
+        assert_eq!(orch.get_vrf_ref_count("Vrf1"), 0);
+    }
+
+    #[test]
+    fn test_ref_count_by_id_nonexistent() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        let result = orch.increase_vrf_ref_count_by_id(0x9999);
+        assert!(matches!(result, Err(VrfOrchError::VrfNotFound(_))));
+
+        let result = orch.decrease_vrf_ref_count_by_id(0x9999);
+        assert!(matches!(result, Err(VrfOrchError::VrfNotFound(_))));
+    }
+
+    // ========== VNI Management Tests ==========
+
+    #[test]
+    fn test_vni_to_vrf_mapping() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        struct MockCallbacks;
+        impl VrfOrchCallbacks for MockCallbacks {
+            fn has_evpn_vtep(&self) -> bool {
+                true
+            }
+            fn get_vlan_mapped_to_vni(&self, _vni: Vni) -> Option<VrfVlanId> {
+                Some(100)
+            }
+        }
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(10000)).unwrap();
+
+        assert_eq!(orch.get_vrf_mapped_vni("Vrf1"), 10000);
+        assert!(orch.is_l3_vni(10000));
+    }
+
+    #[test]
+    fn test_unique_vni_per_vrf() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        struct MockCallbacks;
+        impl VrfOrchCallbacks for MockCallbacks {
+            fn has_evpn_vtep(&self) -> bool {
+                true
+            }
+            fn get_vlan_mapped_to_vni(&self, _vni: Vni) -> Option<VrfVlanId> {
+                Some(100)
+            }
+        }
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(10000)).unwrap();
+        orch.add_vrf(&VrfConfig::new("Vrf2").with_vni(20000)).unwrap();
+
+        assert_eq!(orch.get_vrf_mapped_vni("Vrf1"), 10000);
+        assert_eq!(orch.get_vrf_mapped_vni("Vrf2"), 20000);
+        assert!(orch.is_l3_vni(10000));
+        assert!(orch.is_l3_vni(20000));
+    }
+
+    #[test]
+    fn test_updating_vrf_vni() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        struct MockCallbacks;
+        impl VrfOrchCallbacks for MockCallbacks {
+            fn has_evpn_vtep(&self) -> bool {
+                true
+            }
+            fn get_vlan_mapped_to_vni(&self, _vni: Vni) -> Option<VrfVlanId> {
+                Some(100)
+            }
+        }
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        // Create VRF with VNI
+        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(10000)).unwrap();
+        assert_eq!(orch.get_vrf_mapped_vni("Vrf1"), 10000);
+        assert_eq!(orch.stats().vni_mappings_created, 1);
+
+        // Update to new VNI - VRF-to-VNI map updated but old L3VNI entry remains
+        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(20000)).unwrap();
+        assert_eq!(orch.get_vrf_mapped_vni("Vrf1"), 20000);
+
+        // The VRF should now be mapped to new VNI
+        assert!(orch.is_l3_vni(20000));
+
+        // Old L3VNI entry still exists (not automatically cleaned up)
+        assert!(orch.is_l3_vni(10000));
+
+        // Statistics show new mapping created (old not removed by update)
+        assert_eq!(orch.stats().vni_mappings_created, 2);
+    }
+
+    #[test]
+    fn test_vni_lookups() {
+        let orch = VrfOrch::new(VrfOrchConfig::default());
+
+        // Non-existent VNI
+        assert_eq!(orch.get_vrf_mapped_vni("NonExistent"), 0);
+        assert!(!orch.is_l3_vni(99999));
+        assert_eq!(orch.get_l3_vni_vlan(99999), None);
+    }
+
+    #[test]
+    fn test_vni_removal_with_vrf() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        struct MockCallbacks;
+        impl VrfOrchCallbacks for MockCallbacks {
+            fn has_evpn_vtep(&self) -> bool {
+                true
+            }
+            fn get_vlan_mapped_to_vni(&self, _vni: Vni) -> Option<VrfVlanId> {
+                Some(100)
+            }
+        }
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(10000)).unwrap();
+        assert!(orch.is_l3_vni(10000));
+
+        // Remove VRF should remove VNI mapping
+        orch.remove_vrf("Vrf1").unwrap();
+        assert!(!orch.is_l3_vni(10000));
+        assert_eq!(orch.stats().vni_mappings_removed, 1);
+    }
+
+    // ========== Error Handling Tests ==========
+
+    #[test]
+    fn test_vrf_not_found_errors() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        let result = orch.increase_vrf_ref_count("NonExistent");
+        assert!(matches!(result, Err(VrfOrchError::VrfNotFound(_))));
+
+        let result = orch.decrease_vrf_ref_count("NonExistent");
+        assert!(matches!(result, Err(VrfOrchError::VrfNotFound(_))));
+
+        let result = orch.remove_vrf("NonExistent");
+        assert!(matches!(result, Err(VrfOrchError::VrfNotFound(_))));
+    }
+
+    #[test]
+    fn test_vni_not_found_error() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        let result = orch.update_l3_vni_vlan(99999, 100);
+        assert!(matches!(result, Err(VrfOrchError::VniNotFound(99999))));
+    }
+
+    #[test]
+    fn test_invalid_vni_without_evpn_vtep() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        // No callbacks or callbacks without EVPN VTEP
+        let config = VrfConfig::new("Vrf1").with_vni(10000);
+        let result = orch.add_vrf(&config);
+
+        // Should fail without EVPN VTEP
+        assert!(matches!(result, Err(VrfOrchError::CallbackError(_))));
+    }
+
+    // ========== Statistics Tracking Tests ==========
+
+    #[test]
+    fn test_statistics_tracking() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        assert_eq!(orch.stats().vrfs_created, 0);
+        assert_eq!(orch.stats().vrfs_removed, 0);
+        assert_eq!(orch.stats().vrfs_updated, 0);
+
+        orch.add_vrf(&VrfConfig::new("Vrf1")).unwrap();
+        assert_eq!(orch.stats().vrfs_created, 1);
+
+        orch.add_vrf(&VrfConfig::new("Vrf1").with_v4(false)).unwrap();
+        assert_eq!(orch.stats().vrfs_updated, 1);
+
+        orch.remove_vrf("Vrf1").unwrap();
+        assert_eq!(orch.stats().vrfs_removed, 1);
+    }
+
+    #[test]
+    fn test_vni_mapping_statistics() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        struct MockCallbacks;
+        impl VrfOrchCallbacks for MockCallbacks {
+            fn has_evpn_vtep(&self) -> bool {
+                true
+            }
+            fn get_vlan_mapped_to_vni(&self, _vni: Vni) -> Option<VrfVlanId> {
+                Some(100)
+            }
+        }
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        assert_eq!(orch.stats().vni_mappings_created, 0);
+        assert_eq!(orch.stats().vni_mappings_removed, 0);
+
+        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(10000)).unwrap();
+        assert_eq!(orch.stats().vni_mappings_created, 1);
+
+        orch.remove_vrf("Vrf1").unwrap();
+        assert_eq!(orch.stats().vni_mappings_removed, 1);
+    }
+
+    // ========== Edge Cases Tests ==========
+
+    #[test]
+    fn test_vrf_with_no_rifs() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        orch.add_vrf(&VrfConfig::new("Vrf1")).unwrap();
+        assert_eq!(orch.get_vrf_ref_count("Vrf1"), 0);
+
+        // Should be able to remove immediately
+        assert!(orch.remove_vrf("Vrf1").is_ok());
+    }
+
+    #[test]
+    fn test_multiple_vrfs_with_rifs() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        // Create multiple VRFs with RIFs
+        orch.add_vrf(&VrfConfig::new("Vrf1")).unwrap();
+        orch.add_vrf(&VrfConfig::new("Vrf2")).unwrap();
+        orch.add_vrf(&VrfConfig::new("Vrf3")).unwrap();
+
+        orch.increase_vrf_ref_count("Vrf1").unwrap();
+        orch.increase_vrf_ref_count("Vrf1").unwrap();
+        orch.increase_vrf_ref_count("Vrf2").unwrap();
+        orch.increase_vrf_ref_count("Vrf3").unwrap();
+        orch.increase_vrf_ref_count("Vrf3").unwrap();
+        orch.increase_vrf_ref_count("Vrf3").unwrap();
+
+        assert_eq!(orch.get_vrf_ref_count("Vrf1"), 2);
+        assert_eq!(orch.get_vrf_ref_count("Vrf2"), 1);
+        assert_eq!(orch.get_vrf_ref_count("Vrf3"), 3);
+    }
+
+    #[test]
+    fn test_vrf_cleanup_on_removal() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        let vrf_id = orch.add_vrf(&VrfConfig::new("Vrf1")).unwrap();
+        assert_eq!(orch.vrf_count(), 1);
+
+        orch.remove_vrf("Vrf1").unwrap();
+
+        // All state should be cleaned up
+        assert_eq!(orch.vrf_count(), 0);
+        assert!(!orch.vrf_exists("Vrf1"));
+        assert_eq!(orch.get_vrf_name(vrf_id), "");
+        assert!(orch.get_vrf("Vrf1").is_none());
+        assert_eq!(orch.get_vrf_ref_count("Vrf1"), -1);
+    }
+
+    #[test]
+    fn test_initialized_flag() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        assert!(!orch.is_initialized());
+
+        orch.set_initialized(true);
+        assert!(orch.is_initialized());
+
+        orch.set_initialized(false);
+        assert!(!orch.is_initialized());
+    }
+
+    #[test]
+    fn test_vrf_with_all_configuration_options() {
+        let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+        let mac = MacAddress::new([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+        let config = VrfConfig::new("Vrf1")
+            .with_v4(true)
+            .with_v6(true)
+            .with_src_mac(mac)
+            .with_ttl_action(PacketAction::Drop)
+            .with_ip_opt_action(PacketAction::Trap)
+            .with_l3_mc_action(PacketAction::Forward)
+            .with_fallback(true);
+
+        orch.add_vrf(&config).unwrap();
+
+        let entry = orch.get_vrf("Vrf1").unwrap();
+        assert!(entry.admin_v4_state);
+        assert!(entry.admin_v6_state);
+        assert_eq!(entry.src_mac, Some(mac));
+        assert_eq!(entry.ttl_action, Some(PacketAction::Drop));
+        assert_eq!(entry.ip_opt_action, Some(PacketAction::Trap));
+        assert_eq!(entry.l3_mc_action, Some(PacketAction::Forward));
+        assert!(entry.fallback);
     }
 }

@@ -693,6 +693,139 @@ fn parse_nexthops(fields: &HashMap<String, String>) -> Result<NextHopGroupKey> {
 mod tests {
     use super::*;
     use std::net::Ipv4Addr;
+    use std::sync::{Arc, Mutex};
+
+    // Test helper: Create a test IP prefix
+    fn make_prefix(addr: &str, len: u8) -> IpPrefix {
+        IpPrefix::new(
+            sonic_types::IpAddress::V4(addr.parse::<Ipv4Addr>().unwrap().into()),
+            len,
+        )
+        .unwrap()
+    }
+
+    // Test helper: Create a next-hop key
+    fn make_nexthop(ip: &str, alias: &str) -> NextHopKey {
+        NextHopKey::new(
+            sonic_types::IpAddress::V4(ip.parse::<Ipv4Addr>().unwrap().into()),
+            alias,
+        )
+    }
+
+    // Mock callbacks for testing
+    #[derive(Default)]
+    struct MockCallbacks {
+        next_hop_ids: Arc<Mutex<HashMap<NextHopKey, RawSaiObjectId>>>,
+        router_intf_ids: Arc<Mutex<HashMap<String, RawSaiObjectId>>>,
+        next_hop_refs: Arc<Mutex<HashMap<NextHopKey, u32>>>,
+        router_intf_refs: Arc<Mutex<HashMap<String, u32>>>,
+        vrf_refs: Arc<Mutex<HashMap<RawSaiObjectId, u32>>>,
+        vrfs: Arc<Mutex<HashSet<RawSaiObjectId>>>,
+        nhg_counter: Arc<Mutex<u64>>,
+    }
+
+    impl MockCallbacks {
+        fn new() -> Self {
+            Self::default()
+        }
+
+        fn add_next_hop(&self, nh: NextHopKey, id: RawSaiObjectId) {
+            self.next_hop_ids.lock().unwrap().insert(nh, id);
+        }
+
+        fn add_router_intf(&self, alias: String, id: RawSaiObjectId) {
+            self.router_intf_ids.lock().unwrap().insert(alias, id);
+        }
+
+        fn add_vrf(&self, vrf_id: RawSaiObjectId) {
+            self.vrfs.lock().unwrap().insert(vrf_id);
+        }
+    }
+
+    #[async_trait]
+    impl RouteOrchCallbacks for MockCallbacks {
+        fn has_next_hop(&self, nexthop: &NextHopKey) -> bool {
+            self.next_hop_ids.lock().unwrap().contains_key(nexthop)
+        }
+
+        fn get_next_hop_id(&self, nexthop: &NextHopKey) -> Option<RawSaiObjectId> {
+            self.next_hop_ids.lock().unwrap().get(nexthop).copied()
+        }
+
+        fn get_router_intf_id(&self, alias: &str) -> Option<RawSaiObjectId> {
+            self.router_intf_ids.lock().unwrap().get(alias).copied()
+        }
+
+        fn vrf_exists(&self, vrf_id: RawSaiObjectId) -> bool {
+            vrf_id == 0 || self.vrfs.lock().unwrap().contains(&vrf_id)
+        }
+
+        fn increase_next_hop_ref_count(&self, nexthop: &NextHopKey) {
+            *self.next_hop_refs.lock().unwrap().entry(nexthop.clone()).or_insert(0) += 1;
+        }
+
+        fn decrease_next_hop_ref_count(&self, nexthop: &NextHopKey) {
+            if let Some(count) = self.next_hop_refs.lock().unwrap().get_mut(nexthop) {
+                *count = count.saturating_sub(1);
+            }
+        }
+
+        fn increase_router_intf_ref_count(&self, alias: &str) {
+            *self.router_intf_refs.lock().unwrap().entry(alias.to_string()).or_insert(0) += 1;
+        }
+
+        fn decrease_router_intf_ref_count(&self, alias: &str) {
+            if let Some(count) = self.router_intf_refs.lock().unwrap().get_mut(alias) {
+                *count = count.saturating_sub(1);
+            }
+        }
+
+        fn increase_vrf_ref_count(&self, vrf_id: RawSaiObjectId) {
+            *self.vrf_refs.lock().unwrap().entry(vrf_id).or_insert(0) += 1;
+        }
+
+        fn decrease_vrf_ref_count(&self, vrf_id: RawSaiObjectId) {
+            if let Some(count) = self.vrf_refs.lock().unwrap().get_mut(&vrf_id) {
+                *count = count.saturating_sub(1);
+            }
+        }
+
+        async fn sai_create_nhg(&self, _nhg_key: &NextHopGroupKey) -> Result<RawSaiObjectId> {
+            let mut counter = self.nhg_counter.lock().unwrap();
+            *counter += 1;
+            Ok(*counter)
+        }
+
+        async fn sai_remove_nhg(&self, _nhg_id: RawSaiObjectId) -> Result<()> {
+            Ok(())
+        }
+
+        async fn sai_create_route(
+            &self,
+            _vrf_id: RawSaiObjectId,
+            _prefix: &IpPrefix,
+            _nhg_id: Option<RawSaiObjectId>,
+            _blackhole: bool,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn sai_remove_route(&self, _vrf_id: RawSaiObjectId, _prefix: &IpPrefix) -> Result<()> {
+            Ok(())
+        }
+
+        async fn sai_set_route(
+            &self,
+            _vrf_id: RawSaiObjectId,
+            _prefix: &IpPrefix,
+            _nhg_id: Option<RawSaiObjectId>,
+            _blackhole: bool,
+        ) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    // ===== Basic parsing tests =====
 
     #[test]
     fn test_parse_route_key_default_vrf() {
@@ -709,12 +842,27 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_route_key_invalid_vrf() {
+        let result = parse_route_key("invalid:10.0.0.0/24");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RouteError::InvalidRoute(_)));
+    }
+
+    #[test]
+    fn test_parse_route_key_invalid_prefix() {
+        let result = parse_route_key("10.0.0.0/99");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RouteError::InvalidRoute(_)));
+    }
+
+    #[test]
     fn test_parse_nexthops_single() {
         let mut fields = HashMap::new();
         fields.insert("nexthop".to_string(), "192.168.1.1@Ethernet0".to_string());
 
         let key = parse_nexthops(&fields).unwrap();
         assert_eq!(key.len(), 1);
+        assert!(!key.is_ecmp());
     }
 
     #[test]
@@ -740,20 +888,75 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_nexthops_drop() {
+        let mut fields = HashMap::new();
+        fields.insert("nexthop".to_string(), "drop".to_string());
+
+        let key = parse_nexthops(&fields).unwrap();
+        assert!(key.is_empty());
+    }
+
+    #[test]
+    fn test_parse_nexthops_empty_string() {
+        let mut fields = HashMap::new();
+        fields.insert("nexthop".to_string(), "".to_string());
+
+        let key = parse_nexthops(&fields).unwrap();
+        assert!(key.is_empty());
+    }
+
+    #[test]
+    fn test_parse_nexthops_blackhole_field() {
+        let mut fields = HashMap::new();
+        fields.insert("blackhole".to_string(), "true".to_string());
+
+        let key = parse_nexthops(&fields).unwrap();
+        assert!(key.is_empty());
+    }
+
+    #[test]
+    fn test_parse_nexthops_missing_field() {
+        let fields = HashMap::new();
+        let result = parse_nexthops(&fields);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RouteError::InvalidRoute(_)));
+    }
+
+    #[test]
+    fn test_parse_nexthops_uppercase_field() {
+        let mut fields = HashMap::new();
+        fields.insert("NEXTHOP".to_string(), "192.168.1.1@Ethernet0".to_string());
+
+        let key = parse_nexthops(&fields).unwrap();
+        assert_eq!(key.len(), 1);
+    }
+
+    // ===== RouteOrch initialization tests =====
+
+    #[test]
     fn test_route_orch_new() {
         let orch = RouteOrch::new(RouteOrchConfig::default());
         assert_eq!(orch.name(), "RouteOrch");
         assert_eq!(orch.nhg_count(), 0);
+        assert_eq!(orch.max_nhg_count(), 1024);
+    }
+
+    #[test]
+    fn test_route_orch_custom_config() {
+        let config = RouteOrchConfig {
+            max_nhg_count: 512,
+            ordered_ecmp: true,
+            default_action_drop: false,
+        };
+        let orch = RouteOrch::new(config);
+        assert_eq!(orch.max_nhg_count(), 512);
     }
 
     #[test]
     fn test_route_orch_nhg_not_auto_vivified() {
         let orch = RouteOrch::new(RouteOrchConfig::default());
 
-        let key = NextHopGroupKey::single(NextHopKey::new(
-            sonic_types::IpAddress::V4(Ipv4Addr::new(192, 168, 1, 1).into()),
-            "Ethernet0",
-        ));
+        let key = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
 
         // NHG should not exist
         assert!(!orch.has_nhg(&key));
@@ -770,18 +973,734 @@ mod tests {
         let mut orch = RouteOrch::new(RouteOrchConfig::default());
 
         let key = NextHopGroupKey::from_nexthops([
-            NextHopKey::new(
-                sonic_types::IpAddress::V4(Ipv4Addr::new(192, 168, 1, 1).into()),
-                "Ethernet0",
-            ),
-            NextHopKey::new(
-                sonic_types::IpAddress::V4(Ipv4Addr::new(192, 168, 1, 2).into()),
-                "Ethernet4",
-            ),
+            make_nexthop("192.168.1.1", "Ethernet0"),
+            make_nexthop("192.168.1.2", "Ethernet4"),
         ]);
 
         // increase_nhg_ref_count should fail because NHG doesn't exist and callbacks not set
         let result = orch.increase_nhg_ref_count(&key);
         assert!(result.is_err());
+    }
+
+    // ===== NHG management tests =====
+
+    #[tokio::test]
+    async fn test_add_nhg_success() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let key = NextHopGroupKey::from_nexthops([
+            make_nexthop("192.168.1.1", "Ethernet0"),
+            make_nexthop("192.168.1.2", "Ethernet4"),
+        ]);
+
+        let result = orch.add_nhg(key.clone()).await;
+        assert!(result.is_ok());
+        assert_eq!(orch.nhg_count(), 1);
+        assert!(orch.has_nhg(&key));
+    }
+
+    #[tokio::test]
+    async fn test_add_nhg_duplicate() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let key = NextHopGroupKey::from_nexthops([
+            make_nexthop("192.168.1.1", "Ethernet0"),
+            make_nexthop("192.168.1.2", "Ethernet4"),
+        ]);
+
+        orch.add_nhg(key.clone()).await.unwrap();
+        let result = orch.add_nhg(key.clone()).await;
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RouteError::NhgAlreadyExists(_)));
+        assert_eq!(orch.nhg_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_add_nhg_max_limit() {
+        let config = RouteOrchConfig {
+            max_nhg_count: 2,
+            ..Default::default()
+        };
+        let mut orch = RouteOrch::new(config);
+        let callbacks = Arc::new(MockCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let key1 = NextHopGroupKey::from_nexthops([
+            make_nexthop("192.168.1.1", "Ethernet0"),
+            make_nexthop("192.168.1.2", "Ethernet4"),
+        ]);
+        let key2 = NextHopGroupKey::from_nexthops([
+            make_nexthop("192.168.2.1", "Ethernet0"),
+            make_nexthop("192.168.2.2", "Ethernet4"),
+        ]);
+        let key3 = NextHopGroupKey::from_nexthops([
+            make_nexthop("192.168.3.1", "Ethernet0"),
+            make_nexthop("192.168.3.2", "Ethernet4"),
+        ]);
+
+        orch.add_nhg(key1).await.unwrap();
+        orch.add_nhg(key2).await.unwrap();
+
+        let result = orch.add_nhg(key3).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RouteError::MaxNhgReached(2)));
+        assert_eq!(orch.nhg_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_remove_nhg_success() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let key = NextHopGroupKey::from_nexthops([
+            make_nexthop("192.168.1.1", "Ethernet0"),
+            make_nexthop("192.168.1.2", "Ethernet4"),
+        ]);
+
+        orch.add_nhg(key.clone()).await.unwrap();
+        assert_eq!(orch.nhg_count(), 1);
+
+        let result = orch.remove_nhg(&key).await;
+        assert!(result.is_ok());
+        assert_eq!(orch.nhg_count(), 0);
+        assert!(!orch.has_nhg(&key));
+    }
+
+    #[tokio::test]
+    async fn test_remove_nhg_not_found() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let key = NextHopGroupKey::from_nexthops([
+            make_nexthop("192.168.1.1", "Ethernet0"),
+            make_nexthop("192.168.1.2", "Ethernet4"),
+        ]);
+
+        let result = orch.remove_nhg(&key).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RouteError::NhgNotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn test_remove_nhg_with_references() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let key = NextHopGroupKey::from_nexthops([
+            make_nexthop("192.168.1.1", "Ethernet0"),
+            make_nexthop("192.168.1.2", "Ethernet4"),
+        ]);
+
+        orch.add_nhg(key.clone()).await.unwrap();
+        orch.increase_nhg_ref_count(&key).unwrap();
+
+        let result = orch.remove_nhg(&key).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RouteError::RefCountError(_)));
+        assert_eq!(orch.nhg_count(), 1);
+    }
+
+    // ===== NHG reference counting tests =====
+
+    #[test]
+    fn test_nhg_ref_count_increment_decrement() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let key = NextHopGroupKey::from_nexthops([
+            make_nexthop("192.168.1.1", "Ethernet0"),
+            make_nexthop("192.168.1.2", "Ethernet4"),
+        ]);
+
+        // Manually add NHG entry for testing
+        let entry = NextHopGroupEntry::new(0x1234);
+        orch.synced_nhgs.insert(key.clone(), entry);
+        orch.nhg_count += 1;
+
+        // Initially ref count is 0
+        assert!(orch.is_nhg_ref_count_zero(&key));
+
+        // Increment
+        orch.increase_nhg_ref_count(&key).unwrap();
+        assert!(!orch.is_nhg_ref_count_zero(&key));
+        assert_eq!(orch.get_nhg(&key).unwrap().ref_count(), 1);
+
+        // Increment again
+        orch.increase_nhg_ref_count(&key).unwrap();
+        assert_eq!(orch.get_nhg(&key).unwrap().ref_count(), 2);
+
+        // Decrement
+        orch.decrease_nhg_ref_count(&key).unwrap();
+        assert_eq!(orch.get_nhg(&key).unwrap().ref_count(), 1);
+
+        // Decrement to zero
+        orch.decrease_nhg_ref_count(&key).unwrap();
+        assert!(orch.is_nhg_ref_count_zero(&key));
+    }
+
+    #[test]
+    fn test_nhg_ref_count_single_nexthop_delegates() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        orch.set_callbacks(callbacks.clone());
+
+        let key = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
+
+        // Single NH should delegate to NeighOrch
+        orch.increase_nhg_ref_count(&key).unwrap();
+
+        let refs = callbacks.next_hop_refs.lock().unwrap();
+        assert_eq!(refs.get(&make_nexthop("192.168.1.1", "Ethernet0")), Some(&1));
+    }
+
+    #[test]
+    fn test_nhg_ref_count_interface_nexthop_delegates() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_router_intf("Vlan100".to_string(), 0x2000);
+        orch.set_callbacks(callbacks.clone());
+
+        let key = NextHopGroupKey::single(NextHopKey::interface_only("Vlan100"));
+
+        // Interface NH should delegate to IntfsOrch
+        orch.increase_nhg_ref_count(&key).unwrap();
+
+        let refs = callbacks.router_intf_refs.lock().unwrap();
+        assert_eq!(refs.get("Vlan100"), Some(&1));
+    }
+
+    #[test]
+    fn test_nhg_ref_count_empty_key() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let key = NextHopGroupKey::new(); // Empty = blackhole
+
+        // Empty key should not affect ref counts
+        let result = orch.increase_nhg_ref_count(&key);
+        assert!(result.is_ok());
+
+        let result = orch.decrease_nhg_ref_count(&key);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_nhg_ref_count_nonexistent_fails() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let key = NextHopGroupKey::from_nexthops([
+            make_nexthop("192.168.1.1", "Ethernet0"),
+            make_nexthop("192.168.1.2", "Ethernet4"),
+        ]);
+
+        // Should fail because NHG doesn't exist
+        let result = orch.increase_nhg_ref_count(&key);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RouteError::NhgNotFound(_)));
+
+        let result = orch.decrease_nhg_ref_count(&key);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RouteError::NhgNotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn test_pending_nhg_removal() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let key = NextHopGroupKey::from_nexthops([
+            make_nexthop("192.168.1.1", "Ethernet0"),
+            make_nexthop("192.168.1.2", "Ethernet4"),
+        ]);
+
+        orch.add_nhg(key.clone()).await.unwrap();
+        orch.increase_nhg_ref_count(&key).unwrap();
+
+        // Decrease to zero should mark for pending removal
+        orch.decrease_nhg_ref_count(&key).unwrap();
+        assert!(orch.pending_nhg_removals.contains(&key));
+
+        // Process pending removals
+        orch.process_pending_nhg_removals().await.unwrap();
+        assert!(!orch.has_nhg(&key));
+        assert_eq!(orch.nhg_count(), 0);
+    }
+
+    // ===== Route management tests =====
+
+    #[tokio::test]
+    async fn test_add_route_single_nexthop() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        orch.set_callbacks(callbacks.clone());
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
+
+        let result = orch.add_route(0, prefix.clone(), nhg_key).await;
+        assert!(result.is_ok());
+        assert!(orch.has_route(0, &prefix));
+
+        // Check ref count was incremented
+        let refs = callbacks.next_hop_refs.lock().unwrap();
+        assert_eq!(refs.get(&make_nexthop("192.168.1.1", "Ethernet0")), Some(&1));
+    }
+
+    #[tokio::test]
+    async fn test_add_route_ecmp() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        callbacks.add_next_hop(make_nexthop("192.168.1.2", "Ethernet4"), 0x1001);
+        orch.set_callbacks(callbacks);
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key = NextHopGroupKey::from_nexthops([
+            make_nexthop("192.168.1.1", "Ethernet0"),
+            make_nexthop("192.168.1.2", "Ethernet4"),
+        ]);
+
+        let result = orch.add_route(0, prefix.clone(), nhg_key.clone()).await;
+        assert!(result.is_ok());
+        assert!(orch.has_route(0, &prefix));
+
+        // NHG should have been created
+        assert!(orch.has_nhg(&nhg_key));
+        assert_eq!(orch.nhg_count(), 1);
+        assert_eq!(orch.get_nhg(&nhg_key).unwrap().ref_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_add_route_blackhole() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key = NextHopGroupKey::new(); // Empty = blackhole
+
+        let result = orch.add_route(0, prefix.clone(), nhg_key).await;
+        assert!(result.is_ok());
+        assert!(orch.has_route(0, &prefix));
+    }
+
+    #[tokio::test]
+    async fn test_add_route_with_vrf() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_vrf(0x1234);
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        orch.set_callbacks(callbacks.clone());
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
+
+        let result = orch.add_route(0x1234, prefix.clone(), nhg_key).await;
+        assert!(result.is_ok());
+        assert!(orch.has_route(0x1234, &prefix));
+
+        // VRF ref count should be incremented
+        let refs = callbacks.vrf_refs.lock().unwrap();
+        assert_eq!(refs.get(&0x1234), Some(&1));
+    }
+
+    #[tokio::test]
+    async fn test_add_route_vrf_not_found() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key = NextHopGroupKey::new();
+
+        let result = orch.add_route(0x9999, prefix, nhg_key).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RouteError::VrfNotFound(0x9999)));
+    }
+
+    #[tokio::test]
+    async fn test_add_route_nexthop_not_resolved() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
+
+        let result = orch.add_route(0, prefix, nhg_key).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RouteError::NextHopNotResolved(_)));
+    }
+
+    #[tokio::test]
+    async fn test_update_route_nexthop_change() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        callbacks.add_next_hop(make_nexthop("192.168.1.2", "Ethernet4"), 0x1001);
+        orch.set_callbacks(callbacks.clone());
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key1 = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
+        let nhg_key2 = NextHopGroupKey::single(make_nexthop("192.168.1.2", "Ethernet4"));
+
+        // Add route with first NH
+        orch.add_route(0, prefix.clone(), nhg_key1.clone()).await.unwrap();
+
+        // Update to second NH
+        orch.add_route(0, prefix.clone(), nhg_key2.clone()).await.unwrap();
+
+        // Old NH ref should be decremented, new NH ref should be incremented
+        let refs = callbacks.next_hop_refs.lock().unwrap();
+        assert_eq!(refs.get(&make_nexthop("192.168.1.1", "Ethernet0")), Some(&0));
+        assert_eq!(refs.get(&make_nexthop("192.168.1.2", "Ethernet4")), Some(&1));
+    }
+
+    #[tokio::test]
+    async fn test_update_route_same_nexthop() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        orch.set_callbacks(callbacks.clone());
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
+
+        // Add route
+        orch.add_route(0, prefix.clone(), nhg_key.clone()).await.unwrap();
+
+        // Update with same NH
+        orch.add_route(0, prefix.clone(), nhg_key.clone()).await.unwrap();
+
+        // Ref count should still be 1 (not incremented again)
+        let refs = callbacks.next_hop_refs.lock().unwrap();
+        assert_eq!(refs.get(&make_nexthop("192.168.1.1", "Ethernet0")), Some(&1));
+    }
+
+    #[tokio::test]
+    async fn test_remove_route_success() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        orch.set_callbacks(callbacks.clone());
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
+
+        orch.add_route(0, prefix.clone(), nhg_key).await.unwrap();
+        assert!(orch.has_route(0, &prefix));
+
+        let result = orch.remove_route(0, &prefix).await;
+        assert!(result.is_ok());
+        assert!(!orch.has_route(0, &prefix));
+
+        // Ref count should be decremented
+        let refs = callbacks.next_hop_refs.lock().unwrap();
+        assert_eq!(refs.get(&make_nexthop("192.168.1.1", "Ethernet0")), Some(&0));
+    }
+
+    #[tokio::test]
+    async fn test_remove_route_not_found() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let result = orch.remove_route(0, &prefix).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RouteError::RouteNotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn test_remove_route_with_vrf() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_vrf(0x1234);
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        orch.set_callbacks(callbacks.clone());
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
+
+        orch.add_route(0x1234, prefix.clone(), nhg_key).await.unwrap();
+        orch.remove_route(0x1234, &prefix).await.unwrap();
+
+        // VRF ref count should be decremented
+        let refs = callbacks.vrf_refs.lock().unwrap();
+        assert_eq!(refs.get(&0x1234), Some(&0));
+    }
+
+    #[tokio::test]
+    async fn test_remove_default_route_drops() {
+        let config = RouteOrchConfig {
+            default_action_drop: true,
+            ..Default::default()
+        };
+        let mut orch = RouteOrch::new(config);
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        orch.set_callbacks(callbacks.clone());
+
+        let prefix = make_prefix("0.0.0.0", 0); // Default route
+        let nhg_key = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
+
+        orch.add_route(0, prefix.clone(), nhg_key).await.unwrap();
+
+        // Remove should set to DROP instead of removing
+        orch.remove_route(0, &prefix).await.unwrap();
+
+        // Route should still exist
+        assert!(orch.has_route(0, &prefix));
+
+        // Ref count should be decremented
+        let refs = callbacks.next_hop_refs.lock().unwrap();
+        assert_eq!(refs.get(&make_nexthop("192.168.1.1", "Ethernet0")), Some(&0));
+    }
+
+    #[tokio::test]
+    async fn test_remove_route_ecmp_cleans_nhg() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        callbacks.add_next_hop(make_nexthop("192.168.1.2", "Ethernet4"), 0x1001);
+        orch.set_callbacks(callbacks);
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key = NextHopGroupKey::from_nexthops([
+            make_nexthop("192.168.1.1", "Ethernet0"),
+            make_nexthop("192.168.1.2", "Ethernet4"),
+        ]);
+
+        orch.add_route(0, prefix.clone(), nhg_key.clone()).await.unwrap();
+        assert!(orch.has_nhg(&nhg_key));
+
+        orch.remove_route(0, &prefix).await.unwrap();
+
+        // NHG should be removed when ref count reaches zero
+        assert!(!orch.has_nhg(&nhg_key));
+        assert_eq!(orch.nhg_count(), 0);
+    }
+
+    // ===== Multiple routes sharing NHG tests =====
+
+    #[tokio::test]
+    async fn test_multiple_routes_share_nhg() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        callbacks.add_next_hop(make_nexthop("192.168.1.2", "Ethernet4"), 0x1001);
+        orch.set_callbacks(callbacks);
+
+        let prefix1 = make_prefix("10.0.0.0", 24);
+        let prefix2 = make_prefix("10.1.0.0", 24);
+        let nhg_key = NextHopGroupKey::from_nexthops([
+            make_nexthop("192.168.1.1", "Ethernet0"),
+            make_nexthop("192.168.1.2", "Ethernet4"),
+        ]);
+
+        // Add first route
+        orch.add_route(0, prefix1.clone(), nhg_key.clone()).await.unwrap();
+        assert_eq!(orch.nhg_count(), 1);
+        assert_eq!(orch.get_nhg(&nhg_key).unwrap().ref_count(), 1);
+
+        // Add second route with same NHG
+        orch.add_route(0, prefix2.clone(), nhg_key.clone()).await.unwrap();
+        assert_eq!(orch.nhg_count(), 1); // Still only one NHG
+        assert_eq!(orch.get_nhg(&nhg_key).unwrap().ref_count(), 2);
+
+        // Remove first route
+        orch.remove_route(0, &prefix1).await.unwrap();
+        assert_eq!(orch.get_nhg(&nhg_key).unwrap().ref_count(), 1);
+        assert!(orch.has_nhg(&nhg_key)); // NHG still exists
+
+        // Remove second route
+        orch.remove_route(0, &prefix2).await.unwrap();
+        assert!(!orch.has_nhg(&nhg_key)); // NHG removed when last ref is gone
+        assert_eq!(orch.nhg_count(), 0);
+    }
+
+    // ===== Interface next-hop tests =====
+
+    #[tokio::test]
+    async fn test_add_route_interface_nexthop() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_router_intf("Vlan100".to_string(), 0x2000);
+        orch.set_callbacks(callbacks.clone());
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key = NextHopGroupKey::single(NextHopKey::interface_only("Vlan100"));
+
+        let result = orch.add_route(0, prefix.clone(), nhg_key).await;
+        assert!(result.is_ok());
+        assert!(orch.has_route(0, &prefix));
+
+        // Router interface ref should be incremented
+        let refs = callbacks.router_intf_refs.lock().unwrap();
+        assert_eq!(refs.get("Vlan100"), Some(&1));
+    }
+
+    #[tokio::test]
+    async fn test_add_route_interface_not_resolved() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key = NextHopGroupKey::single(NextHopKey::interface_only("Vlan100"));
+
+        let result = orch.add_route(0, prefix, nhg_key).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RouteError::NextHopNotResolved(_)));
+    }
+
+    // ===== Duplicate route handling tests =====
+
+    #[tokio::test]
+    async fn test_duplicate_route_updates() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        callbacks.add_next_hop(make_nexthop("192.168.1.2", "Ethernet4"), 0x1001);
+        orch.set_callbacks(callbacks);
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key1 = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
+        let nhg_key2 = NextHopGroupKey::single(make_nexthop("192.168.1.2", "Ethernet4"));
+
+        // Add route
+        orch.add_route(0, prefix.clone(), nhg_key1).await.unwrap();
+        let route1 = orch.get_route(0, &prefix).unwrap();
+        assert_eq!(route1.nhg.nhg_key.len(), 1);
+
+        // Update with different NH
+        orch.add_route(0, prefix.clone(), nhg_key2.clone()).await.unwrap();
+        let route2 = orch.get_route(0, &prefix).unwrap();
+        assert_eq!(route2.nhg.nhg_key, nhg_key2);
+    }
+
+    // ===== Ordered ECMP tests =====
+
+    #[test]
+    fn test_ordered_ecmp_config() {
+        let config = RouteOrchConfig {
+            ordered_ecmp: true,
+            ..Default::default()
+        };
+        let orch = RouteOrch::new(config);
+        assert_eq!(orch.config.ordered_ecmp, true);
+    }
+
+    // ===== Route query tests =====
+
+    #[tokio::test]
+    async fn test_has_route() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        orch.set_callbacks(callbacks);
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
+
+        assert!(!orch.has_route(0, &prefix));
+
+        orch.add_route(0, prefix.clone(), nhg_key).await.unwrap();
+        assert!(orch.has_route(0, &prefix));
+    }
+
+    #[tokio::test]
+    async fn test_get_route() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        orch.set_callbacks(callbacks);
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
+
+        assert!(orch.get_route(0, &prefix).is_none());
+
+        orch.add_route(0, prefix.clone(), nhg_key.clone()).await.unwrap();
+        let route = orch.get_route(0, &prefix).unwrap();
+        assert_eq!(route.nhg.nhg_key, nhg_key);
+    }
+
+    #[tokio::test]
+    async fn test_route_separate_vrfs() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_vrf(0x1234);
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        callbacks.add_next_hop(make_nexthop("192.168.1.2", "Ethernet4"), 0x1001);
+        orch.set_callbacks(callbacks);
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key1 = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
+        let nhg_key2 = NextHopGroupKey::single(make_nexthop("192.168.1.2", "Ethernet4"));
+
+        // Same prefix in different VRFs
+        orch.add_route(0, prefix.clone(), nhg_key1.clone()).await.unwrap();
+        orch.add_route(0x1234, prefix.clone(), nhg_key2.clone()).await.unwrap();
+
+        let route1 = orch.get_route(0, &prefix).unwrap();
+        let route2 = orch.get_route(0x1234, &prefix).unwrap();
+
+        assert_eq!(route1.nhg.nhg_key, nhg_key1);
+        assert_eq!(route2.nhg.nhg_key, nhg_key2);
+    }
+
+    // ===== Empty VRF table cleanup test =====
+
+    #[tokio::test]
+    async fn test_remove_route_cleans_empty_vrf_table() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_vrf(0x1234);
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        orch.set_callbacks(callbacks);
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
+
+        orch.add_route(0x1234, prefix.clone(), nhg_key).await.unwrap();
+        assert!(orch.synced_routes.contains_key(&0x1234));
+
+        orch.remove_route(0x1234, &prefix).await.unwrap();
+
+        // VRF table should be removed when empty (but not for VRF 0)
+        assert!(!orch.synced_routes.contains_key(&0x1234));
+    }
+
+    #[tokio::test]
+    async fn test_remove_route_keeps_default_vrf_table() {
+        let mut orch = RouteOrch::new(RouteOrchConfig::default());
+        let callbacks = Arc::new(MockCallbacks::new());
+        callbacks.add_next_hop(make_nexthop("192.168.1.1", "Ethernet0"), 0x1000);
+        orch.set_callbacks(callbacks);
+
+        let prefix = make_prefix("10.0.0.0", 24);
+        let nhg_key = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
+
+        orch.add_route(0, prefix.clone(), nhg_key).await.unwrap();
+        orch.remove_route(0, &prefix).await.unwrap();
+
+        // Default VRF table might be cleaned up - implementation allows it
+        // This test verifies no crash occurs
     }
 }

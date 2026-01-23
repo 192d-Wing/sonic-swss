@@ -329,4 +329,580 @@ mod tests {
 
         assert!(orch.reconcile_drop_reasons("counter1").is_ok());
     }
+
+    // === Debug Counter Types Tests ===
+
+    #[test]
+    fn test_create_port_level_counter() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = DebugCounterConfig::new("port_counter".to_string(), DebugCounterType::PortIngressDrops);
+        assert!(orch.create_debug_counter(config).is_ok());
+
+        let entry = orch.get_counter("port_counter").unwrap();
+        assert!(entry.counter_type.is_port_counter());
+        assert!(entry.counter_type.is_ingress());
+    }
+
+    #[test]
+    fn test_create_switch_level_counter() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = DebugCounterConfig::new("switch_counter".to_string(), DebugCounterType::SwitchIngressDrops);
+        assert!(orch.create_debug_counter(config).is_ok());
+
+        let entry = orch.get_counter("switch_counter").unwrap();
+        assert!(entry.counter_type.is_switch_counter());
+        assert!(entry.counter_type.is_ingress());
+    }
+
+    #[test]
+    fn test_create_ingress_and_egress_counters() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let ingress_config = DebugCounterConfig::new("ingress_counter".to_string(), DebugCounterType::PortIngressDrops);
+        let egress_config = DebugCounterConfig::new("egress_counter".to_string(), DebugCounterType::PortEgressDrops);
+
+        assert!(orch.create_debug_counter(ingress_config).is_ok());
+        assert!(orch.create_debug_counter(egress_config).is_ok());
+
+        let ingress = orch.get_counter("ingress_counter").unwrap();
+        let egress = orch.get_counter("egress_counter").unwrap();
+
+        assert!(ingress.counter_type.is_ingress());
+        assert!(egress.counter_type.is_egress());
+        assert_eq!(orch.counter_count(), 2);
+    }
+
+    // === Counter Creation Tests ===
+
+    #[test]
+    fn test_create_counter_with_multiple_drop_reasons() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = DebugCounterConfig::new("multi_reason_counter".to_string(), DebugCounterType::PortIngressDrops);
+        config.add_drop_reason("L3_ANY".to_string());
+        config.add_drop_reason("L2_ANY".to_string());
+        config.add_drop_reason("ACL_ANY".to_string());
+
+        assert!(orch.create_debug_counter(config).is_ok());
+
+        let entry = orch.get_counter("multi_reason_counter").unwrap();
+        assert_eq!(entry.drop_reason_count(), 3);
+        assert_eq!(orch.stats().drop_reasons_added, 3);
+    }
+
+    #[test]
+    fn test_create_counter_with_description() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = DebugCounterConfig::new("described_counter".to_string(), DebugCounterType::SwitchIngressDrops)
+            .with_description("Counter for monitoring L3 drops".to_string());
+
+        assert!(orch.create_debug_counter(config).is_ok());
+
+        let entry = orch.get_counter("described_counter").unwrap();
+        assert_eq!(entry.description, Some("Counter for monitoring L3 drops".to_string()));
+    }
+
+    #[test]
+    fn test_create_counter_all_types() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let types = vec![
+            ("port_ingress", DebugCounterType::PortIngressDrops),
+            ("port_egress", DebugCounterType::PortEgressDrops),
+            ("switch_ingress", DebugCounterType::SwitchIngressDrops),
+            ("switch_egress", DebugCounterType::SwitchEgressDrops),
+        ];
+
+        for (name, counter_type) in types {
+            let config = DebugCounterConfig::new(name.to_string(), counter_type);
+            assert!(orch.create_debug_counter(config).is_ok(), "Failed to create counter: {}", name);
+        }
+
+        assert_eq!(orch.counter_count(), 4);
+        assert_eq!(orch.stats().counters_created, 4);
+    }
+
+    // === Drop Reasons Tests ===
+
+    #[test]
+    fn test_add_multiple_drop_reasons_sequentially() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        orch.create_debug_counter(config).unwrap();
+
+        let drop_reasons = vec!["L3_ANY", "L2_ANY", "ACL_ANY", "TTL", "VLAN"];
+        for reason in &drop_reasons {
+            assert!(orch.add_drop_reason("counter1", reason).is_ok());
+        }
+
+        let entry = orch.get_counter("counter1").unwrap();
+        assert_eq!(entry.drop_reason_count(), drop_reasons.len());
+        assert_eq!(orch.stats().drop_reasons_added, drop_reasons.len() as u64);
+    }
+
+    #[test]
+    fn test_remove_multiple_drop_reasons() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        config.add_drop_reason("L3_ANY".to_string());
+        config.add_drop_reason("L2_ANY".to_string());
+        config.add_drop_reason("ACL_ANY".to_string());
+        orch.create_debug_counter(config).unwrap();
+
+        assert!(orch.remove_drop_reason("counter1", "L3_ANY").is_ok());
+        assert!(orch.remove_drop_reason("counter1", "L2_ANY").is_ok());
+
+        let entry = orch.get_counter("counter1").unwrap();
+        assert_eq!(entry.drop_reason_count(), 1);
+        assert_eq!(orch.stats().drop_reasons_removed, 2);
+    }
+
+    #[test]
+    fn test_l2_drop_reasons() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = DebugCounterConfig::new("l2_counter".to_string(), DebugCounterType::PortIngressDrops);
+        config.add_drop_reason("STP".to_string());
+        config.add_drop_reason("VLAN_TAG_NOT_ALLOWED".to_string());
+        config.add_drop_reason("L2_ANY".to_string());
+
+        assert!(orch.create_debug_counter(config).is_ok());
+
+        let entry = orch.get_counter("l2_counter").unwrap();
+        assert_eq!(entry.drop_reason_count(), 3);
+    }
+
+    #[test]
+    fn test_l3_drop_reasons() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = DebugCounterConfig::new("l3_counter".to_string(), DebugCounterType::SwitchIngressDrops);
+        config.add_drop_reason("L3_ANY".to_string());
+        config.add_drop_reason("EXCEEDS_L3_MTU".to_string());
+        config.add_drop_reason("IP_HEADER_ERROR".to_string());
+        config.add_drop_reason("UC_DIP_MC_DMAC".to_string());
+        config.add_drop_reason("DIP_LOOPBACK".to_string());
+
+        assert!(orch.create_debug_counter(config).is_ok());
+
+        let entry = orch.get_counter("l3_counter").unwrap();
+        assert_eq!(entry.drop_reason_count(), 5);
+    }
+
+    // === Counter Operations Tests ===
+
+    #[test]
+    fn test_remove_debug_counter() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = DebugCounterConfig::new("counter_to_remove".to_string(), DebugCounterType::PortIngressDrops);
+        orch.create_debug_counter(config).unwrap();
+
+        assert_eq!(orch.counter_count(), 1);
+        assert!(orch.remove_debug_counter("counter_to_remove").is_ok());
+        assert_eq!(orch.counter_count(), 0);
+        assert_eq!(orch.stats().counters_removed, 1);
+    }
+
+    #[test]
+    fn test_multiple_counters_simultaneously() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        for i in 1..=5 {
+            let mut config = DebugCounterConfig::new(
+                format!("counter_{}", i),
+                DebugCounterType::PortIngressDrops
+            );
+            config.add_drop_reason(format!("REASON_{}", i));
+            assert!(orch.create_debug_counter(config).is_ok());
+        }
+
+        assert_eq!(orch.counter_count(), 5);
+
+        for i in 1..=5 {
+            let entry = orch.get_counter(&format!("counter_{}", i));
+            assert!(entry.is_some());
+        }
+    }
+
+    #[test]
+    fn test_counter_exists() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        assert!(!orch.counter_exists("nonexistent"));
+
+        let config = DebugCounterConfig::new("existing_counter".to_string(), DebugCounterType::PortIngressDrops);
+        orch.create_debug_counter(config).unwrap();
+
+        assert!(orch.counter_exists("existing_counter"));
+        assert!(!orch.counter_exists("still_nonexistent"));
+    }
+
+    // === Counter Configuration Tests ===
+
+    #[test]
+    fn test_add_drop_reason_after_creation() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        orch.create_debug_counter(config).unwrap();
+
+        let entry = orch.get_counter("counter1").unwrap();
+        assert_eq!(entry.drop_reason_count(), 0);
+
+        assert!(orch.add_drop_reason("counter1", "L3_ANY").is_ok());
+        assert!(orch.add_drop_reason("counter1", "L2_ANY").is_ok());
+
+        let entry = orch.get_counter("counter1").unwrap();
+        assert_eq!(entry.drop_reason_count(), 2);
+    }
+
+    #[test]
+    fn test_get_counter_mut() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = DebugCounterConfig::new("mutable_counter".to_string(), DebugCounterType::SwitchIngressDrops);
+        orch.create_debug_counter(config).unwrap();
+
+        if let Some(entry) = orch.get_counter_mut("mutable_counter") {
+            entry.description = Some("Modified description".to_string());
+            entry.add_drop_reason("NEW_REASON".to_string());
+        }
+
+        let entry = orch.get_counter("mutable_counter").unwrap();
+        assert_eq!(entry.description, Some("Modified description".to_string()));
+        assert!(entry.drop_reasons.contains("NEW_REASON"));
+    }
+
+    #[test]
+    fn test_clear_free_counters() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        config.add_drop_reason("L3_ANY".to_string());
+        orch.create_debug_counter(config).unwrap();
+
+        orch.remove_drop_reason("counter1", "L3_ANY").unwrap();
+        assert_eq!(orch.get_free_counters().len(), 1);
+
+        orch.clear_free_counters();
+        assert_eq!(orch.get_free_counters().len(), 0);
+    }
+
+    // === Statistics Tracking Tests ===
+
+    #[test]
+    fn test_statistics_tracking() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config1 = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        config1.add_drop_reason("L3_ANY".to_string());
+        config1.add_drop_reason("L2_ANY".to_string());
+        orch.create_debug_counter(config1).unwrap();
+
+        let config2 = DebugCounterConfig::new("counter2".to_string(), DebugCounterType::SwitchIngressDrops);
+        orch.create_debug_counter(config2).unwrap();
+
+        assert_eq!(orch.stats().counters_created, 2);
+        assert_eq!(orch.stats().drop_reasons_added, 2);
+
+        orch.add_drop_reason("counter2", "ACL_ANY").unwrap();
+        assert_eq!(orch.stats().drop_reasons_added, 3);
+
+        orch.remove_drop_reason("counter1", "L3_ANY").unwrap();
+        assert_eq!(orch.stats().drop_reasons_removed, 1);
+
+        orch.remove_debug_counter("counter1").unwrap();
+        assert_eq!(orch.stats().counters_removed, 1);
+    }
+
+    #[test]
+    fn test_flex_counter_statistics() {
+        let mut config = DebugCounterOrchConfig::default();
+        config.enable_flex_counter = true;
+
+        let mut orch = DebugCounterOrch::new(config);
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let counter_config1 = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let counter_config2 = DebugCounterConfig::new("counter2".to_string(), DebugCounterType::SwitchIngressDrops);
+
+        orch.create_debug_counter(counter_config1).unwrap();
+        orch.create_debug_counter(counter_config2).unwrap();
+
+        assert_eq!(orch.stats().flex_counter_registrations, 2);
+    }
+
+    // === Error Handling Tests ===
+
+    #[test]
+    fn test_duplicate_counter_error() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config1 = DebugCounterConfig::new("duplicate".to_string(), DebugCounterType::PortIngressDrops);
+        assert!(orch.create_debug_counter(config1).is_ok());
+
+        let config2 = DebugCounterConfig::new("duplicate".to_string(), DebugCounterType::SwitchIngressDrops);
+        let result = orch.create_debug_counter(config2);
+
+        assert!(result.is_err());
+        match result {
+            Err(DebugCounterOrchError::CounterExists(name)) => assert_eq!(name, "duplicate"),
+            _ => panic!("Expected CounterExists error"),
+        }
+    }
+
+    #[test]
+    fn test_counter_not_found_error() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let result = orch.remove_debug_counter("nonexistent");
+        assert!(result.is_err());
+        match result {
+            Err(DebugCounterOrchError::CounterNotFound(name)) => assert_eq!(name, "nonexistent"),
+            _ => panic!("Expected CounterNotFound error"),
+        }
+    }
+
+    #[test]
+    fn test_drop_reason_not_found_error() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        orch.create_debug_counter(config).unwrap();
+
+        let result = orch.remove_drop_reason("counter1", "NONEXISTENT_REASON");
+        assert!(result.is_err());
+        match result {
+            Err(DebugCounterOrchError::DropReasonNotFound(reason)) => {
+                assert_eq!(reason, "NONEXISTENT_REASON")
+            }
+            _ => panic!("Expected DropReasonNotFound error"),
+        }
+    }
+
+    #[test]
+    fn test_add_drop_reason_to_nonexistent_counter() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let result = orch.add_drop_reason("nonexistent", "L3_ANY");
+        assert!(result.is_err());
+        match result {
+            Err(DebugCounterOrchError::CounterNotFound(name)) => assert_eq!(name, "nonexistent"),
+            _ => panic!("Expected CounterNotFound error"),
+        }
+    }
+
+    struct MockCallbacksWithFailure {
+        fail_create: bool,
+    }
+
+    impl DebugCounterOrchCallbacks for MockCallbacksWithFailure {
+        fn create_debug_counter(&self, _counter_type: DebugCounterType) -> Result<RawSaiObjectId, String> {
+            if self.fail_create {
+                Err("SAI creation failed".to_string())
+            } else {
+                Ok(0x1000)
+            }
+        }
+
+        fn remove_debug_counter(&self, _oid: RawSaiObjectId) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn add_drop_reason_to_counter(&self, _counter_id: RawSaiObjectId, _drop_reason: &str) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn remove_drop_reason_from_counter(&self, _counter_id: RawSaiObjectId, _drop_reason: &str) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn register_flex_counter(&self, _counter_id: RawSaiObjectId, _counter_name: &str) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn unregister_flex_counter(&self, _counter_name: &str) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn get_available_drop_reasons(&self, _is_ingress: bool) -> Vec<String> {
+            vec!["L3_ANY".to_string(), "L2_ANY".to_string()]
+        }
+    }
+
+    #[test]
+    fn test_sai_creation_failure() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacksWithFailure { fail_create: true }));
+
+        let config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let result = orch.create_debug_counter(config);
+
+        assert!(result.is_err());
+        match result {
+            Err(DebugCounterOrchError::SaiError(_)) => {},
+            _ => panic!("Expected SaiError"),
+        }
+        assert_eq!(orch.counter_count(), 0);
+    }
+
+    #[test]
+    fn test_no_callbacks_set_error() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        // Don't set callbacks
+
+        let config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let result = orch.create_debug_counter(config);
+
+        assert!(result.is_err());
+        match result {
+            Err(DebugCounterOrchError::SaiError(msg)) => assert!(msg.contains("No callbacks")),
+            _ => panic!("Expected SaiError for no callbacks"),
+        }
+    }
+
+    // === Edge Cases Tests ===
+
+    #[test]
+    fn test_counter_with_no_drop_reasons() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let config = DebugCounterConfig::new("empty_counter".to_string(), DebugCounterType::PortIngressDrops);
+        assert!(orch.create_debug_counter(config).is_ok());
+
+        let entry = orch.get_counter("empty_counter").unwrap();
+        assert_eq!(entry.drop_reason_count(), 0);
+    }
+
+    #[test]
+    fn test_counter_with_many_drop_reasons() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config = DebugCounterConfig::new("full_counter".to_string(), DebugCounterType::SwitchIngressDrops);
+
+        // Add many drop reasons
+        let reasons = vec![
+            "L2_ANY", "L3_ANY", "ACL_ANY", "TUNNEL_ANY",
+            "STP", "VLAN_TAG_NOT_ALLOWED", "INGRESS_VLAN_FILTER",
+            "FDB_SA_MISS", "FDB_SA_MOVE", "FDB_DA_MISS",
+            "EXCEEDS_L3_MTU", "TTL", "L3_LOOPBACK",
+            "NON_ROUTABLE", "NO_L3_HEADER", "IP_HEADER_ERROR",
+            "UC_DIP_MC_DMAC", "DIP_LOOPBACK", "SIP_LOOPBACK",
+            "SIP_MC", "DIP_LINK_LOCAL"
+        ];
+
+        for reason in &reasons {
+            config.add_drop_reason(reason.to_string());
+        }
+
+        assert!(orch.create_debug_counter(config).is_ok());
+
+        let entry = orch.get_counter("full_counter").unwrap();
+        assert_eq!(entry.drop_reason_count(), reasons.len());
+    }
+
+    #[test]
+    fn test_removing_nonexistent_counter() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let result = orch.remove_debug_counter("does_not_exist");
+        assert!(result.is_err());
+
+        // Stats should not be updated
+        assert_eq!(orch.stats().counters_removed, 0);
+    }
+
+    #[test]
+    fn test_multiple_counters_same_drop_reason() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let mut config1 = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        config1.add_drop_reason("L3_ANY".to_string());
+
+        let mut config2 = DebugCounterConfig::new("counter2".to_string(), DebugCounterType::SwitchIngressDrops);
+        config2.add_drop_reason("L3_ANY".to_string());
+
+        assert!(orch.create_debug_counter(config1).is_ok());
+        assert!(orch.create_debug_counter(config2).is_ok());
+
+        let entry1 = orch.get_counter("counter1").unwrap();
+        let entry2 = orch.get_counter("counter2").unwrap();
+
+        assert!(entry1.drop_reasons.contains("L3_ANY"));
+        assert!(entry2.drop_reasons.contains("L3_ANY"));
+        assert_eq!(orch.counter_count(), 2);
+    }
+
+    #[test]
+    fn test_reconcile_with_nonexistent_counter() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        let result = orch.reconcile_drop_reasons("nonexistent");
+        assert!(result.is_err());
+        match result {
+            Err(DebugCounterOrchError::CounterNotFound(name)) => assert_eq!(name, "nonexistent"),
+            _ => panic!("Expected CounterNotFound error"),
+        }
+    }
+
+    #[test]
+    fn test_free_counter_tracking_multiple() {
+        let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
+        orch.set_callbacks(Arc::new(MockCallbacks));
+
+        // Create counters with drop reasons
+        for i in 1..=3 {
+            let mut config = DebugCounterConfig::new(
+                format!("counter_{}", i),
+                DebugCounterType::PortIngressDrops
+            );
+            config.add_drop_reason("L3_ANY".to_string());
+            orch.create_debug_counter(config).unwrap();
+        }
+
+        // Remove all drop reasons
+        for i in 1..=3 {
+            orch.remove_drop_reason(&format!("counter_{}", i), "L3_ANY").unwrap();
+        }
+
+        assert_eq!(orch.get_free_counters().len(), 3);
+
+        // Verify counter names in free counters
+        let free_counters = orch.get_free_counters();
+        for i in 1..=3 {
+            assert!(free_counters.iter().any(|fc| fc.name == format!("counter_{}", i)));
+        }
+    }
 }

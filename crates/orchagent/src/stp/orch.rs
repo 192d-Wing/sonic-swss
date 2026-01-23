@@ -431,4 +431,559 @@ mod tests {
         assert!(stp_port_ids.contains_key(&1));
         assert_eq!(orch.stats().state_updates, 1);
     }
+
+    // STP Instance Management Tests
+
+    #[test]
+    fn test_multiple_stp_instances() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.initialize(0x100, 256);
+
+        // Create multiple instances
+        let oid1 = orch.add_instance(1).unwrap();
+        let oid2 = orch.add_instance(2).unwrap();
+        let oid3 = orch.add_instance(3).unwrap();
+
+        assert_ne!(oid1, oid2);
+        assert_ne!(oid2, oid3);
+        assert_eq!(orch.instance_count(), 4); // Default + 3 instances
+
+        // Verify each instance has unique OID
+        assert_eq!(orch.get_instance_oid(1), Some(oid1));
+        assert_eq!(orch.get_instance_oid(2), Some(oid2));
+        assert_eq!(orch.get_instance_oid(3), Some(oid3));
+
+        assert_eq!(callbacks.created_instances.lock().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_default_stp_instance() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+
+        let default_oid = 0x100;
+        orch.initialize(default_oid, 256);
+
+        // Default instance (instance 0) should exist
+        assert_eq!(orch.get_instance_oid(0), Some(default_oid));
+        assert_eq!(orch.instance_count(), 1);
+    }
+
+    #[test]
+    fn test_remove_stp_instance() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        let oid = orch.add_instance(1).unwrap();
+        assert_eq!(orch.instance_count(), 2);
+
+        // Remove instance
+        orch.remove_instance(1).unwrap();
+        assert_eq!(orch.get_instance_oid(1), None);
+        assert_eq!(orch.instance_count(), 1);
+        assert_eq!(orch.stats().instances_removed, 1);
+    }
+
+    #[test]
+    fn test_create_duplicate_instance() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.initialize(0x100, 256);
+
+        let oid1 = orch.add_instance(1).unwrap();
+        let oid2 = orch.add_instance(1).unwrap(); // Duplicate
+
+        // Should return same OID
+        assert_eq!(oid1, oid2);
+        assert_eq!(orch.instance_count(), 2); // Default + 1
+        assert_eq!(callbacks.created_instances.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_invalid_instance_exceeds_max() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 10); // Max 10 instances
+
+        let result = orch.add_instance(10);
+        assert!(matches!(result, Err(StpOrchError::InvalidInstance(_))));
+    }
+
+    #[test]
+    fn test_remove_nonexistent_instance() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        let result = orch.remove_instance(99);
+        assert!(matches!(result, Err(StpOrchError::InstanceNotFound(99))));
+    }
+
+    // Port State Management Tests
+
+    #[test]
+    fn test_port_state_disabled() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        orch.add_instance(1).unwrap();
+
+        let mut stp_port_ids = HashMap::new();
+        orch.update_port_state("Ethernet0", 1, StpState::Disabled, &mut stp_port_ids).unwrap();
+
+        assert!(stp_port_ids.contains_key(&1));
+        assert_eq!(orch.stats().state_updates, 1);
+    }
+
+    #[test]
+    fn test_port_state_blocking() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        orch.add_instance(1).unwrap();
+
+        let mut stp_port_ids = HashMap::new();
+        orch.update_port_state("Ethernet0", 1, StpState::Blocking, &mut stp_port_ids).unwrap();
+
+        assert!(stp_port_ids.contains_key(&1));
+    }
+
+    #[test]
+    fn test_port_state_learning() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        orch.add_instance(1).unwrap();
+
+        let mut stp_port_ids = HashMap::new();
+        orch.update_port_state("Ethernet0", 1, StpState::Learning, &mut stp_port_ids).unwrap();
+
+        assert!(stp_port_ids.contains_key(&1));
+    }
+
+    #[test]
+    fn test_port_state_transitions() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        orch.add_instance(1).unwrap();
+
+        let mut stp_port_ids = HashMap::new();
+
+        // Transition: Blocking -> Learning -> Forwarding
+        orch.update_port_state("Ethernet0", 1, StpState::Blocking, &mut stp_port_ids).unwrap();
+        assert_eq!(orch.stats().state_updates, 1);
+
+        orch.update_port_state("Ethernet0", 1, StpState::Learning, &mut stp_port_ids).unwrap();
+        assert_eq!(orch.stats().state_updates, 2);
+
+        orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids).unwrap();
+        assert_eq!(orch.stats().state_updates, 3);
+    }
+
+    #[test]
+    fn test_per_vlan_per_port_state() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        // Create two instances
+        orch.add_instance(1).unwrap();
+        orch.add_instance(2).unwrap();
+
+        let mut stp_port_ids = HashMap::new();
+
+        // Same port, different VLANs/instances, different states
+        orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids).unwrap();
+        orch.update_port_state("Ethernet0", 2, StpState::Blocking, &mut stp_port_ids).unwrap();
+
+        // Should have two STP port entries
+        assert_eq!(stp_port_ids.len(), 2);
+        assert!(stp_port_ids.contains_key(&1));
+        assert!(stp_port_ids.contains_key(&2));
+    }
+
+    #[test]
+    fn test_multiple_ports_same_vlan() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.initialize(0x100, 256);
+
+        orch.add_instance(1).unwrap();
+
+        let mut stp_port_ids_eth0 = HashMap::new();
+        let mut stp_port_ids_eth1 = HashMap::new();
+        let mut stp_port_ids_eth2 = HashMap::new();
+
+        // Add multiple ports to same instance
+        orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids_eth0).unwrap();
+        orch.add_stp_port("Ethernet1", 1, &mut stp_port_ids_eth1).unwrap();
+        orch.add_stp_port("Ethernet2", 1, &mut stp_port_ids_eth2).unwrap();
+
+        // All ports created with blocking state
+        let created = callbacks.created_ports.lock().unwrap();
+        assert_eq!(created.len(), 3);
+        assert!(created.iter().all(|(_, _, state)| *state == SaiStpPortState::Blocking));
+    }
+
+    // VLAN Configuration Tests
+
+    #[test]
+    fn test_add_multiple_vlans_to_instance() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        orch.add_vlan_to_instance("Vlan100", 1).unwrap();
+        orch.add_vlan_to_instance("Vlan200", 1).unwrap();
+        orch.add_vlan_to_instance("Vlan300", 1).unwrap();
+
+        let entry = orch.vlan_to_instance_map.get(&1).unwrap();
+        assert_eq!(entry.vlan_count(), 3);
+    }
+
+    #[test]
+    fn test_remove_vlan_from_instance() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        orch.add_vlan_to_instance("Vlan100", 1).unwrap();
+        orch.add_vlan_to_instance("Vlan200", 1).unwrap();
+
+        let entry = orch.vlan_to_instance_map.get(&1).unwrap();
+        assert_eq!(entry.vlan_count(), 2);
+
+        // Remove one VLAN
+        orch.remove_vlan_from_instance("Vlan100", 1).unwrap();
+
+        let entry = orch.vlan_to_instance_map.get(&1).unwrap();
+        assert_eq!(entry.vlan_count(), 1);
+    }
+
+    #[test]
+    fn test_vlan_membership_tracking() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        // Add VLANs to different instances
+        orch.add_vlan_to_instance("Vlan100", 1).unwrap();
+        orch.add_vlan_to_instance("Vlan200", 1).unwrap();
+        orch.add_vlan_to_instance("Vlan300", 2).unwrap();
+
+        let entry1 = orch.vlan_to_instance_map.get(&1).unwrap();
+        let entry2 = orch.vlan_to_instance_map.get(&2).unwrap();
+
+        assert_eq!(entry1.vlan_count(), 2);
+        assert_eq!(entry2.vlan_count(), 1);
+    }
+
+    #[test]
+    fn test_lazy_create_instance_on_vlan_add() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        // Add VLAN without creating instance first (lazy creation)
+        assert_eq!(orch.instance_count(), 1); // Only default
+
+        orch.add_vlan_to_instance("Vlan100", 5).unwrap();
+
+        // Instance should be created automatically
+        assert_eq!(orch.instance_count(), 2);
+        assert!(orch.get_instance_oid(5).is_some());
+    }
+
+    // Port Operations Tests
+
+    #[test]
+    fn test_add_port_creates_with_blocking_state() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.initialize(0x100, 256);
+
+        orch.add_instance(1).unwrap();
+
+        let mut stp_port_ids = HashMap::new();
+        orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids).unwrap();
+
+        let created = callbacks.created_ports.lock().unwrap();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].2, SaiStpPortState::Blocking);
+    }
+
+    #[test]
+    fn test_add_duplicate_port() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.initialize(0x100, 256);
+
+        orch.add_instance(1).unwrap();
+
+        let mut stp_port_ids = HashMap::new();
+        let oid1 = orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids).unwrap();
+        let oid2 = orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids).unwrap();
+
+        // Should return existing OID
+        assert_eq!(oid1, oid2);
+        assert_eq!(callbacks.created_ports.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_remove_port_from_instance() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        orch.add_instance(1).unwrap();
+
+        let mut stp_port_ids = HashMap::new();
+        orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids).unwrap();
+        assert_eq!(orch.stats().ports_created, 1);
+
+        orch.remove_stp_port(1, &mut stp_port_ids).unwrap();
+        assert!(!stp_port_ids.contains_key(&1));
+        assert_eq!(orch.stats().ports_removed, 1);
+    }
+
+    #[test]
+    fn test_remove_nonexistent_port() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        let mut stp_port_ids = HashMap::new();
+        let result = orch.remove_stp_port(99, &mut stp_port_ids);
+
+        assert!(matches!(result, Err(StpOrchError::StpPortNotFound(99))));
+    }
+
+    #[test]
+    fn test_port_spanning_multiple_vlans() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        orch.add_instance(1).unwrap();
+        orch.add_instance(2).unwrap();
+        orch.add_instance(3).unwrap();
+
+        let mut stp_port_ids = HashMap::new();
+
+        // Same port in multiple instances
+        orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids).unwrap();
+        orch.add_stp_port("Ethernet0", 2, &mut stp_port_ids).unwrap();
+        orch.add_stp_port("Ethernet0", 3, &mut stp_port_ids).unwrap();
+
+        assert_eq!(stp_port_ids.len(), 3);
+        assert!(stp_port_ids.contains_key(&1));
+        assert!(stp_port_ids.contains_key(&2));
+        assert!(stp_port_ids.contains_key(&3));
+    }
+
+    // Statistics Tests
+
+    #[test]
+    fn test_statistics_tracking() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        // Create instances
+        orch.add_instance(1).unwrap();
+        orch.add_instance(2).unwrap();
+        assert_eq!(orch.stats().instances_created, 2);
+
+        // Create ports
+        let mut stp_port_ids1 = HashMap::new();
+        let mut stp_port_ids2 = HashMap::new();
+        orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids1).unwrap();
+        orch.add_stp_port("Ethernet1", 2, &mut stp_port_ids2).unwrap();
+        assert_eq!(orch.stats().ports_created, 2);
+
+        // Update states
+        orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids1).unwrap();
+        orch.update_port_state("Ethernet1", 2, StpState::Learning, &mut stp_port_ids2).unwrap();
+        assert_eq!(orch.stats().state_updates, 2);
+
+        // Remove ports
+        orch.remove_stp_port(1, &mut stp_port_ids1).unwrap();
+        assert_eq!(orch.stats().ports_removed, 1);
+
+        // Remove instances
+        orch.remove_instance(1).unwrap();
+        assert_eq!(orch.stats().instances_removed, 1);
+    }
+
+    #[test]
+    fn test_fdb_flush_statistics() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        orch.flush_fdb_vlan("Vlan100").unwrap();
+        orch.flush_fdb_vlan("Vlan200").unwrap();
+        orch.flush_fdb_vlan("Vlan300").unwrap();
+
+        assert_eq!(orch.stats().fdb_flushes, 3);
+    }
+
+    // Error Handling Tests
+
+    #[test]
+    fn test_add_port_without_instance() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        let mut stp_port_ids = HashMap::new();
+        let result = orch.add_stp_port("Ethernet0", 99, &mut stp_port_ids);
+
+        assert!(matches!(result, Err(StpOrchError::InstanceNotFound(99))));
+    }
+
+    #[test]
+    fn test_operations_without_callbacks() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        orch.initialize(0x100, 256);
+
+        // Try to add instance without callbacks
+        let result = orch.add_instance(1);
+        assert!(matches!(result, Err(StpOrchError::SaiError(_))));
+
+        // Try to remove instance without callbacks
+        orch.stp_inst_to_oid.insert(1, 0x1234);
+        let result = orch.remove_instance(1);
+        assert!(matches!(result, Err(StpOrchError::SaiError(_))));
+    }
+
+    // Edge Cases Tests
+
+    #[test]
+    fn test_empty_stp_instance() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        // Create instance without any VLANs or ports
+        let oid = orch.add_instance(1).unwrap();
+        assert!(oid > 0);
+        assert_eq!(orch.instance_count(), 2);
+
+        // Instance should not have any VLANs
+        assert!(orch.vlan_to_instance_map.get(&1).is_none());
+    }
+
+    #[test]
+    fn test_rapid_state_changes() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        orch.add_instance(1).unwrap();
+
+        let mut stp_port_ids = HashMap::new();
+
+        // Rapid state changes
+        for _ in 0..10 {
+            orch.update_port_state("Ethernet0", 1, StpState::Blocking, &mut stp_port_ids).unwrap();
+            orch.update_port_state("Ethernet0", 1, StpState::Learning, &mut stp_port_ids).unwrap();
+            orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids).unwrap();
+        }
+
+        assert_eq!(orch.stats().state_updates, 30);
+    }
+
+    #[test]
+    fn test_remove_instance_clears_vlan_mapping() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        orch.add_vlan_to_instance("Vlan100", 1).unwrap();
+        orch.add_vlan_to_instance("Vlan200", 1).unwrap();
+
+        assert!(orch.vlan_to_instance_map.contains_key(&1));
+
+        // Remove instance should clear VLAN mapping
+        orch.remove_instance(1).unwrap();
+        assert!(!orch.vlan_to_instance_map.contains_key(&1));
+    }
+
+    #[test]
+    fn test_lazy_create_port_on_state_update() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks.clone());
+        orch.initialize(0x100, 256);
+
+        orch.add_instance(1).unwrap();
+
+        let mut stp_port_ids = HashMap::new();
+
+        // Update state without explicitly creating port (lazy creation)
+        orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids).unwrap();
+
+        // Port should be created automatically
+        assert!(stp_port_ids.contains_key(&1));
+        assert_eq!(callbacks.created_ports.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_instance_count_tracking() {
+        let mut orch = StpOrch::new(StpOrchConfig::default());
+        let callbacks = Arc::new(TestCallbacks::new());
+        orch.set_callbacks(callbacks);
+        orch.initialize(0x100, 256);
+
+        assert_eq!(orch.instance_count(), 1); // Default
+
+        orch.add_instance(1).unwrap();
+        assert_eq!(orch.instance_count(), 2);
+
+        orch.add_instance(2).unwrap();
+        orch.add_instance(3).unwrap();
+        assert_eq!(orch.instance_count(), 4);
+
+        orch.remove_instance(2).unwrap();
+        assert_eq!(orch.instance_count(), 3);
+
+        orch.remove_instance(1).unwrap();
+        orch.remove_instance(3).unwrap();
+        assert_eq!(orch.instance_count(), 1); // Back to default only
+    }
 }

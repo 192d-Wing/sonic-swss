@@ -584,6 +584,7 @@ impl AclOrch {
 mod tests {
     use super::super::rule::{AclRuleAction, AclRuleMatch};
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn test_acl_orch_new() {
@@ -767,5 +768,900 @@ mod tests {
 
         orch.create_table(&config).unwrap();
         assert!(orch.has_table("CustomTable"));
+    }
+
+    // ============ Additional ACL Table Management Tests ============
+
+    #[test]
+    fn test_create_table_egress_stage() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("EgressTable")
+            .with_type("L3")
+            .with_stage(AclStage::Egress);
+
+        orch.create_table(&config).unwrap();
+
+        let table = orch.get_table("EgressTable").unwrap();
+        assert_eq!(table.stage, AclStage::Egress);
+    }
+
+    #[test]
+    fn test_create_table_ingress_stage() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("IngressTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+
+        orch.create_table(&config).unwrap();
+
+        let table = orch.get_table("IngressTable").unwrap();
+        assert_eq!(table.stage, AclStage::Ingress);
+    }
+
+    #[test]
+    fn test_create_table_with_ports() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("PortTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress)
+            .with_ports(vec!["Ethernet0".to_string(), "Ethernet4".to_string()]);
+
+        orch.create_table(&config).unwrap();
+
+        let table = orch.get_table("PortTable").unwrap();
+        assert!(table.is_port_configured("Ethernet0"));
+        assert!(table.is_port_configured("Ethernet4"));
+    }
+
+    #[test]
+    fn test_create_table_max_limit() {
+        let config = AclOrchConfig {
+            max_tables: 2,
+            ..Default::default()
+        };
+        let mut orch = AclOrch::new(config);
+
+        // Create first table
+        let config1 = AclTableConfig::new()
+            .with_id("Table1")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config1).unwrap();
+
+        // Create second table
+        let config2 = AclTableConfig::new()
+            .with_id("Table2")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config2).unwrap();
+
+        // Third table should fail
+        let config3 = AclTableConfig::new()
+            .with_id("Table3")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        let result = orch.create_table(&config3);
+        assert!(matches!(result, Err(AclOrchError::ResourceExhausted(_))));
+    }
+
+    #[test]
+    fn test_remove_nonexistent_table() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+        let result = orch.remove_table("NonExistent");
+        assert!(matches!(result, Err(AclOrchError::TableNotFound(_))));
+    }
+
+    #[test]
+    fn test_table_binding_to_ports() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("BindTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+
+        orch.create_table(&config).unwrap();
+        orch.bind_port("BindTable", "Ethernet0", 0x1000).unwrap();
+
+        let table = orch.get_table("BindTable").unwrap();
+        assert!(table.is_port_bound("Ethernet0"));
+    }
+
+    #[test]
+    fn test_table_unbinding_from_ports() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("UnbindTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+
+        orch.create_table(&config).unwrap();
+        orch.bind_port("UnbindTable", "Ethernet0", 0x1000).unwrap();
+        orch.unbind_port("UnbindTable", "Ethernet0").unwrap();
+
+        let table = orch.get_table("UnbindTable").unwrap();
+        assert!(!table.is_port_bound("Ethernet0"));
+    }
+
+    #[test]
+    fn test_update_table_ports() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("UpdateTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress)
+            .with_ports(vec!["Ethernet0".to_string()]);
+
+        orch.create_table(&config).unwrap();
+
+        let new_ports = vec!["Ethernet0".to_string(), "Ethernet4".to_string()];
+        let (added, removed) = orch.update_table_ports("UpdateTable", new_ports).unwrap();
+
+        assert_eq!(added.len(), 1);
+        assert!(added.contains(&"Ethernet4".to_string()));
+        assert_eq!(removed.len(), 0);
+    }
+
+    // ============ ACL Rule Operations Tests ============
+
+    #[test]
+    fn test_create_rule_with_src_ip() {
+        use sonic_types::IpAddress;
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let ip = IpAddress::from_str("192.168.1.1").unwrap();
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::src_ip(ip, None))
+            .with_action(AclRuleAction::drop());
+
+        orch.add_rule("TestTable", rule).unwrap();
+        assert!(orch.get_rule("TestTable", "rule1").is_some());
+    }
+
+    #[test]
+    fn test_create_rule_with_dst_ip() {
+        use sonic_types::IpAddress;
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let ip = IpAddress::from_str("10.0.0.1").unwrap();
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::dst_ip(ip, None))
+            .with_action(AclRuleAction::drop());
+
+        orch.add_rule("TestTable", rule).unwrap();
+        assert!(orch.get_rule("TestTable", "rule1").is_some());
+    }
+
+    #[test]
+    fn test_create_rule_with_src_port() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::l4_src_port(8080))
+            .with_action(AclRuleAction::drop());
+
+        orch.add_rule("TestTable", rule).unwrap();
+        assert!(orch.get_rule("TestTable", "rule1").is_some());
+    }
+
+    #[test]
+    fn test_create_rule_with_dst_port() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::l4_dst_port(443))
+            .with_action(AclRuleAction::drop());
+
+        orch.add_rule("TestTable", rule).unwrap();
+        assert!(orch.get_rule("TestTable", "rule1").is_some());
+    }
+
+    #[test]
+    fn test_create_rule_with_protocol_match() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::ip_protocol(17)) // UDP
+            .with_action(AclRuleAction::drop());
+
+        orch.add_rule("TestTable", rule).unwrap();
+        let stored_rule = orch.get_rule("TestTable", "rule1").unwrap();
+        assert!(stored_rule.has_match(super::super::types::AclMatchField::IpProtocol));
+    }
+
+    #[test]
+    fn test_create_rule_with_tcp_flags() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::tcp_flags(0x02, 0xFF)) // SYN flag
+            .with_action(AclRuleAction::drop());
+
+        orch.add_rule("TestTable", rule).unwrap();
+        assert!(orch.get_rule("TestTable", "rule1").is_some());
+    }
+
+    #[test]
+    fn test_create_rule_with_dscp_match() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::dscp(46)) // EF
+            .with_action(AclRuleAction::drop());
+
+        orch.add_rule("TestTable", rule).unwrap();
+        assert!(orch.get_rule("TestTable", "rule1").is_some());
+    }
+
+    #[test]
+    fn test_create_rule_with_port_range() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::l4_src_port_range(1000, 2000))
+            .with_action(AclRuleAction::drop());
+
+        orch.add_rule("TestTable", rule).unwrap();
+        assert!(orch.get_rule("TestTable", "rule1").is_some());
+    }
+
+    // ============ Rule Actions Tests ============
+
+    #[test]
+    fn test_rule_action_forward() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::ip_protocol(6))
+            .with_action(AclRuleAction::forward());
+
+        orch.add_rule("TestTable", rule).unwrap();
+        let stored_rule = orch.get_rule("TestTable", "rule1").unwrap();
+        assert!(stored_rule.has_action(super::super::types::AclActionType::PacketAction));
+    }
+
+    #[test]
+    fn test_rule_action_drop() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::ip_protocol(6))
+            .with_action(AclRuleAction::drop());
+
+        orch.add_rule("TestTable", rule).unwrap();
+        assert_eq!(orch.total_rule_count(), 1);
+    }
+
+    #[test]
+    fn test_rule_action_redirect() {
+        use super::super::rule::AclRedirectTarget;
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::ip_protocol(6))
+            .with_action(AclRuleAction::redirect(AclRedirectTarget::Port("Ethernet0".to_string())));
+
+        orch.add_rule("TestTable", rule).unwrap();
+        let stored_rule = orch.get_rule("TestTable", "rule1").unwrap();
+        assert!(stored_rule.has_action(super::super::types::AclActionType::Redirect));
+    }
+
+    #[test]
+    fn test_rule_action_mirror_ingress() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("MIRROR")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::mirror("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::ip_protocol(6))
+            .with_action(AclRuleAction::mirror_ingress("session1"));
+
+        orch.add_rule("TestTable", rule).unwrap();
+        let stored_rule = orch.get_rule("TestTable", "rule1").unwrap();
+        assert!(stored_rule.has_action(super::super::types::AclActionType::MirrorIngress));
+    }
+
+    #[test]
+    fn test_rule_action_mirror_egress() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("MIRROR")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::mirror("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::ip_protocol(6))
+            .with_action(AclRuleAction::mirror_egress("session1"));
+
+        orch.add_rule("TestTable", rule).unwrap();
+        assert!(orch.get_rule("TestTable", "rule1").is_some());
+    }
+
+    #[test]
+    fn test_rule_action_counter() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::ip_protocol(6))
+            .with_action(AclRuleAction::drop())
+            .with_action(AclRuleAction::counter(true));
+
+        orch.add_rule("TestTable", rule).unwrap();
+        let stored_rule = orch.get_rule("TestTable", "rule1").unwrap();
+        assert!(stored_rule.has_action(super::super::types::AclActionType::PacketAction));
+        assert!(stored_rule.has_action(super::super::types::AclActionType::Counter));
+    }
+
+    #[test]
+    fn test_rule_with_counter() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::ip_protocol(6))
+            .with_action(AclRuleAction::drop())
+            .with_counter(true);
+
+        orch.add_rule("TestTable", rule).unwrap();
+        let stored_rule = orch.get_rule("TestTable", "rule1").unwrap();
+        assert!(stored_rule.counter_enabled);
+    }
+
+    // ============ Rule Priority Tests ============
+
+    #[test]
+    fn test_rule_priority_handling() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::packet("high_priority")
+            .with_priority(1000)
+            .with_action(AclRuleAction::drop());
+
+        orch.add_rule("TestTable", rule).unwrap();
+        let stored_rule = orch.get_rule("TestTable", "high_priority").unwrap();
+        assert_eq!(stored_rule.priority, 1000);
+    }
+
+    #[test]
+    fn test_rule_priority_out_of_range() {
+        let config = AclOrchConfig {
+            min_priority: 0,
+            max_priority: 100,
+            ..Default::default()
+        };
+        let mut orch = AclOrch::new(config);
+
+        let table_config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&table_config).unwrap();
+
+        let rule = AclRule::packet("rule1")
+            .with_priority(200) // Out of range
+            .with_action(AclRuleAction::drop());
+
+        let result = orch.add_rule("TestTable", rule);
+        assert!(matches!(result, Err(AclOrchError::ValidationError(_))));
+    }
+
+    #[test]
+    fn test_update_rule() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_action(AclRuleAction::drop());
+        orch.add_rule("TestTable", rule).unwrap();
+
+        let updated_rule = AclRule::packet("rule1")
+            .with_priority(200)
+            .with_action(AclRuleAction::forward());
+
+        let old_rule = orch.update_rule("TestTable", updated_rule).unwrap();
+        assert_eq!(old_rule.priority, 100);
+
+        let stored_rule = orch.get_rule("TestTable", "rule1").unwrap();
+        assert_eq!(stored_rule.priority, 200);
+    }
+
+    #[test]
+    fn test_update_nonexistent_rule() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::packet("nonexistent")
+            .with_priority(100)
+            .with_action(AclRuleAction::drop());
+
+        let result = orch.update_rule("TestTable", rule);
+        assert!(matches!(result, Err(AclOrchError::RuleNotFound(_, _))));
+    }
+
+    #[test]
+    fn test_remove_rule_from_nonexistent_table() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+        let result = orch.remove_rule("NonExistentTable", "rule1");
+        assert!(matches!(result, Err(AclOrchError::TableNotFound(_))));
+    }
+
+    #[test]
+    fn test_add_rule_to_nonexistent_table() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_action(AclRuleAction::drop());
+
+        let result = orch.add_rule("NonExistentTable", rule);
+        assert!(matches!(result, Err(AclOrchError::TableNotFound(_))));
+    }
+
+    // ============ Rule with Multiple Actions Tests ============
+
+    #[test]
+    fn test_rule_with_multiple_actions() {
+        use super::super::rule::AclRedirectTarget;
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::ip_protocol(6))
+            .with_action(AclRuleAction::redirect(AclRedirectTarget::Port("Ethernet0".to_string())))
+            .with_action(AclRuleAction::counter(true));
+
+        orch.add_rule("TestTable", rule).unwrap();
+        let stored_rule = orch.get_rule("TestTable", "rule1").unwrap();
+        assert!(stored_rule.has_action(super::super::types::AclActionType::Redirect));
+        assert!(stored_rule.has_action(super::super::types::AclActionType::Counter));
+    }
+
+    // ============ Counter Operations Tests ============
+
+    #[test]
+    fn test_rule_counter_attachment() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_match(AclRuleMatch::ip_protocol(6))
+            .with_action(AclRuleAction::drop())
+            .with_counter(true);
+
+        orch.add_rule("TestTable", rule).unwrap();
+        assert_eq!(orch.stats().rules_created, 1);
+    }
+
+    // ============ Metadata Operations Tests ============
+
+    #[test]
+    fn test_metadata_ref_counting() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let meta = orch.allocate_metadata().unwrap();
+        assert!(orch.is_metadata_allocated(meta));
+
+        // Increment ref count
+        orch.incr_metadata_ref(meta);
+        orch.incr_metadata_ref(meta);
+
+        // Decrement should not free until count reaches 0
+        assert!(!orch.decr_metadata_ref(meta));
+        assert!(orch.is_metadata_allocated(meta));
+        assert!(!orch.decr_metadata_ref(meta));
+        assert!(orch.is_metadata_allocated(meta));
+        assert!(orch.decr_metadata_ref(meta)); // Now freed
+        assert!(!orch.is_metadata_allocated(meta));
+    }
+
+    #[test]
+    fn test_metadata_exhaustion() {
+        let config = AclOrchConfig {
+            metadata_min: 0,
+            metadata_max: 2,
+            ..Default::default()
+        };
+        let mut orch = AclOrch::new(config);
+
+        let meta1 = orch.allocate_metadata().unwrap();
+        let meta2 = orch.allocate_metadata().unwrap();
+        let meta3 = orch.allocate_metadata().unwrap();
+
+        // Fourth should fail
+        let result = orch.allocate_metadata();
+        assert!(matches!(result, Err(AclOrchError::ResourceExhausted(_))));
+
+        // Free one
+        orch.decr_metadata_ref(meta1);
+
+        // Now should succeed
+        let _meta4 = orch.allocate_metadata().unwrap();
+    }
+
+    #[test]
+    fn test_metadata_not_supported() {
+        let config = AclOrchConfig {
+            metadata_supported: false,
+            ..Default::default()
+        };
+        let mut orch = AclOrch::new(config);
+
+        let result = orch.allocate_metadata();
+        assert!(matches!(result, Err(AclOrchError::InvalidConfig(_))));
+    }
+
+    // ============ Error Handling Tests ============
+
+    #[test]
+    fn test_error_table_not_found() {
+        let orch = AclOrch::new(AclOrchConfig::default());
+        let table = orch.get_table("NonExistent");
+        assert!(table.is_none());
+    }
+
+    #[test]
+    fn test_error_rule_not_found() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let rule = orch.get_rule("TestTable", "NonExistent");
+        assert!(rule.is_none());
+    }
+
+    #[test]
+    fn test_error_display() {
+        let err = AclOrchError::TableNotFound("TestTable".to_string());
+        assert!(err.to_string().contains("TestTable"));
+
+        let err = AclOrchError::RuleNotFound("Table1".to_string(), "Rule1".to_string());
+        assert!(err.to_string().contains("Rule1"));
+        assert!(err.to_string().contains("Table1"));
+    }
+
+    // ============ Edge Cases Tests ============
+
+    #[test]
+    fn test_empty_acl_table() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("EmptyTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        let table = orch.get_table("EmptyTable").unwrap();
+        assert_eq!(table.rule_count(), 0);
+        assert!(table.is_empty());
+    }
+
+    #[test]
+    fn test_table_with_many_rules() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("BigTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        // Add 100 rules
+        for i in 0..100 {
+            let rule = AclRule::packet(format!("rule{}", i))
+                .with_priority(i)
+                .with_action(AclRuleAction::drop());
+            orch.add_rule("BigTable", rule).unwrap();
+        }
+
+        assert_eq!(orch.total_rule_count(), 100);
+    }
+
+    #[test]
+    fn test_rule_with_no_match_criteria() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        // Rule with only actions, no matches
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_action(AclRuleAction::drop());
+
+        orch.add_rule("TestTable", rule).unwrap();
+        let stored_rule = orch.get_rule("TestTable", "rule1").unwrap();
+        assert_eq!(stored_rule.matches.len(), 0);
+    }
+
+    #[test]
+    fn test_get_table_by_oid() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config = AclTableConfig::new()
+            .with_id("TestTable")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+
+        // Initially no OID is set
+        let table = orch.get_table_by_oid(0x1234);
+        assert!(table.is_none());
+    }
+
+    #[test]
+    fn test_table_ids() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config1 = AclTableConfig::new()
+            .with_id("Table1")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config1).unwrap();
+
+        let config2 = AclTableConfig::new()
+            .with_id("Table2")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config2).unwrap();
+
+        let ids = orch.table_ids();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&"Table1".to_string()));
+        assert!(ids.contains(&"Table2".to_string()));
+    }
+
+    #[test]
+    fn test_bind_port_to_nonexistent_table() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+        let result = orch.bind_port("NonExistent", "Ethernet0", 0x1000);
+        assert!(matches!(result, Err(AclOrchError::TableNotFound(_))));
+    }
+
+    #[test]
+    fn test_unbind_port_from_nonexistent_table() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+        let result = orch.unbind_port("NonExistent", "Ethernet0");
+        assert!(matches!(result, Err(AclOrchError::TableNotFound(_))));
+    }
+
+    #[test]
+    fn test_orch_initialization() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+        assert!(!orch.is_initialized());
+
+        orch.set_initialized(true);
+        assert!(orch.is_initialized());
+    }
+
+    #[test]
+    fn test_config_access() {
+        let config = AclOrchConfig {
+            min_priority: 10,
+            max_priority: 10000,
+            ..Default::default()
+        };
+        let orch = AclOrch::new(config);
+
+        assert_eq!(orch.config().min_priority, 10);
+        assert_eq!(orch.config().max_priority, 10000);
+    }
+
+    #[test]
+    fn test_stats_tracking() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        // Create table
+        let config = AclTableConfig::new()
+            .with_id("Table1")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config).unwrap();
+        assert_eq!(orch.stats().tables_created, 1);
+
+        // Add rule
+        let rule = AclRule::packet("rule1")
+            .with_priority(100)
+            .with_action(AclRuleAction::drop());
+        orch.add_rule("Table1", rule).unwrap();
+        assert_eq!(orch.stats().rules_created, 1);
+
+        // Update rule
+        let updated = AclRule::packet("rule1")
+            .with_priority(200)
+            .with_action(AclRuleAction::forward());
+        orch.update_rule("Table1", updated).unwrap();
+        assert_eq!(orch.stats().rules_updated, 1);
+
+        // Remove rule
+        orch.remove_rule("Table1", "rule1").unwrap();
+        assert_eq!(orch.stats().rules_deleted, 1);
+
+        // Remove table
+        orch.remove_table("Table1").unwrap();
+        assert_eq!(orch.stats().tables_deleted, 1);
+    }
+
+    #[test]
+    fn test_table_type_names() {
+        let orch = AclOrch::new(AclOrchConfig::default());
+        let names = orch.table_type_names();
+
+        assert!(names.contains(&"L3".to_string()));
+        assert!(names.contains(&"L3V6".to_string()));
+        assert!(names.contains(&"MIRROR".to_string()));
+        assert!(names.contains(&"PFCWD".to_string()));
+        assert!(names.contains(&"DROP".to_string()));
+        assert!(names.contains(&"CTRLPLANE".to_string()));
+    }
+
+    #[test]
+    fn test_range_cache_access() {
+        let orch = AclOrch::new(AclOrchConfig::default());
+        let _range_cache = orch.range_cache();
+        // Just verify we can access it
+    }
+
+    #[test]
+    fn test_multiple_tables_different_types() {
+        let mut orch = AclOrch::new(AclOrchConfig::default());
+
+        let config1 = AclTableConfig::new()
+            .with_id("L3Table")
+            .with_type("L3")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config1).unwrap();
+
+        let config2 = AclTableConfig::new()
+            .with_id("MirrorTable")
+            .with_type("MIRROR")
+            .with_stage(AclStage::Ingress);
+        orch.create_table(&config2).unwrap();
+
+        assert_eq!(orch.table_count(), 2);
+        assert!(orch.has_table("L3Table"));
+        assert!(orch.has_table("MirrorTable"));
     }
 }
