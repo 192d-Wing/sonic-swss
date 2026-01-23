@@ -34,4 +34,4 @@ mod types;
 
 pub use ffi::{register_vrf_orch, unregister_vrf_orch};
 pub use orch::{VrfOrch, VrfOrchCallbacks, VrfOrchConfig, VrfOrchError};
-pub use types::{L3VniEntry, VrfEntry, VrfId, VrfName, VrfVlanId, Vni};
+pub use types::{L3VniEntry, VrfConfig, VrfEntry, VrfId, VrfName, VrfVlanId, Vni};

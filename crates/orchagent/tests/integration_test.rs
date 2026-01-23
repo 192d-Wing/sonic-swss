@@ -43,6 +43,13 @@ pub enum SaiObjectType {
     AclTable,
     AclRule,
     AclCounter,
+    BfdSession,
+    FlexCounterGroup,
+    PortCounter,
+    QueueCounter,
+    BufferCounter,
+    Samplepacket,
+    VirtualRouter,
 }
 
 impl MockSai {
@@ -3435,6 +3442,1366 @@ mod integration_tests {
                 assert!(entry.is_dnat());
                 assert!(!entry.is_snat());
             }
+        }
+    }
+
+    // SflowOrch integration tests
+    mod sflow_orch_tests {
+        use super::*;
+        use sonic_orchagent::sflow::{SflowOrch, SflowOrchConfig, SflowOrchCallbacks, SflowConfig, SampleDirection};
+        use std::num::NonZeroU32;
+
+        /// Mock callbacks implementation for SflowOrch that uses MockSai
+        struct MockSflowCallbacks {
+            sai: Arc<MockSai>,
+            ports_ready: bool,
+        }
+
+        impl MockSflowCallbacks {
+            fn new(sai: Arc<MockSai>) -> Self {
+                Self {
+                    sai,
+                    ports_ready: true,
+                }
+            }
+        }
+
+        impl SflowOrchCallbacks for MockSflowCallbacks {
+            fn create_samplepacket_session(&self, rate: NonZeroU32) -> Result<u64, String> {
+                self.sai.create_object(
+                    SaiObjectType::Samplepacket,
+                    vec![("rate".to_string(), rate.to_string())],
+                )
+            }
+
+            fn remove_samplepacket_session(&self, session_id: u64) -> Result<(), String> {
+                self.sai.remove_object(session_id)
+            }
+
+            fn enable_port_ingress_sample(&self, _port_id: u64, _session_id: u64) -> Result<(), String> {
+                Ok(())
+            }
+
+            fn disable_port_ingress_sample(&self, _port_id: u64) -> Result<(), String> {
+                Ok(())
+            }
+
+            fn enable_port_egress_sample(&self, _port_id: u64, _session_id: u64) -> Result<(), String> {
+                Ok(())
+            }
+
+            fn disable_port_egress_sample(&self, _port_id: u64) -> Result<(), String> {
+                Ok(())
+            }
+
+            fn get_port_id(&self, alias: &str) -> Option<u64> {
+                match alias {
+                    "Ethernet0" => Some(0x100),
+                    "Ethernet4" => Some(0x104),
+                    "Ethernet8" => Some(0x108),
+                    _ => None,
+                }
+            }
+
+            fn all_ports_ready(&self) -> bool {
+                self.ports_ready
+            }
+        }
+
+        /// Helper function to create a sflow session configuration
+        fn create_sflow_config(rate: u32, direction: SampleDirection) -> SflowConfig {
+            let mut config = SflowConfig::new();
+            config.admin_state = true;
+            config.rate = NonZeroU32::new(rate);
+            config.direction = direction;
+            config
+        }
+
+        #[test]
+        fn test_sflow_session_creation_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockSflowCallbacks::new(sai.clone()));
+            let mut orch = SflowOrch::new(SflowOrchConfig::default());
+            orch.set_callbacks(callbacks);
+            orch.set_enabled(true);
+
+            // Verify no samplepacket sessions exist initially
+            assert_eq!(sai.count_objects(SaiObjectType::Samplepacket), 0);
+
+            // Configure port with sflow sampling rate
+            let config = create_sflow_config(4096, SampleDirection::Rx);
+            orch.configure_port("Ethernet0", config).unwrap();
+
+            // Verify samplepacket session was created in SAI
+            assert_eq!(orch.session_count(), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::Samplepacket), 1);
+
+            // Verify SAI object attributes
+            let sai_obj = sai.get_object(1).unwrap();
+            assert_eq!(sai_obj.object_type, SaiObjectType::Samplepacket);
+            assert_eq!(sai_obj.attributes.len(), 1);
+            assert_eq!(sai_obj.attributes[0].0, "rate");
+            assert_eq!(sai_obj.attributes[0].1, "4096");
+
+            // Verify port is configured
+            assert_eq!(orch.port_count(), 1);
+            let port_info = orch.get_port_info(0x100).unwrap();
+            assert_eq!(port_info.admin_state, true);
+            assert_eq!(port_info.direction, SampleDirection::Rx);
+        }
+
+        #[test]
+        fn test_sflow_session_configuration_updates_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockSflowCallbacks::new(sai.clone()));
+            let mut orch = SflowOrch::new(SflowOrchConfig::default());
+            orch.set_callbacks(callbacks);
+            orch.set_enabled(true);
+
+            // Initial configuration
+            let config = create_sflow_config(4096, SampleDirection::Rx);
+            orch.configure_port("Ethernet0", config).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::Samplepacket), 1);
+
+            // Update sampling rate
+            let new_config = create_sflow_config(8192, SampleDirection::Rx);
+            orch.configure_port("Ethernet0", new_config).unwrap();
+
+            // Old session should be removed, new one created
+            assert_eq!(orch.session_count(), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::Samplepacket), 1);
+            assert_eq!(orch.stats().rate_updates, 1);
+
+            // Update sampling direction
+            let direction_config = create_sflow_config(8192, SampleDirection::Both);
+            orch.configure_port("Ethernet0", direction_config).unwrap();
+
+            // Session should remain the same, only direction changes
+            assert_eq!(orch.session_count(), 1);
+            assert_eq!(orch.stats().direction_updates, 1);
+
+            let port_info = orch.get_port_info(0x100).unwrap();
+            assert_eq!(port_info.direction, SampleDirection::Both);
+        }
+
+        #[test]
+        fn test_sflow_session_removal_and_cleanup_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockSflowCallbacks::new(sai.clone()));
+            let mut orch = SflowOrch::new(SflowOrchConfig::default());
+            orch.set_callbacks(callbacks);
+            orch.set_enabled(true);
+
+            // Configure port with sflow
+            let config = create_sflow_config(4096, SampleDirection::Rx);
+            orch.configure_port("Ethernet0", config).unwrap();
+
+            assert_eq!(orch.port_count(), 1);
+            assert_eq!(orch.session_count(), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::Samplepacket), 1);
+
+            // Remove port configuration
+            orch.remove_port("Ethernet0").unwrap();
+
+            // Verify cleanup
+            assert_eq!(orch.port_count(), 0);
+            assert_eq!(orch.session_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::Samplepacket), 0);
+            assert_eq!(orch.stats().ports_unconfigured, 1);
+            assert_eq!(orch.stats().sessions_destroyed, 1);
+        }
+
+        #[test]
+        fn test_port_based_sflow_sampling_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockSflowCallbacks::new(sai.clone()));
+            let mut orch = SflowOrch::new(SflowOrchConfig::default());
+            orch.set_callbacks(callbacks);
+            orch.set_enabled(true);
+
+            // Configure multiple ports with different sampling directions
+            let rx_config = create_sflow_config(4096, SampleDirection::Rx);
+            orch.configure_port("Ethernet0", rx_config).unwrap();
+
+            let tx_config = create_sflow_config(4096, SampleDirection::Tx);
+            orch.configure_port("Ethernet4", tx_config).unwrap();
+
+            let both_config = create_sflow_config(4096, SampleDirection::Both);
+            orch.configure_port("Ethernet8", both_config).unwrap();
+
+            // Verify all ports configured with shared session
+            assert_eq!(orch.port_count(), 3);
+            assert_eq!(orch.session_count(), 1); // All share same rate
+            assert_eq!(sai.count_objects(SaiObjectType::Samplepacket), 1);
+
+            // Verify each port has correct direction
+            let port0_info = orch.get_port_info(0x100).unwrap();
+            assert_eq!(port0_info.direction, SampleDirection::Rx);
+
+            let port1_info = orch.get_port_info(0x104).unwrap();
+            assert_eq!(port1_info.direction, SampleDirection::Tx);
+
+            let port2_info = orch.get_port_info(0x108).unwrap();
+            assert_eq!(port2_info.direction, SampleDirection::Both);
+
+            // Verify all ports share the same session
+            assert_eq!(port0_info.session_id, port1_info.session_id);
+            assert_eq!(port1_info.session_id, port2_info.session_id);
+        }
+
+        #[test]
+        fn test_multiple_sflow_sessions_management_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockSflowCallbacks::new(sai.clone()));
+            let mut orch = SflowOrch::new(SflowOrchConfig::default());
+            orch.set_callbacks(callbacks);
+            orch.set_enabled(true);
+
+            // Configure ports with different sampling rates
+            let config_4096 = create_sflow_config(4096, SampleDirection::Rx);
+            orch.configure_port("Ethernet0", config_4096).unwrap();
+
+            let config_8192 = create_sflow_config(8192, SampleDirection::Rx);
+            orch.configure_port("Ethernet4", config_8192).unwrap();
+
+            let config_16384 = create_sflow_config(16384, SampleDirection::Rx);
+            orch.configure_port("Ethernet8", config_16384).unwrap();
+
+            // Verify multiple sessions created
+            assert_eq!(orch.port_count(), 3);
+            assert_eq!(orch.session_count(), 3);
+            assert_eq!(sai.count_objects(SaiObjectType::Samplepacket), 3);
+            assert_eq!(orch.stats().sessions_created, 3);
+
+            // Verify SAI objects have correct rates
+            let obj1 = sai.get_object(1).unwrap();
+            assert_eq!(obj1.attributes[0].1, "4096");
+
+            let obj2 = sai.get_object(2).unwrap();
+            assert_eq!(obj2.attributes[0].1, "8192");
+
+            let obj3 = sai.get_object(3).unwrap();
+            assert_eq!(obj3.attributes[0].1, "16384");
+
+            // Remove middle port
+            orch.remove_port("Ethernet4").unwrap();
+            assert_eq!(orch.session_count(), 2);
+            assert_eq!(sai.count_objects(SaiObjectType::Samplepacket), 2);
+
+            // Add another port with existing rate (session reuse)
+            let config_4096_new = create_sflow_config(4096, SampleDirection::Both);
+            orch.configure_port("Ethernet4", config_4096_new).unwrap();
+
+            // Should reuse existing 4096 session, so still only 2 sessions
+            assert_eq!(orch.session_count(), 2);
+            assert_eq!(sai.count_objects(SaiObjectType::Samplepacket), 2);
+
+            // Verify session reference counting - two ports now use the 4096 rate session
+            let port0_info = orch.get_port_info(0x100).unwrap();
+            let port1_info = orch.get_port_info(0x104).unwrap();
+            assert_eq!(port0_info.session_id, port1_info.session_id); // Both share same session
+
+            let session_rate = orch.get_session_rate(port0_info.session_id).unwrap();
+            assert_eq!(session_rate.get(), 4096);
+        }
+    }
+
+    // FlexCounterOrch integration tests
+    mod flex_counter_orch_tests {
+        use super::*;
+        use sonic_orchagent::flex_counter::{
+            fields, FlexCounterOrch, FlexCounterOrchConfig, FlexCounterGroup, FlexCounterCallbacks,
+            FlexCounterError, QueueConfigurations, PgConfigurations,
+        };
+        use sonic_orch_common::Orch;
+        use async_trait::async_trait;
+        use std::sync::{Arc, Mutex};
+
+        /// Mock callbacks for FlexCounterOrch testing
+        struct MockFlexCounterCallbacks {
+            sai: Arc<MockSai>,
+            all_ports_ready: bool,
+            is_gearbox_enabled: bool,
+            /// Track which operations were called
+            operations_called: Arc<Mutex<Vec<String>>>,
+        }
+
+        impl MockFlexCounterCallbacks {
+            fn new(sai: Arc<MockSai>) -> Self {
+                Self {
+                    sai,
+                    all_ports_ready: true,
+                    is_gearbox_enabled: false,
+                    operations_called: Arc::new(Mutex::new(Vec::new())),
+                }
+            }
+
+            fn track_operation(&self, op: String) {
+                self.operations_called.lock().unwrap().push(op);
+            }
+
+            fn get_operations(&self) -> Vec<String> {
+                self.operations_called.lock().unwrap().clone()
+            }
+        }
+
+        #[async_trait]
+        impl FlexCounterCallbacks for MockFlexCounterCallbacks {
+            fn all_ports_ready(&self) -> bool {
+                self.all_ports_ready
+            }
+
+            fn is_gearbox_enabled(&self) -> bool {
+                self.is_gearbox_enabled
+            }
+
+            async fn generate_port_counter_map(&self) -> Result<(), FlexCounterError> {
+                self.track_operation("generate_port_counter_map".to_string());
+                // Create SAI port counter objects
+                self.sai.create_object(
+                    SaiObjectType::PortCounter,
+                    vec![("type".to_string(), "port_stat".to_string())],
+                ).map_err(|e| FlexCounterError::ConfigError(e))?;
+                Ok(())
+            }
+
+            async fn generate_port_buffer_drop_counter_map(&self) -> Result<(), FlexCounterError> {
+                self.track_operation("generate_port_buffer_drop_counter_map".to_string());
+                self.sai.create_object(
+                    SaiObjectType::BufferCounter,
+                    vec![("type".to_string(), "port_buffer_drop".to_string())],
+                ).map_err(|e| FlexCounterError::ConfigError(e))?;
+                Ok(())
+            }
+
+            async fn generate_queue_map(&self, _configs: &QueueConfigurations) -> Result<(), FlexCounterError> {
+                self.track_operation("generate_queue_map".to_string());
+                Ok(())
+            }
+
+            async fn add_queue_flex_counters(&self, _configs: &QueueConfigurations) -> Result<(), FlexCounterError> {
+                self.track_operation("add_queue_flex_counters".to_string());
+                self.sai.create_object(
+                    SaiObjectType::QueueCounter,
+                    vec![("type".to_string(), "queue".to_string())],
+                ).map_err(|e| FlexCounterError::ConfigError(e))?;
+                Ok(())
+            }
+
+            async fn add_queue_watermark_flex_counters(&self, _configs: &QueueConfigurations) -> Result<(), FlexCounterError> {
+                self.track_operation("add_queue_watermark_flex_counters".to_string());
+                self.sai.create_object(
+                    SaiObjectType::QueueCounter,
+                    vec![("type".to_string(), "queue_watermark".to_string())],
+                ).map_err(|e| FlexCounterError::ConfigError(e))?;
+                Ok(())
+            }
+
+            async fn generate_pg_map(&self, _configs: &PgConfigurations) -> Result<(), FlexCounterError> {
+                self.track_operation("generate_pg_map".to_string());
+                Ok(())
+            }
+
+            async fn add_pg_flex_counters(&self, _configs: &PgConfigurations) -> Result<(), FlexCounterError> {
+                self.track_operation("add_pg_flex_counters".to_string());
+                self.sai.create_object(
+                    SaiObjectType::BufferCounter,
+                    vec![("type".to_string(), "pg_drop".to_string())],
+                ).map_err(|e| FlexCounterError::ConfigError(e))?;
+                Ok(())
+            }
+
+            async fn add_pg_watermark_flex_counters(&self, _configs: &PgConfigurations) -> Result<(), FlexCounterError> {
+                self.track_operation("add_pg_watermark_flex_counters".to_string());
+                self.sai.create_object(
+                    SaiObjectType::BufferCounter,
+                    vec![("type".to_string(), "pg_watermark".to_string())],
+                ).map_err(|e| FlexCounterError::ConfigError(e))?;
+                Ok(())
+            }
+
+            async fn generate_wred_port_counter_map(&self) -> Result<(), FlexCounterError> {
+                self.track_operation("generate_wred_port_counter_map".to_string());
+                Ok(())
+            }
+
+            async fn add_wred_queue_flex_counters(&self, _configs: &QueueConfigurations) -> Result<(), FlexCounterError> {
+                self.track_operation("add_wred_queue_flex_counters".to_string());
+                Ok(())
+            }
+
+            async fn flush_counters(&self) -> Result<(), FlexCounterError> {
+                self.track_operation("flush_counters".to_string());
+                Ok(())
+            }
+
+            async fn set_poll_interval(&self, group: &str, interval_ms: u64, gearbox: bool) -> Result<(), FlexCounterError> {
+                self.track_operation(format!("set_poll_interval:{}:{}:{}", group, interval_ms, gearbox));
+                // Create/update FlexCounterGroup SAI object
+                self.sai.create_object(
+                    SaiObjectType::FlexCounterGroup,
+                    vec![
+                        ("group".to_string(), group.to_string()),
+                        ("poll_interval".to_string(), interval_ms.to_string()),
+                        ("gearbox".to_string(), gearbox.to_string()),
+                    ],
+                ).map_err(|e| FlexCounterError::ConfigError(e))?;
+                Ok(())
+            }
+
+            async fn set_group_operation(&self, group: &str, enable: bool, gearbox: bool) -> Result<(), FlexCounterError> {
+                self.track_operation(format!("set_group_operation:{}:{}:{}", group, enable, gearbox));
+                Ok(())
+            }
+
+            async fn set_bulk_chunk_size(&self, group: &str, size: Option<u32>) -> Result<(), FlexCounterError> {
+                self.track_operation(format!("set_bulk_chunk_size:{}:{:?}", group, size));
+                Ok(())
+            }
+        }
+
+        fn create_flex_counter_entry(
+            group: FlexCounterGroup,
+            poll_interval: u64,
+            enabled: bool,
+        ) -> (String, std::collections::HashMap<String, String>) {
+            let key = group.redis_key().to_string();
+            let mut field_map = std::collections::HashMap::new();
+            field_map.insert(fields::POLL_INTERVAL.to_string(), poll_interval.to_string());
+            field_map.insert(
+                fields::STATUS.to_string(),
+                if enabled {
+                    fields::STATUS_ENABLE.to_string()
+                } else {
+                    fields::STATUS_DISABLE.to_string()
+                },
+            );
+            (key, field_map)
+        }
+
+        #[tokio::test]
+        async fn test_flex_counter_port_polling_integration() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+            let callbacks = Arc::new(MockFlexCounterCallbacks::new(sai.clone()));
+            orch.set_callbacks(callbacks.clone());
+
+            // Create and enable port counter group
+            let (key, fields) = create_flex_counter_entry(FlexCounterGroup::Port, 10000, true);
+
+            use sonic_orch_common::Operation;
+            orch.add_task(key, Operation::Set, fields);
+
+            // Process the task
+            orch.do_task().await;
+
+            // Verify port counters are enabled
+            assert!(orch.port_counters_enabled());
+
+            // Verify SAI objects were created
+            assert_eq!(sai.count_objects(SaiObjectType::FlexCounterGroup), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::PortCounter), 1);
+
+            // Verify callbacks were invoked in correct order
+            let ops = callbacks.get_operations();
+            assert!(ops.contains(&"generate_port_counter_map".to_string()));
+            assert!(ops.contains(&"set_poll_interval:PORT_STAT_COUNTER:10000:false".to_string()));
+            assert!(ops.contains(&"set_group_operation:PORT_STAT_COUNTER:true:false".to_string()));
+            assert!(ops.contains(&"flush_counters".to_string()));
+
+            // Verify the FlexCounterGroup SAI object
+            let group_obj = sai.get_object(1).unwrap();
+            assert_eq!(group_obj.object_type, SaiObjectType::FlexCounterGroup);
+            assert_eq!(
+                group_obj.attributes.iter().find(|(k, _)| k == "group").map(|(_, v)| v.as_str()),
+                Some("PORT_STAT_COUNTER")
+            );
+        }
+
+        #[tokio::test]
+        async fn test_flex_counter_queue_creation_and_management() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+            let callbacks = Arc::new(MockFlexCounterCallbacks::new(sai.clone()));
+            orch.set_callbacks(callbacks.clone());
+
+            // Load buffer queue configuration
+            orch.load_buffer_queue_config("Ethernet0:0-7");
+            orch.load_buffer_queue_config("Ethernet4:0-3");
+            orch.set_create_only_config_db_buffers(true);
+
+            // Enable queue counters
+            let (key, fields) = create_flex_counter_entry(FlexCounterGroup::Queue, 5000, true);
+
+            use sonic_orch_common::Operation;
+            orch.add_task(key, Operation::Set, fields);
+            orch.do_task().await;
+
+            // Verify queue counters are enabled
+            assert!(orch.queue_counters_enabled());
+
+            // Verify SAI objects created
+            assert_eq!(sai.count_objects(SaiObjectType::FlexCounterGroup), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::QueueCounter), 1);
+
+            // Verify queue configurations
+            let configs = orch.get_queue_configurations();
+            assert!(configs.contains_key("Ethernet0"));
+            assert!(configs.contains_key("Ethernet4"));
+
+            let eth0_states = configs.get("Ethernet0").unwrap();
+            assert!(eth0_states.is_queue_counter_enabled(0));
+            assert!(eth0_states.is_queue_counter_enabled(7));
+            assert!(!eth0_states.is_queue_counter_enabled(8));
+
+            // Verify callbacks
+            let ops = callbacks.get_operations();
+            assert!(ops.contains(&"generate_queue_map".to_string()));
+            assert!(ops.contains(&"add_queue_flex_counters".to_string()));
+        }
+
+        #[tokio::test]
+        async fn test_flex_counter_buffer_statistics_collection() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+            let callbacks = Arc::new(MockFlexCounterCallbacks::new(sai.clone()));
+            orch.set_callbacks(callbacks.clone());
+
+            // Enable multiple buffer-related counter groups
+            use sonic_orch_common::Operation;
+
+            // Enable port buffer drop counters
+            let (key1, fields1) = create_flex_counter_entry(FlexCounterGroup::PortBufferDrop, 2000, true);
+            orch.add_task(key1, Operation::Set, fields1);
+
+            // Enable PG drop counters
+            orch.load_buffer_pg_config("Ethernet0:0-7");
+            orch.set_create_only_config_db_buffers(true);
+            let (key2, fields2) = create_flex_counter_entry(FlexCounterGroup::PgDrop, 3000, true);
+            orch.add_task(key2, Operation::Set, fields2);
+
+            // Enable PG watermark counters
+            let (key3, fields3) = create_flex_counter_entry(FlexCounterGroup::PgWatermark, 4000, true);
+            orch.add_task(key3, Operation::Set, fields3);
+
+            // Process all tasks
+            orch.do_task().await;
+
+            // Verify all buffer counter states
+            assert!(orch.port_buffer_drop_counters_enabled());
+            assert!(orch.pg_counters_enabled());
+            assert!(orch.pg_watermark_counters_enabled());
+
+            // Verify SAI objects created for each buffer counter type
+            assert_eq!(sai.count_objects(SaiObjectType::FlexCounterGroup), 3);
+            assert_eq!(sai.count_objects(SaiObjectType::BufferCounter), 3); // port_buffer_drop, pg_drop, pg_watermark
+
+            // Verify PG configurations
+            let pg_configs = orch.get_pg_configurations();
+            assert!(pg_configs.contains_key("Ethernet0"));
+            let eth0_pgs = pg_configs.get("Ethernet0").unwrap();
+            assert!(eth0_pgs.is_pg_counter_enabled(0));
+            assert!(eth0_pgs.is_pg_counter_enabled(7));
+
+            // Verify all callbacks were invoked
+            let ops = callbacks.get_operations();
+            assert!(ops.contains(&"generate_port_buffer_drop_counter_map".to_string()));
+            assert!(ops.contains(&"generate_pg_map".to_string()));
+            assert!(ops.contains(&"add_pg_flex_counters".to_string()));
+            assert!(ops.contains(&"add_pg_watermark_flex_counters".to_string()));
+        }
+
+        #[tokio::test]
+        async fn test_flex_counter_group_lifecycle() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+            let callbacks = Arc::new(MockFlexCounterCallbacks::new(sai.clone()));
+            orch.set_callbacks(callbacks.clone());
+
+            use sonic_orch_common::Operation;
+
+            // Step 1: Create and enable port counter group
+            let (key, mut fields) = create_flex_counter_entry(FlexCounterGroup::Port, 5000, true);
+            orch.add_task(key.clone(), Operation::Set, fields.clone());
+            orch.do_task().await;
+
+            assert!(orch.port_counters_enabled());
+            assert_eq!(sai.count_objects(SaiObjectType::FlexCounterGroup), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::PortCounter), 1);
+
+            // Step 2: Update poll interval
+            fields.insert(fields::POLL_INTERVAL.to_string(), "10000".to_string());
+            orch.add_task(key.clone(), Operation::Set, fields.clone());
+            orch.do_task().await;
+
+            // Should have 2 FlexCounterGroup objects (one for initial interval, one for update)
+            assert_eq!(sai.count_objects(SaiObjectType::FlexCounterGroup), 2);
+
+            // Step 3: Disable the group
+            fields.insert(fields::STATUS.to_string(), fields::STATUS_DISABLE.to_string());
+            orch.add_task(key.clone(), Operation::Set, fields.clone());
+            orch.do_task().await;
+
+            assert!(!orch.port_counters_enabled());
+
+            // Step 4: Remove (delete) the group
+            orch.add_task(key, Operation::Del, std::collections::HashMap::new());
+            orch.do_task().await;
+
+            assert!(!orch.port_counters_enabled());
+
+            // Verify lifecycle operations were tracked
+            let ops = callbacks.get_operations();
+            assert!(ops.iter().any(|op| op.contains("set_poll_interval")));
+            assert!(ops.iter().any(|op| op.contains("set_group_operation:PORT_STAT_COUNTER:true")));
+            assert!(ops.iter().any(|op| op.contains("set_group_operation:PORT_STAT_COUNTER:false")));
+        }
+
+        #[tokio::test]
+        async fn test_flex_counter_multiple_counter_types_interaction() {
+            let sai = Arc::new(MockSai::new());
+            let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
+            let callbacks = Arc::new(MockFlexCounterCallbacks::new(sai.clone()));
+            orch.set_callbacks(callbacks.clone());
+
+            use sonic_orch_common::Operation;
+
+            // Enable multiple counter types with different configurations
+            let counter_groups = vec![
+                (FlexCounterGroup::Port, 1000),
+                (FlexCounterGroup::Queue, 5000),
+                (FlexCounterGroup::QueueWatermark, 10000),
+                (FlexCounterGroup::Rif, 2000),
+            ];
+
+            for (group, interval) in counter_groups {
+                let (key, fields) = create_flex_counter_entry(group, interval, true);
+                orch.add_task(key, Operation::Set, fields);
+            }
+
+            // Process all tasks
+            orch.do_task().await;
+
+            // Verify all counter types are enabled
+            assert!(orch.port_counters_enabled());
+            assert!(orch.queue_counters_enabled());
+            assert!(orch.queue_watermark_counters_enabled());
+
+            // Verify SAI objects created for all groups
+            assert_eq!(sai.count_objects(SaiObjectType::FlexCounterGroup), 4);
+
+            // Port counters should have created port counter objects
+            assert_eq!(sai.count_objects(SaiObjectType::PortCounter), 1);
+
+            // Queue counters should have created queue counter objects
+            assert_eq!(sai.count_objects(SaiObjectType::QueueCounter), 2); // Queue + QueueWatermark
+
+            // Verify all groups have correct poll intervals set
+            let ops = callbacks.get_operations();
+            assert!(ops.contains(&"set_poll_interval:PORT_STAT_COUNTER:1000:false".to_string()));
+            assert!(ops.contains(&"set_poll_interval:QUEUE_STAT_COUNTER:5000:false".to_string()));
+            assert!(ops.contains(&"set_poll_interval:QUEUE_WATERMARK_STAT_COUNTER:10000:false".to_string()));
+            assert!(ops.contains(&"set_poll_interval:RIF_STAT_COUNTER:2000:false".to_string()));
+
+            // Now disable Port counters and verify others remain active
+            let (key, fields) = create_flex_counter_entry(FlexCounterGroup::Port, 1000, false);
+            orch.add_task(key, Operation::Set, fields);
+            orch.do_task().await;
+
+            assert!(!orch.port_counters_enabled());
+            assert!(orch.queue_counters_enabled());
+            assert!(orch.queue_watermark_counters_enabled());
+
+            // Verify cleanup was called for Port group
+            let ops = callbacks.get_operations();
+            assert!(ops.iter().any(|op| op.contains("set_group_operation:PORT_STAT_COUNTER:false")));
+        }
+    }
+
+    // BfdOrch integration tests
+    mod bfd_orch_tests {
+        use super::*;
+        use sonic_orchagent::bfd::{BfdOrch, BfdOrchConfig, BfdOrchCallbacks, BfdSessionConfig, BfdSessionKey, BfdSessionState, BfdSessionType, BfdUpdate};
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+        use std::sync::{Arc, Mutex};
+
+        /// Mock callbacks for BfdOrch testing
+        struct MockBfdCallbacks {
+            sai: Arc<MockSai>,
+            created_sessions: Mutex<Vec<(String, u32, u16)>>,
+            removed_sessions: Mutex<Vec<u64>>,
+            state_updates: Mutex<Vec<(String, BfdSessionState)>>,
+            notifications: Mutex<Vec<BfdUpdate>>,
+            software_bfd: bool,
+            tsa_active: bool,
+        }
+
+        impl MockBfdCallbacks {
+            fn new(sai: Arc<MockSai>) -> Self {
+                Self {
+                    sai,
+                    created_sessions: Mutex::new(Vec::new()),
+                    removed_sessions: Mutex::new(Vec::new()),
+                    state_updates: Mutex::new(Vec::new()),
+                    notifications: Mutex::new(Vec::new()),
+                    software_bfd: false,
+                    tsa_active: false,
+                }
+            }
+        }
+
+        impl BfdOrchCallbacks for MockBfdCallbacks {
+            fn create_bfd_session(
+                &self,
+                config: &BfdSessionConfig,
+                discriminator: u32,
+                src_port: u16,
+            ) -> Result<u64, String> {
+                let oid = self.sai.create_object(
+                    SaiObjectType::BfdSession,
+                    vec![
+                        ("peer_ip".to_string(), config.key.peer_ip.to_string()),
+                        ("vrf".to_string(), config.key.vrf.clone()),
+                        ("discriminator".to_string(), discriminator.to_string()),
+                        ("src_port".to_string(), src_port.to_string()),
+                    ],
+                )?;
+
+                self.created_sessions
+                    .lock()
+                    .unwrap()
+                    .push((config.key.to_config_key(), discriminator, src_port));
+
+                Ok(oid)
+            }
+
+            fn remove_bfd_session(&self, sai_oid: u64) -> Result<(), String> {
+                self.removed_sessions.lock().unwrap().push(sai_oid);
+                self.sai.remove_object(sai_oid)
+            }
+
+            fn get_vrf_id(&self, _vrf_name: &str) -> Option<u64> {
+                Some(0x1000)
+            }
+
+            fn get_port_id(&self, _port_name: &str) -> Option<u64> {
+                Some(0x2000)
+            }
+
+            fn write_state_db(&self, key: &str, state: BfdSessionState, _session_type: BfdSessionType) {
+                self.state_updates
+                    .lock()
+                    .unwrap()
+                    .push((key.to_string(), state));
+            }
+
+            fn remove_state_db(&self, _key: &str) {}
+
+            fn notify(&self, update: BfdUpdate) {
+                self.notifications.lock().unwrap().push(update);
+            }
+
+            fn is_software_bfd(&self) -> bool {
+                self.software_bfd
+            }
+
+            fn is_tsa_active(&self) -> bool {
+                self.tsa_active
+            }
+
+            fn create_software_bfd_session(&self, _key: &str, _config: &BfdSessionConfig) {}
+
+            fn remove_software_bfd_session(&self, _key: &str) {}
+        }
+
+        /// Helper to create a BFD session with SAI integration
+        fn create_bfd_session(
+            orch: &mut BfdOrch,
+            vrf: &str,
+            interface: Option<&str>,
+            peer_ip: IpAddr,
+        ) -> Result<(), String> {
+            let key = BfdSessionKey::new(vrf, interface.map(|s| s.to_string()), peer_ip);
+            let config = BfdSessionConfig::new(key);
+            orch.create_session(config).map_err(|e| e.to_string())
+        }
+
+        #[test]
+        fn test_bfd_session_lifecycle_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockBfdCallbacks::new(Arc::clone(&sai)));
+            let mut orch = BfdOrch::new(BfdOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Initially no sessions
+            assert_eq!(orch.session_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::BfdSession), 0);
+
+            // Create BFD session
+            let peer_ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+            create_bfd_session(&mut orch, "default", None, peer_ip).unwrap();
+
+            // Verify session created
+            assert_eq!(orch.session_count(), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::BfdSession), 1);
+
+            // Verify SAI object was created with correct attributes
+            let created = callbacks.created_sessions.lock().unwrap();
+            assert_eq!(created.len(), 1);
+            assert_eq!(created[0].0, "default::10.0.0.1");
+
+            // Verify initial state written to state DB
+            let state_updates = callbacks.state_updates.lock().unwrap();
+            assert_eq!(state_updates.len(), 1);
+            assert_eq!(state_updates[0].1, BfdSessionState::Down);
+
+            // Get session info
+            let session = orch.get_session("default::10.0.0.1").unwrap();
+            let sai_oid = session.sai_oid;
+
+            // Verify SAI object exists
+            let sai_obj = sai.get_object(sai_oid).unwrap();
+            assert_eq!(sai_obj.object_type, SaiObjectType::BfdSession);
+
+            // Remove session
+            drop(created);
+            drop(state_updates);
+            orch.remove_session("default::10.0.0.1").unwrap();
+
+            // Verify cleanup
+            assert_eq!(orch.session_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::BfdSession), 0);
+
+            let removed = callbacks.removed_sessions.lock().unwrap();
+            assert_eq!(removed.len(), 1);
+            assert_eq!(removed[0], sai_oid);
+        }
+
+        #[test]
+        fn test_bfd_session_state_transitions_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockBfdCallbacks::new(Arc::clone(&sai)));
+            let mut orch = BfdOrch::new(BfdOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Create session
+            let peer_ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+            create_bfd_session(&mut orch, "default", None, peer_ip).unwrap();
+
+            let session = orch.get_session("default::10.0.0.2").unwrap();
+            let sai_oid = session.sai_oid;
+            assert_eq!(session.state, BfdSessionState::Down);
+
+            // Simulate state transition: Down -> Init
+            orch.handle_state_change(sai_oid, BfdSessionState::Init).unwrap();
+
+            let session = orch.get_session("default::10.0.0.2").unwrap();
+            assert_eq!(session.state, BfdSessionState::Init);
+
+            // Verify state DB was updated
+            let state_updates = callbacks.state_updates.lock().unwrap();
+            assert!(state_updates.iter().any(|(_, state)| *state == BfdSessionState::Init));
+
+            // Verify notification was sent
+            let notifications = callbacks.notifications.lock().unwrap();
+            assert_eq!(notifications.len(), 1);
+            assert_eq!(notifications[0].state, BfdSessionState::Init);
+
+            drop(state_updates);
+            drop(notifications);
+
+            // Simulate state transition: Init -> Up
+            orch.handle_state_change(sai_oid, BfdSessionState::Up).unwrap();
+
+            let session = orch.get_session("default::10.0.0.2").unwrap();
+            assert_eq!(session.state, BfdSessionState::Up);
+
+            // Verify second notification
+            let notifications = callbacks.notifications.lock().unwrap();
+            assert_eq!(notifications.len(), 2);
+            assert_eq!(notifications[1].state, BfdSessionState::Up);
+
+            drop(notifications);
+
+            // Simulate link failure: Up -> Down
+            orch.handle_state_change(sai_oid, BfdSessionState::Down).unwrap();
+
+            let session = orch.get_session("default::10.0.0.2").unwrap();
+            assert_eq!(session.state, BfdSessionState::Down);
+
+            // Verify final state change stats
+            assert_eq!(orch.stats().state_changes, 3);
+
+            // Cleanup
+            orch.remove_session("default::10.0.0.2").unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::BfdSession), 0);
+        }
+
+        #[test]
+        fn test_bfd_session_removal_and_cleanup_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockBfdCallbacks::new(Arc::clone(&sai)));
+            let mut orch = BfdOrch::new(BfdOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Create multiple sessions
+            for i in 1..=5 {
+                let peer_ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, i));
+                create_bfd_session(&mut orch, "default", None, peer_ip).unwrap();
+            }
+
+            assert_eq!(orch.session_count(), 5);
+            assert_eq!(sai.count_objects(SaiObjectType::BfdSession), 5);
+
+            // Collect SAI OIDs before removal
+            let session1 = orch.get_session("default::10.0.0.1").unwrap();
+            let oid1 = session1.sai_oid;
+            let session3 = orch.get_session("default::10.0.0.3").unwrap();
+            let oid3 = session3.sai_oid;
+            let session5 = orch.get_session("default::10.0.0.5").unwrap();
+            let oid5 = session5.sai_oid;
+
+            // Remove sessions 1, 3, and 5
+            orch.remove_session("default::10.0.0.1").unwrap();
+            orch.remove_session("default::10.0.0.3").unwrap();
+            orch.remove_session("default::10.0.0.5").unwrap();
+
+            // Verify partial cleanup
+            assert_eq!(orch.session_count(), 2);
+            assert_eq!(sai.count_objects(SaiObjectType::BfdSession), 2);
+
+            // Verify correct sessions remain
+            assert!(orch.get_session("default::10.0.0.1").is_none());
+            assert!(orch.get_session("default::10.0.0.2").is_some());
+            assert!(orch.get_session("default::10.0.0.3").is_none());
+            assert!(orch.get_session("default::10.0.0.4").is_some());
+            assert!(orch.get_session("default::10.0.0.5").is_none());
+
+            // Verify SAI objects were removed
+            let removed = callbacks.removed_sessions.lock().unwrap();
+            assert_eq!(removed.len(), 3);
+            assert!(removed.contains(&oid1));
+            assert!(removed.contains(&oid3));
+            assert!(removed.contains(&oid5));
+
+            // Verify removal stats
+            assert_eq!(orch.stats().sessions_removed, 3);
+
+            // Remove remaining sessions
+            drop(removed);
+            orch.remove_session("default::10.0.0.2").unwrap();
+            orch.remove_session("default::10.0.0.4").unwrap();
+
+            // Verify complete cleanup
+            assert_eq!(orch.session_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::BfdSession), 0);
+            assert_eq!(orch.stats().sessions_removed, 5);
+        }
+
+        #[test]
+        fn test_bfd_multiple_sessions_management_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockBfdCallbacks::new(Arc::clone(&sai)));
+            let mut orch = BfdOrch::new(BfdOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Create IPv4 multihop sessions
+            create_bfd_session(&mut orch, "default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).unwrap();
+            create_bfd_session(&mut orch, "Vrf-RED", None, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))).unwrap();
+
+            // Create IPv6 multihop sessions
+            create_bfd_session(&mut orch, "default", None, IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1))).unwrap();
+
+            // Create single-hop sessions
+            create_bfd_session(&mut orch, "default", Some("Ethernet0"), IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1))).unwrap();
+            create_bfd_session(&mut orch, "default", Some("Ethernet4"), IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1))).unwrap();
+
+            // Verify all sessions created
+            assert_eq!(orch.session_count(), 5);
+            assert_eq!(sai.count_objects(SaiObjectType::BfdSession), 5);
+
+            // Verify session keys are correct
+            assert!(orch.get_session("default::10.0.0.1").is_some());
+            assert!(orch.get_session("Vrf-RED::192.168.1.1").is_some());
+            assert!(orch.get_session("default::2001:db8::1").is_some());
+            assert!(orch.get_session("default:Ethernet0:172.16.0.1").is_some());
+            assert!(orch.get_session("default:Ethernet4:fe80::1").is_some());
+
+            // Verify multihop detection
+            let session1 = orch.get_session("default::10.0.0.1").unwrap();
+            assert!(session1.config.key.is_multihop());
+
+            let session4 = orch.get_session("default:Ethernet0:172.16.0.1").unwrap();
+            assert!(!session4.config.key.is_multihop());
+
+            // Simulate state changes on multiple sessions
+            let oid1 = orch.get_session("default::10.0.0.1").unwrap().sai_oid;
+            let oid3 = orch.get_session("default::2001:db8::1").unwrap().sai_oid;
+            let oid5 = orch.get_session("default:Ethernet4:fe80::1").unwrap().sai_oid;
+
+            orch.handle_state_change(oid1, BfdSessionState::Up).unwrap();
+            orch.handle_state_change(oid3, BfdSessionState::Up).unwrap();
+            orch.handle_state_change(oid5, BfdSessionState::Init).unwrap();
+
+            // Verify state changes
+            assert_eq!(orch.get_session("default::10.0.0.1").unwrap().state, BfdSessionState::Up);
+            assert_eq!(orch.get_session("default::2001:db8::1").unwrap().state, BfdSessionState::Up);
+            assert_eq!(orch.get_session("default:Ethernet4:fe80::1").unwrap().state, BfdSessionState::Init);
+
+            // Verify state change count
+            assert_eq!(orch.stats().state_changes, 3);
+
+            // Cleanup all sessions
+            orch.remove_session("default::10.0.0.1").unwrap();
+            orch.remove_session("Vrf-RED::192.168.1.1").unwrap();
+            orch.remove_session("default::2001:db8::1").unwrap();
+            orch.remove_session("default:Ethernet0:172.16.0.1").unwrap();
+            orch.remove_session("default:Ethernet4:fe80::1").unwrap();
+
+            assert_eq!(orch.session_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::BfdSession), 0);
+        }
+
+        #[test]
+        fn test_bfd_session_parameter_updates_integration() {
+            let sai = Arc::new(MockSai::new());
+            let callbacks = Arc::new(MockBfdCallbacks::new(Arc::clone(&sai)));
+            let mut orch = BfdOrch::new(BfdOrchConfig::default());
+            orch.set_callbacks(callbacks.clone());
+
+            // Create session with custom parameters
+            let peer_ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 10));
+            let key = BfdSessionKey::new("default", None, peer_ip);
+            let config = BfdSessionConfig::new(key)
+                .with_tx_interval(500)
+                .with_rx_interval(600)
+                .with_multiplier(5)
+                .with_tos(128)
+                .with_session_type(BfdSessionType::AsyncActive);
+
+            orch.create_session(config).unwrap();
+
+            // Verify session created with custom parameters
+            assert_eq!(orch.session_count(), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::BfdSession), 1);
+
+            let session = orch.get_session("default::10.0.0.10").unwrap();
+            assert_eq!(session.config.tx_interval, 500);
+            assert_eq!(session.config.rx_interval, 600);
+            assert_eq!(session.config.multiplier, 5);
+            assert_eq!(session.config.tos, 128);
+            assert_eq!(session.config.session_type, BfdSessionType::AsyncActive);
+
+            // Verify SAI session was created
+            let sai_obj = sai.get_object(session.sai_oid).unwrap();
+            assert_eq!(sai_obj.object_type, SaiObjectType::BfdSession);
+
+            // To update parameters, remove and recreate session (typical pattern)
+            let old_oid = session.sai_oid;
+            orch.remove_session("default::10.0.0.10").unwrap();
+
+            assert_eq!(orch.session_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::BfdSession), 0);
+
+            // Recreate with updated parameters
+            let key = BfdSessionKey::new("default", None, peer_ip);
+            let updated_config = BfdSessionConfig::new(key)
+                .with_tx_interval(300)
+                .with_rx_interval(400)
+                .with_multiplier(3)
+                .with_tos(64)
+                .with_session_type(BfdSessionType::AsyncPassive);
+
+            orch.create_session(updated_config).unwrap();
+
+            // Verify updated session
+            let updated_session = orch.get_session("default::10.0.0.10").unwrap();
+            assert_eq!(updated_session.config.tx_interval, 300);
+            assert_eq!(updated_session.config.rx_interval, 400);
+            assert_eq!(updated_session.config.multiplier, 3);
+            assert_eq!(updated_session.config.tos, 64);
+            assert_eq!(updated_session.config.session_type, BfdSessionType::AsyncPassive);
+
+            // Verify new SAI object created
+            assert_ne!(updated_session.sai_oid, old_oid);
+            assert_eq!(sai.count_objects(SaiObjectType::BfdSession), 1);
+
+            // Verify stats
+            assert_eq!(orch.stats().sessions_created, 2);
+            assert_eq!(orch.stats().sessions_removed, 1);
+
+            // Cleanup
+            orch.remove_session("default::10.0.0.10").unwrap();
+            assert_eq!(orch.session_count(), 0);
+            assert_eq!(sai.count_objects(SaiObjectType::BfdSession), 0);
+        }
+    }
+
+    // VrfOrch integration tests
+    mod vrf_orch_tests {
+        use super::*;
+        use sonic_orchagent::vrf::{VrfOrch, VrfOrchConfig, VrfOrchCallbacks, VrfConfig};
+        use std::sync::Arc;
+
+        /// Mock VRF callbacks with EVPN VTEP support for testing
+        struct MockVrfCallbacks {
+            has_vtep: bool,
+            vni_to_vlan_map: std::collections::HashMap<u32, u16>,
+        }
+
+        impl MockVrfCallbacks {
+            fn new() -> Self {
+                Self {
+                    has_vtep: false,
+                    vni_to_vlan_map: std::collections::HashMap::new(),
+                }
+            }
+
+            fn with_vtep(mut self) -> Self {
+                self.has_vtep = true;
+                self
+            }
+
+            fn with_vni_mapping(mut self, vni: u32, vlan_id: u16) -> Self {
+                self.vni_to_vlan_map.insert(vni, vlan_id);
+                self
+            }
+        }
+
+        impl VrfOrchCallbacks for MockVrfCallbacks {
+            fn has_evpn_vtep(&self) -> bool {
+                self.has_vtep
+            }
+
+            fn get_vlan_mapped_to_vni(&self, vni: u32) -> Option<u16> {
+                self.vni_to_vlan_map.get(&vni).copied()
+            }
+        }
+
+        fn create_vrf_entry(name: &str, sai: &MockSai) -> (VrfConfig, u64) {
+            let config = VrfConfig::new(name).with_v4(true).with_v6(true);
+
+            let oid = sai.create_object(
+                SaiObjectType::VirtualRouter,
+                vec![
+                    ("name".to_string(), name.to_string()),
+                    ("v4_enabled".to_string(), "true".to_string()),
+                    ("v6_enabled".to_string(), "true".to_string()),
+                ]
+            ).unwrap();
+
+            (config, oid)
+        }
+
+        fn create_vrf_entry_with_vni(name: &str, vni: u32, sai: &MockSai) -> (VrfConfig, u64) {
+            let config = VrfConfig::new(name)
+                .with_v4(true)
+                .with_v6(true)
+                .with_vni(vni);
+
+            let oid = sai.create_object(
+                SaiObjectType::VirtualRouter,
+                vec![
+                    ("name".to_string(), name.to_string()),
+                    ("v4_enabled".to_string(), "true".to_string()),
+                    ("v6_enabled".to_string(), "true".to_string()),
+                    ("vni".to_string(), vni.to_string()),
+                ]
+            ).unwrap();
+
+            (config, oid)
+        }
+
+        #[test]
+        fn test_vrf_creation_integration() {
+            let sai = MockSai::new();
+            let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+            assert_eq!(sai.count_objects(SaiObjectType::VirtualRouter), 0);
+
+            let (config, _oid) = create_vrf_entry("Vrf1", &sai);
+            let vrf_id = orch.add_vrf(&config).unwrap();
+
+            // Verify orchestration state
+            assert_eq!(orch.vrf_count(), 1);
+            assert!(orch.vrf_exists("Vrf1"));
+            assert_eq!(orch.get_vrf_id("Vrf1"), vrf_id);
+            assert_eq!(orch.stats().vrfs_created, 1);
+
+            // Verify SAI synchronization
+            assert_eq!(sai.count_objects(SaiObjectType::VirtualRouter), 1);
+
+            let sai_obj = sai.get_object(_oid).unwrap();
+            assert_eq!(sai_obj.object_type, SaiObjectType::VirtualRouter);
+            assert_eq!(sai_obj.attributes[0].1, "Vrf1");
+        }
+
+        #[test]
+        fn test_vrf_vni_mapping_configuration() {
+            let sai = MockSai::new();
+            let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+            // Setup callbacks with EVPN VTEP support
+            let callbacks = MockVrfCallbacks::new()
+                .with_vtep()
+                .with_vni_mapping(10000, 100);
+            orch.set_callbacks(Arc::new(callbacks));
+
+            assert_eq!(sai.count_objects(SaiObjectType::VirtualRouter), 0);
+
+            let (config, _oid) = create_vrf_entry_with_vni("Vrf1", 10000, &sai);
+            let vrf_id = orch.add_vrf(&config).unwrap();
+
+            // Verify VRF created
+            assert_eq!(orch.vrf_count(), 1);
+            assert!(orch.vrf_exists("Vrf1"));
+            assert_eq!(orch.get_vrf_id("Vrf1"), vrf_id);
+
+            // Verify VNI mapping
+            assert_eq!(orch.get_vrf_mapped_vni("Vrf1"), 10000);
+            assert!(orch.is_l3_vni(10000));
+            assert_eq!(orch.get_l3_vni_vlan(10000), Some(100));
+
+            // Verify statistics
+            assert_eq!(orch.stats().vrfs_created, 1);
+            assert_eq!(orch.stats().vni_mappings_created, 1);
+
+            // Verify SAI synchronization
+            assert_eq!(sai.count_objects(SaiObjectType::VirtualRouter), 1);
+        }
+
+        #[test]
+        fn test_vrf_removal_and_cleanup() {
+            let sai = MockSai::new();
+            let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+            let (config, oid) = create_vrf_entry("Vrf1", &sai);
+            let vrf_id = orch.add_vrf(&config).unwrap();
+
+            assert_eq!(orch.vrf_count(), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::VirtualRouter), 1);
+
+            // Remove VRF
+            orch.remove_vrf("Vrf1").unwrap();
+
+            // Verify orchestration cleanup
+            assert_eq!(orch.vrf_count(), 0);
+            assert!(!orch.vrf_exists("Vrf1"));
+            assert_eq!(orch.get_vrf_name(vrf_id), "");
+            assert_eq!(orch.stats().vrfs_removed, 1);
+
+            // Verify SAI cleanup
+            sai.remove_object(oid).unwrap();
+            assert_eq!(sai.count_objects(SaiObjectType::VirtualRouter), 0);
+        }
+
+        #[test]
+        fn test_multiple_vrf_instances_with_isolation() {
+            let sai = MockSai::new();
+            let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+            // Setup callbacks for VNI support
+            let callbacks = MockVrfCallbacks::new()
+                .with_vtep()
+                .with_vni_mapping(10000, 100)
+                .with_vni_mapping(20000, 200)
+                .with_vni_mapping(30000, 300);
+            orch.set_callbacks(Arc::new(callbacks));
+
+            assert_eq!(sai.count_objects(SaiObjectType::VirtualRouter), 0);
+
+            // Create three VRFs with different VNIs
+            let (config1, _) = create_vrf_entry_with_vni("Vrf1", 10000, &sai);
+            let (config2, _) = create_vrf_entry_with_vni("Vrf2", 20000, &sai);
+            let (config3, _) = create_vrf_entry_with_vni("Vrf3", 30000, &sai);
+
+            let vrf_id1 = orch.add_vrf(&config1).unwrap();
+            let vrf_id2 = orch.add_vrf(&config2).unwrap();
+            let vrf_id3 = orch.add_vrf(&config3).unwrap();
+
+            // Verify all VRFs created
+            assert_eq!(orch.vrf_count(), 3);
+            assert_eq!(sai.count_objects(SaiObjectType::VirtualRouter), 3);
+
+            // Verify VRF isolation (unique IDs)
+            assert_ne!(vrf_id1, vrf_id2);
+            assert_ne!(vrf_id2, vrf_id3);
+            assert_ne!(vrf_id1, vrf_id3);
+
+            // Verify VNI isolation (unique VNI mappings)
+            assert_eq!(orch.get_vrf_mapped_vni("Vrf1"), 10000);
+            assert_eq!(orch.get_vrf_mapped_vni("Vrf2"), 20000);
+            assert_eq!(orch.get_vrf_mapped_vni("Vrf3"), 30000);
+
+            // Verify L3 VNI VLAN mappings
+            assert_eq!(orch.get_l3_vni_vlan(10000), Some(100));
+            assert_eq!(orch.get_l3_vni_vlan(20000), Some(200));
+            assert_eq!(orch.get_l3_vni_vlan(30000), Some(300));
+
+            // Verify reference count isolation
+            orch.increase_vrf_ref_count("Vrf1").unwrap();
+            orch.increase_vrf_ref_count("Vrf1").unwrap();
+            orch.increase_vrf_ref_count("Vrf2").unwrap();
+
+            assert_eq!(orch.get_vrf_ref_count("Vrf1"), 2);
+            assert_eq!(orch.get_vrf_ref_count("Vrf2"), 1);
+            assert_eq!(orch.get_vrf_ref_count("Vrf3"), 0);
+
+            // Can only remove VRF3 (not in use)
+            assert!(orch.remove_vrf("Vrf1").is_err());
+            assert!(orch.remove_vrf("Vrf2").is_err());
+            assert!(orch.remove_vrf("Vrf3").is_ok());
+
+            assert_eq!(orch.vrf_count(), 2);
+            assert_eq!(orch.stats().vrfs_created, 3);
+            assert_eq!(orch.stats().vrfs_removed, 1);
+        }
+
+        #[test]
+        fn test_vrf_attribute_updates() {
+            let sai = MockSai::new();
+            let mut orch = VrfOrch::new(VrfOrchConfig::default());
+
+            // Create initial VRF
+            let (config1, _oid) = create_vrf_entry("Vrf1", &sai);
+            let vrf_id = orch.add_vrf(&config1).unwrap();
+
+            assert_eq!(orch.vrf_count(), 1);
+            assert_eq!(sai.count_objects(SaiObjectType::VirtualRouter), 1);
+
+            // Verify initial state
+            let vrf = orch.get_vrf("Vrf1").unwrap();
+            assert!(vrf.admin_v4_state);
+            assert!(vrf.admin_v6_state);
+            assert_eq!(vrf.vrf_id, vrf_id);
+
+            // Update VRF attributes
+            let config2 = VrfConfig::new("Vrf1")
+                .with_v4(false)
+                .with_v6(true);
+
+            let updated_vrf_id = orch.add_vrf(&config2).unwrap();
+
+            // Verify VRF ID unchanged (update, not recreate)
+            assert_eq!(updated_vrf_id, vrf_id);
+            assert_eq!(orch.vrf_count(), 1);
+
+            // Verify updated attributes
+            let vrf = orch.get_vrf("Vrf1").unwrap();
+            assert!(!vrf.admin_v4_state);
+            assert!(vrf.admin_v6_state);
+
+            // Verify statistics
+            assert_eq!(orch.stats().vrfs_created, 1);
+            assert_eq!(orch.stats().vrfs_updated, 1);
+
+            // Verify SAI object not duplicated
+            assert_eq!(sai.count_objects(SaiObjectType::VirtualRouter), 1);
+
+            // Cleanup
+            orch.remove_vrf("Vrf1").unwrap();
+            assert_eq!(orch.vrf_count(), 0);
+            assert_eq!(orch.stats().vrfs_removed, 1);
         }
     }
 }
