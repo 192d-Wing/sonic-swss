@@ -1,6 +1,5 @@
 //! FDB (Forwarding Database) types.
 
-use std::collections::HashSet;
 use std::sync::atomic::AtomicU32;
 
 pub type RawSaiObjectId = u64;

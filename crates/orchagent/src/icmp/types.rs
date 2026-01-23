@@ -39,3 +39,54 @@ pub struct IcmpStats {
     pub entries_added: u64,
     pub entries_removed: u64,
 }
+
+/// ICMP redirect configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IcmpRedirectConfig {
+    pub enabled: bool,
+    pub hop_limit: u8,
+}
+
+impl Default for IcmpRedirectConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            hop_limit: 64,
+        }
+    }
+}
+
+/// Neighbor discovery configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NeighborDiscoveryConfig {
+    pub enabled: bool,
+    pub max_solicitation_delay: u32,
+}
+
+impl Default for NeighborDiscoveryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_solicitation_delay: 1000,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_icmp_redirect_config_default() {
+        let config = IcmpRedirectConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.hop_limit, 64);
+    }
+
+    #[test]
+    fn test_neighbor_discovery_config_default() {
+        let config = NeighborDiscoveryConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.max_solicitation_delay, 1000);
+    }
+}

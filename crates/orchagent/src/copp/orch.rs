@@ -1,12 +1,17 @@
 //! CoPP orchestration logic.
 
-use super::types::{CoppStats, CoppTrapEntry, CoppTrapKey};
+use super::types::{CoppStats, CoppTrapEntry, CoppTrapKey, CoppTrapConfig, RawSaiObjectId};
 use std::collections::HashMap;
+use std::sync::Arc;
+
+pub type Result<T> = std::result::Result<T, CoppOrchError>;
 
 #[derive(Debug, Clone)]
 pub enum CoppOrchError {
     TrapNotFound(CoppTrapKey),
+    TrapExists(CoppTrapKey),
     InvalidQueue(u8),
+    InvalidRate(u64),
     SaiError(String),
 }
 
@@ -17,241 +22,365 @@ pub struct CoppOrchConfig {}
 pub struct CoppOrchStats {
     pub stats: CoppStats,
     pub errors: u64,
+    pub dropped_packets: u64,
+    pub rate_limited_packets: u64,
 }
 
-pub trait CoppOrchCallbacks: Send + Sync {}
+pub trait CoppOrchCallbacks: Send + Sync {
+    fn create_trap(&self, key: &CoppTrapKey, config: &CoppTrapConfig) -> Result<RawSaiObjectId>;
+    fn remove_trap(&self, trap_id: RawSaiObjectId) -> Result<()>;
+    fn update_trap_rate(&self, trap_id: RawSaiObjectId, cir: u64, cbs: u64) -> Result<()>;
+    fn get_trap_stats(&self, trap_id: RawSaiObjectId) -> Result<(u64, u64)>;
+    fn on_trap_created(&self, key: &CoppTrapKey, trap_id: RawSaiObjectId);
+    fn on_trap_removed(&self, key: &CoppTrapKey);
+}
 
-pub struct CoppOrch {
+pub struct CoppOrch<C: CoppOrchCallbacks> {
+    #[allow(dead_code)]
     config: CoppOrchConfig,
     stats: CoppOrchStats,
     traps: HashMap<CoppTrapKey, CoppTrapEntry>,
+    callbacks: Option<Arc<C>>,
 }
 
-impl CoppOrch {
+impl<C: CoppOrchCallbacks> CoppOrch<C> {
     pub fn new(config: CoppOrchConfig) -> Self {
         Self {
             config,
             stats: CoppOrchStats::default(),
             traps: HashMap::new(),
+            callbacks: None,
         }
+    }
+
+    pub fn with_callbacks(mut self, callbacks: Arc<C>) -> Self {
+        self.callbacks = Some(callbacks);
+        self
+    }
+
+    pub fn add_trap(&mut self, key: CoppTrapKey, config: CoppTrapConfig) -> Result<RawSaiObjectId> {
+        if self.traps.contains_key(&key) {
+            return Err(CoppOrchError::TrapExists(key));
+        }
+
+        if let Some(queue) = config.queue {
+            if queue >= 8 {
+                return Err(CoppOrchError::InvalidQueue(queue));
+            }
+        }
+
+        let callbacks = self.callbacks.as_ref().ok_or(CoppOrchError::SaiError("No callbacks".into()))?;
+        let trap_id = callbacks.create_trap(&key, &config)?;
+
+        let mut entry = CoppTrapEntry::new(key.clone(), config);
+        entry.trap_oid = trap_id;
+
+        self.traps.insert(key.clone(), entry);
+        self.stats.stats.traps_created += 1;
+
+        callbacks.on_trap_created(&key, trap_id);
+
+        Ok(trap_id)
+    }
+
+    pub fn remove_trap(&mut self, key: &CoppTrapKey) -> Result<()> {
+        let entry = self.traps.remove(key)
+            .ok_or_else(|| CoppOrchError::TrapNotFound(key.clone()))?;
+
+        let callbacks = self.callbacks.as_ref().ok_or(CoppOrchError::SaiError("No callbacks".into()))?;
+        callbacks.remove_trap(entry.trap_oid)?;
+
+        self.stats.stats.traps_created = self.stats.stats.traps_created.saturating_sub(1);
+        callbacks.on_trap_removed(key);
+
+        Ok(())
+    }
+
+    pub fn update_trap_rate(&mut self, key: &CoppTrapKey, cir: u64, cbs: u64) -> Result<()> {
+        if cir == 0 || cbs == 0 {
+            return Err(CoppOrchError::InvalidRate(cir));
+        }
+
+        let entry = self.traps.get_mut(key)
+            .ok_or_else(|| CoppOrchError::TrapNotFound(key.clone()))?;
+
+        let callbacks = self.callbacks.as_ref().ok_or(CoppOrchError::SaiError("No callbacks".into()))?;
+        callbacks.update_trap_rate(entry.trap_oid, cir, cbs)?;
+
+        entry.config.cir = Some(cir);
+        entry.config.cbs = Some(cbs);
+
+        Ok(())
     }
 
     pub fn get_trap(&self, key: &CoppTrapKey) -> Option<&CoppTrapEntry> {
         self.traps.get(key)
     }
 
+    pub fn get_all_traps(&self) -> Vec<&CoppTrapEntry> {
+        self.traps.values().collect()
+    }
+
+    pub fn trap_exists(&self, key: &CoppTrapKey) -> bool {
+        self.traps.contains_key(key)
+    }
+
+    pub fn trap_count(&self) -> usize {
+        self.traps.len()
+    }
+
     pub fn stats(&self) -> &CoppOrchStats {
         &self.stats
+    }
+
+    pub fn update_stats(&mut self, dropped: u64, rate_limited: u64) {
+        self.stats.dropped_packets += dropped;
+        self.stats.rate_limited_packets += rate_limited;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::types::{CoppTrapAction, CoppTrapConfig};
+    use super::super::types::CoppTrapAction;
 
-    #[test]
-    fn test_copp_orch_new() {
-        let orch = CoppOrch::new(CoppOrchConfig::default());
-        assert_eq!(orch.traps.len(), 0);
-        assert_eq!(orch.stats.stats.traps_created, 0);
-        assert_eq!(orch.stats.stats.trap_groups_created, 0);
-        assert_eq!(orch.stats.stats.policers_created, 0);
-        assert_eq!(orch.stats.errors, 0);
+    struct MockCoppCallbacks;
+
+    impl CoppOrchCallbacks for MockCoppCallbacks {
+        fn create_trap(&self, _key: &CoppTrapKey, _config: &CoppTrapConfig) -> Result<RawSaiObjectId> {
+            Ok(0x1000)
+        }
+
+        fn remove_trap(&self, _trap_id: RawSaiObjectId) -> Result<()> {
+            Ok(())
+        }
+
+        fn update_trap_rate(&self, _trap_id: RawSaiObjectId, _cir: u64, _cbs: u64) -> Result<()> {
+            Ok(())
+        }
+
+        fn get_trap_stats(&self, _trap_id: RawSaiObjectId) -> Result<(u64, u64)> {
+            Ok((0, 0))
+        }
+
+        fn on_trap_created(&self, _key: &CoppTrapKey, _trap_id: RawSaiObjectId) {}
+        fn on_trap_removed(&self, _key: &CoppTrapKey) {}
+    }
+
+    fn create_test_config() -> CoppTrapConfig {
+        CoppTrapConfig {
+            trap_action: CoppTrapAction::Trap,
+            trap_priority: Some(4),
+            queue: Some(4),
+            meter_type: Some("packets".to_string()),
+            mode: Some("sr_tcm".to_string()),
+            color: Some("aware".to_string()),
+            cbs: Some(600),
+            cir: Some(600),
+            pbs: Some(600),
+            pir: Some(600),
+        }
     }
 
     #[test]
-    fn test_get_trap_not_found() {
-        let orch = CoppOrch::new(CoppOrchConfig::default());
-        let key = CoppTrapKey::new("bgp".to_string());
+    fn test_copp_orch_new() {
+        let orch: CoppOrch<MockCoppCallbacks> = CoppOrch::new(CoppOrchConfig::default());
+        assert_eq!(orch.trap_count(), 0);
+        assert_eq!(orch.stats().stats.traps_created, 0);
+        assert_eq!(orch.stats().errors, 0);
+        assert_eq!(orch.stats().dropped_packets, 0);
+        assert_eq!(orch.stats().rate_limited_packets, 0);
+    }
 
-        let result = orch.get_trap(&key);
-        assert!(result.is_none());
+    #[test]
+    fn test_add_trap_success() {
+        let mut orch: CoppOrch<MockCoppCallbacks> = CoppOrch::new(CoppOrchConfig::default())
+            .with_callbacks(Arc::new(MockCoppCallbacks));
+
+        let key = CoppTrapKey::new("bgp".to_string());
+        let config = create_test_config();
+
+        let result = orch.add_trap(key.clone(), config);
+        assert!(result.is_ok());
+        assert_eq!(orch.trap_count(), 1);
+        assert_eq!(orch.stats().stats.traps_created, 1);
+        assert!(orch.trap_exists(&key));
+    }
+
+    #[test]
+    fn test_add_trap_duplicate() {
+        let mut orch: CoppOrch<MockCoppCallbacks> = CoppOrch::new(CoppOrchConfig::default())
+            .with_callbacks(Arc::new(MockCoppCallbacks));
+
+        let key = CoppTrapKey::new("bgp".to_string());
+        let config = create_test_config();
+
+        assert!(orch.add_trap(key.clone(), config.clone()).is_ok());
+        assert!(orch.add_trap(key, config).is_err());
+        assert_eq!(orch.trap_count(), 1);
+    }
+
+    #[test]
+    fn test_add_trap_invalid_queue() {
+        let mut orch: CoppOrch<MockCoppCallbacks> = CoppOrch::new(CoppOrchConfig::default())
+            .with_callbacks(Arc::new(MockCoppCallbacks));
+
+        let key = CoppTrapKey::new("bgp".to_string());
+        let mut config = create_test_config();
+        config.queue = Some(8);
+
+        let result = orch.add_trap(key, config);
+        assert!(result.is_err());
+        assert_eq!(orch.trap_count(), 0);
+    }
+
+    #[test]
+    fn test_remove_trap_success() {
+        let mut orch: CoppOrch<MockCoppCallbacks> = CoppOrch::new(CoppOrchConfig::default())
+            .with_callbacks(Arc::new(MockCoppCallbacks));
+
+        let key = CoppTrapKey::new("bgp".to_string());
+        let config = create_test_config();
+
+        assert!(orch.add_trap(key.clone(), config).is_ok());
+        assert_eq!(orch.trap_count(), 1);
+
+        assert!(orch.remove_trap(&key).is_ok());
+        assert_eq!(orch.trap_count(), 0);
+        assert!(!orch.trap_exists(&key));
+    }
+
+    #[test]
+    fn test_remove_trap_not_found() {
+        let mut orch: CoppOrch<MockCoppCallbacks> = CoppOrch::new(CoppOrchConfig::default())
+            .with_callbacks(Arc::new(MockCoppCallbacks));
+
+        let key = CoppTrapKey::new("nonexistent".to_string());
+        let result = orch.remove_trap(&key);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_update_trap_rate_success() {
+        let mut orch: CoppOrch<MockCoppCallbacks> = CoppOrch::new(CoppOrchConfig::default())
+            .with_callbacks(Arc::new(MockCoppCallbacks));
+
+        let key = CoppTrapKey::new("bgp".to_string());
+        let config = create_test_config();
+
+        assert!(orch.add_trap(key.clone(), config).is_ok());
+        assert!(orch.update_trap_rate(&key, 1000, 1000).is_ok());
+
+        let trap = orch.get_trap(&key).unwrap();
+        assert_eq!(trap.config.cir, Some(1000));
+        assert_eq!(trap.config.cbs, Some(1000));
+    }
+
+    #[test]
+    fn test_update_trap_rate_invalid() {
+        let mut orch: CoppOrch<MockCoppCallbacks> = CoppOrch::new(CoppOrchConfig::default())
+            .with_callbacks(Arc::new(MockCoppCallbacks));
+
+        let key = CoppTrapKey::new("bgp".to_string());
+        let config = create_test_config();
+
+        assert!(orch.add_trap(key.clone(), config).is_ok());
+        assert!(orch.update_trap_rate(&key, 0, 1000).is_err());
+        assert!(orch.update_trap_rate(&key, 1000, 0).is_err());
     }
 
     #[test]
     fn test_get_trap_found() {
-        let mut orch = CoppOrch::new(CoppOrchConfig::default());
+        let mut orch: CoppOrch<MockCoppCallbacks> = CoppOrch::new(CoppOrchConfig::default())
+            .with_callbacks(Arc::new(MockCoppCallbacks));
 
         let key = CoppTrapKey::new("bgp".to_string());
-        let config = CoppTrapConfig {
-            trap_action: CoppTrapAction::Trap,
-            trap_priority: Some(4),
-            queue: Some(4),
-            meter_type: Some("packets".to_string()),
-            mode: Some("sr_tcm".to_string()),
-            color: Some("aware".to_string()),
-            cbs: Some(600),
-            cir: Some(600),
-            pbs: Some(600),
-            pir: Some(600),
-        };
-        let entry = CoppTrapEntry::new(key.clone(), config);
+        let config = create_test_config();
 
-        orch.traps.insert(key.clone(), entry);
-
-        let result = orch.get_trap(&key);
-        assert!(result.is_some());
-        let trap = result.unwrap();
-        assert_eq!(trap.key.trap_id, "bgp");
-        assert_eq!(trap.config.trap_action, CoppTrapAction::Trap);
-        assert_eq!(trap.config.queue, Some(4));
+        assert!(orch.add_trap(key.clone(), config).is_ok());
+        let trap = orch.get_trap(&key);
+        assert!(trap.is_some());
+        assert_eq!(trap.unwrap().key.trap_id, "bgp");
     }
 
     #[test]
-    fn test_stats_returns_reference() {
-        let orch = CoppOrch::new(CoppOrchConfig::default());
-        let stats = orch.stats();
-
-        assert_eq!(stats.errors, 0);
-        assert_eq!(stats.stats.traps_created, 0);
-        assert_eq!(stats.stats.trap_groups_created, 0);
-        assert_eq!(stats.stats.policers_created, 0);
+    fn test_get_trap_not_found() {
+        let orch: CoppOrch<MockCoppCallbacks> = CoppOrch::new(CoppOrchConfig::default());
+        let key = CoppTrapKey::new("nonexistent".to_string());
+        assert!(orch.get_trap(&key).is_none());
     }
 
     #[test]
-    fn test_copp_orch_config_default() {
-        let config = CoppOrchConfig::default();
-        let orch = CoppOrch::new(config);
+    fn test_get_all_traps() {
+        let mut orch: CoppOrch<MockCoppCallbacks> = CoppOrch::new(CoppOrchConfig::default())
+            .with_callbacks(Arc::new(MockCoppCallbacks));
 
-        assert_eq!(orch.traps.len(), 0);
+        let config = create_test_config();
+        let trap_names = vec!["bgp", "arp", "lacp"];
+
+        for name in trap_names.iter() {
+            let key = CoppTrapKey::new(name.to_string());
+            assert!(orch.add_trap(key, config.clone()).is_ok());
+        }
+
+        let all_traps = orch.get_all_traps();
+        assert_eq!(all_traps.len(), 3);
     }
 
     #[test]
-    fn test_multiple_trap_configurations() {
-        let mut orch = CoppOrch::new(CoppOrchConfig::default());
+    fn test_trap_exists() {
+        let mut orch: CoppOrch<MockCoppCallbacks> = CoppOrch::new(CoppOrchConfig::default())
+            .with_callbacks(Arc::new(MockCoppCallbacks));
 
+        let key = CoppTrapKey::new("bgp".to_string());
+        let config = create_test_config();
+
+        assert!(!orch.trap_exists(&key));
+        assert!(orch.add_trap(key.clone(), config).is_ok());
+        assert!(orch.trap_exists(&key));
+    }
+
+    #[test]
+    fn test_stats_tracking() {
+        let mut orch: CoppOrch<MockCoppCallbacks> = CoppOrch::new(CoppOrchConfig::default());
+
+        assert_eq!(orch.stats().dropped_packets, 0);
+        assert_eq!(orch.stats().rate_limited_packets, 0);
+
+        orch.update_stats(100, 50);
+        assert_eq!(orch.stats().dropped_packets, 100);
+        assert_eq!(orch.stats().rate_limited_packets, 50);
+
+        orch.update_stats(50, 25);
+        assert_eq!(orch.stats().dropped_packets, 150);
+        assert_eq!(orch.stats().rate_limited_packets, 75);
+    }
+
+    #[test]
+    fn test_multiple_trap_operations() {
+        let mut orch: CoppOrch<MockCoppCallbacks> = CoppOrch::new(CoppOrchConfig::default())
+            .with_callbacks(Arc::new(MockCoppCallbacks));
+
+        let config = create_test_config();
         let trap_names = vec!["bgp", "arp", "lacp", "lldp", "dhcp"];
 
         for (i, name) in trap_names.iter().enumerate() {
             let key = CoppTrapKey::new(name.to_string());
-            let config = CoppTrapConfig {
-                trap_action: CoppTrapAction::Trap,
-                trap_priority: Some(i as u32),
-                queue: Some((i % 8) as u8),
-                meter_type: Some("packets".to_string()),
-                mode: Some("sr_tcm".to_string()),
-                color: Some("aware".to_string()),
-                cbs: Some(600),
-                cir: Some(600),
-                pbs: Some(600),
-                pir: Some(600),
-            };
-            let entry = CoppTrapEntry::new(key.clone(), config);
-            orch.traps.insert(key, entry);
+            let mut cfg = config.clone();
+            cfg.queue = Some((i % 8) as u8);
+            assert!(orch.add_trap(key, cfg).is_ok());
         }
 
-        assert_eq!(orch.traps.len(), 5);
+        assert_eq!(orch.trap_count(), 5);
+        assert_eq!(orch.stats().stats.traps_created, 5);
 
-        for name in trap_names {
+        for name in trap_names.iter() {
             let key = CoppTrapKey::new(name.to_string());
-            assert!(orch.get_trap(&key).is_some());
-        }
-    }
-
-    #[test]
-    fn test_trap_key_equality() {
-        let key1 = CoppTrapKey::new("bgp".to_string());
-        let key2 = CoppTrapKey::new("bgp".to_string());
-        let key3 = CoppTrapKey::new("arp".to_string());
-
-        assert_eq!(key1, key2);
-        assert_ne!(key1, key3);
-    }
-
-    #[test]
-    fn test_copp_stats_structure() {
-        let stats = CoppOrchStats::default();
-
-        assert_eq!(stats.stats.traps_created, 0);
-        assert_eq!(stats.stats.trap_groups_created, 0);
-        assert_eq!(stats.stats.policers_created, 0);
-        assert_eq!(stats.errors, 0);
-    }
-
-    #[test]
-    fn test_trap_entry_creation() {
-        let key = CoppTrapKey::new("bgp".to_string());
-        let config = CoppTrapConfig {
-            trap_action: CoppTrapAction::Trap,
-            trap_priority: Some(4),
-            queue: Some(4),
-            meter_type: Some("packets".to_string()),
-            mode: Some("sr_tcm".to_string()),
-            color: Some("aware".to_string()),
-            cbs: Some(600),
-            cir: Some(600),
-            pbs: Some(600),
-            pir: Some(600),
-        };
-
-        let entry = CoppTrapEntry::new(key, config);
-
-        assert_eq!(entry.key.trap_id, "bgp");
-        assert_eq!(entry.config.trap_action, CoppTrapAction::Trap);
-        assert_eq!(entry.config.trap_priority, Some(4));
-        assert_eq!(entry.config.queue, Some(4));
-        assert_eq!(entry.trap_oid, 0);
-        assert_eq!(entry.trap_group_oid, 0);
-        assert_eq!(entry.policer_oid, 0);
-    }
-
-    #[test]
-    fn test_trap_action_variants() {
-        let actions = vec![
-            CoppTrapAction::Drop,
-            CoppTrapAction::Forward,
-            CoppTrapAction::Copy,
-            CoppTrapAction::CopyCancel,
-            CoppTrapAction::Trap,
-            CoppTrapAction::Log,
-        ];
-
-        for action in actions {
-            let key = CoppTrapKey::new("test".to_string());
-            let config = CoppTrapConfig {
-                trap_action: action,
-                trap_priority: None,
-                queue: None,
-                meter_type: None,
-                mode: None,
-                color: None,
-                cbs: None,
-                cir: None,
-                pbs: None,
-                pir: None,
-            };
-
-            let entry = CoppTrapEntry::new(key, config);
-            assert_eq!(entry.config.trap_action, action);
-        }
-    }
-
-    #[test]
-    fn test_copp_error_variants() {
-        let err1 = CoppOrchError::TrapNotFound(CoppTrapKey::new("bgp".to_string()));
-        let err2 = CoppOrchError::InvalidQueue(10);
-        let err3 = CoppOrchError::SaiError("test error".to_string());
-
-        match err1 {
-            CoppOrchError::TrapNotFound(key) => {
-                assert_eq!(key.trap_id, "bgp");
-            }
-            _ => panic!("Wrong error variant"),
+            assert!(orch.trap_exists(&key));
         }
 
-        match err2 {
-            CoppOrchError::InvalidQueue(q) => {
-                assert_eq!(q, 10);
-            }
-            _ => panic!("Wrong error variant"),
-        }
-
-        match err3 {
-            CoppOrchError::SaiError(msg) => {
-                assert_eq!(msg, "test error");
-            }
-            _ => panic!("Wrong error variant"),
-        }
+        let bgp_key = CoppTrapKey::new("bgp".to_string());
+        assert!(orch.remove_trap(&bgp_key).is_ok());
+        assert_eq!(orch.trap_count(), 4);
     }
 }

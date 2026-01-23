@@ -1,7 +1,5 @@
 //! MPLS route types.
 
-use std::collections::HashMap;
-
 pub type RawSaiObjectId = u64;
 pub type MplsLabel = u32;
 

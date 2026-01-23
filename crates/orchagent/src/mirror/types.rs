@@ -1,6 +1,6 @@
 //! Mirror session types and structures.
 
-use sonic_sai::types::RawSaiObjectId;
+pub use sonic_sai::types::RawSaiObjectId;
 use sonic_types::IpAddress;
 
 /// Mirror session type.

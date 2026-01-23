@@ -1,7 +1,5 @@
 //! CoPP (Control Plane Policing) types.
 
-use std::collections::HashMap;
-
 pub type RawSaiObjectId = u64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
