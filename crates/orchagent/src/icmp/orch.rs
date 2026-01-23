@@ -1,17 +1,32 @@
 //! ICMP echo orchestration logic.
 
 use super::types::{IcmpEchoEntry, IcmpEchoKey, IcmpStats, IcmpRedirectConfig, NeighborDiscoveryConfig};
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::{audit_log, debug_log, info_log, warn_log, error_log};
 use std::collections::HashMap;
 use std::sync::Arc;
+use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, IcmpOrchError>;
 
-#[derive(Debug, Clone)]
+/// ICMP orchestration errors with NIST-compliant error messages.
+#[derive(Debug, Clone, Error)]
 pub enum IcmpOrchError {
+    /// ICMP echo entry not found
+    #[error("ICMP echo entry not found: {0:?}")]
     EntryNotFound(IcmpEchoKey),
+    /// Invalid ICMP configuration
+    #[error("Invalid ICMP configuration: {0}")]
     InvalidConfig(String),
+    /// SAI operation failed
+    #[error("SAI operation failed: {0}")]
     SaiError(String),
+    /// ICMP operation failed
+    #[error("ICMP operation failed: {0}")]
     OperationFailed(String),
+    /// Callbacks not configured
+    #[error("ICMP orchestrator not initialized: callbacks not configured")]
+    NotInitialized,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -67,53 +82,171 @@ impl<C: IcmpOrchCallbacks> IcmpOrch<C> {
     }
 
     pub fn add_entry(&mut self, key: IcmpEchoKey, entry: IcmpEchoEntry) -> Result<()> {
+        debug_log!("IcmpOrch", vrf = %key.vrf_name, ip = %key.ip, "Adding ICMP echo entry");
+
         if self.entries.contains_key(&key) {
+            warn_log!("IcmpOrch", vrf = %key.vrf_name, ip = %key.ip, "Entry already exists");
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "IcmpOrch",
+                "add_entry"
+            )
+            .with_object_id(format!("{}", key.ip))
+            .with_object_type("icmp_entry")
+            .with_error(format!("Entry already exists: {:?}", key)));
             return Err(IcmpOrchError::OperationFailed(
                 format!("Entry already exists for key: {:?}", key),
             ));
         }
-        self.entries.insert(key, entry);
+        self.entries.insert(key.clone(), entry);
         self.stats.stats.entries_added += 1;
+
+        info_log!("IcmpOrch", vrf = %key.vrf_name, ip = %key.ip, "ICMP echo entry created successfully");
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "IcmpOrch",
+            "add_entry"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("{}", key.ip))
+        .with_object_type("icmp_entry")
+        .with_details(serde_json::json!({
+            "vrf_name": key.vrf_name,
+            "ip_address": format!("{}", key.ip)
+        })));
         Ok(())
     }
 
     pub fn remove_entry(&mut self, key: &IcmpEchoKey) -> Result<()> {
+        debug_log!("IcmpOrch", vrf = %key.vrf_name, ip = %key.ip, "Removing ICMP echo entry");
+
         if self.entries.remove(key).is_none() {
+            warn_log!("IcmpOrch", vrf = %key.vrf_name, ip = %key.ip, "Entry not found for removal");
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "IcmpOrch",
+                "remove_entry"
+            )
+            .with_object_id(format!("{}", key.ip))
+            .with_object_type("icmp_entry")
+            .with_error("Entry not found"));
             return Err(IcmpOrchError::EntryNotFound(key.clone()));
         }
         self.stats.stats.entries_removed += 1;
+
+        info_log!("IcmpOrch", vrf = %key.vrf_name, ip = %key.ip, "ICMP echo entry removed successfully");
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "IcmpOrch",
+            "remove_entry"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("{}", key.ip))
+        .with_object_type("icmp_entry")
+        .with_details(serde_json::json!({
+            "vrf_name": key.vrf_name,
+            "ip_address": format!("{}", key.ip)
+        })));
         Ok(())
     }
 
     pub fn configure_redirect(&mut self, config: IcmpRedirectConfig) -> Result<()> {
+        debug_log!("IcmpOrch", enabled = config.enabled, hop_limit = config.hop_limit, "Configuring ICMP redirect");
+
         if !self.config.enable_redirects {
+            error_log!("IcmpOrch", "ICMP redirects not enabled in configuration");
+            audit_log!(AuditRecord::new(
+                AuditCategory::ConfigurationChange,
+                "IcmpOrch",
+                "configure_redirect"
+            )
+            .with_object_type("icmp_redirect")
+            .with_error("ICMP redirects not enabled"));
             return Err(IcmpOrchError::InvalidConfig(
                 "ICMP redirects not enabled".to_string(),
             ));
         }
 
-        let callbacks = self.callbacks.as_ref().ok_or(IcmpOrchError::SaiError(
-            "No callbacks available".to_string(),
-        ))?;
-        callbacks.configure_icmp_redirect(&config)?;
+        let callbacks = self.callbacks.as_ref().ok_or_else(|| {
+            error_log!("IcmpOrch", "Callbacks not configured");
+            IcmpOrchError::NotInitialized
+        })?;
+        callbacks.configure_icmp_redirect(&config).map_err(|e| {
+            error_log!("IcmpOrch", error = %e, "Failed to configure ICMP redirect");
+            audit_log!(AuditRecord::new(
+                AuditCategory::SaiOperation,
+                "IcmpOrch",
+                "configure_icmp_redirect"
+            )
+            .with_object_type("icmp_redirect")
+            .with_error(e.to_string()));
+            e
+        })?;
 
-        self.redirect_config = Some(config);
+        self.redirect_config = Some(config.clone());
+
+        info_log!("IcmpOrch", enabled = config.enabled, hop_limit = config.hop_limit, "ICMP redirect configured successfully");
+        audit_log!(AuditRecord::new(
+            AuditCategory::ConfigurationChange,
+            "IcmpOrch",
+            "configure_redirect"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_type("icmp_redirect")
+        .with_details(serde_json::json!({
+            "enabled": config.enabled,
+            "hop_limit": config.hop_limit
+        })));
         Ok(())
     }
 
     pub fn configure_neighbor_discovery(&mut self, config: NeighborDiscoveryConfig) -> Result<()> {
+        debug_log!("IcmpOrch", enabled = config.enabled, delay = config.max_solicitation_delay, "Configuring neighbor discovery");
+
         if !self.config.enable_neighbor_discovery {
+            error_log!("IcmpOrch", "Neighbor discovery not enabled in configuration");
+            audit_log!(AuditRecord::new(
+                AuditCategory::ConfigurationChange,
+                "IcmpOrch",
+                "configure_neighbor_discovery"
+            )
+            .with_object_type("neighbor_discovery")
+            .with_error("Neighbor discovery not enabled"));
             return Err(IcmpOrchError::InvalidConfig(
                 "Neighbor discovery not enabled".to_string(),
             ));
         }
 
-        let callbacks = self.callbacks.as_ref().ok_or(IcmpOrchError::SaiError(
-            "No callbacks available".to_string(),
-        ))?;
-        callbacks.configure_neighbor_discovery(&config)?;
+        let callbacks = self.callbacks.as_ref().ok_or_else(|| {
+            error_log!("IcmpOrch", "Callbacks not configured");
+            IcmpOrchError::NotInitialized
+        })?;
+        callbacks.configure_neighbor_discovery(&config).map_err(|e| {
+            error_log!("IcmpOrch", error = %e, "Failed to configure neighbor discovery");
+            audit_log!(AuditRecord::new(
+                AuditCategory::SaiOperation,
+                "IcmpOrch",
+                "configure_neighbor_discovery"
+            )
+            .with_object_type("neighbor_discovery")
+            .with_error(e.to_string()));
+            e
+        })?;
 
-        self.nd_config = Some(config);
+        self.nd_config = Some(config.clone());
+
+        info_log!("IcmpOrch", enabled = config.enabled, delay = config.max_solicitation_delay, "Neighbor discovery configured successfully");
+        audit_log!(AuditRecord::new(
+            AuditCategory::ConfigurationChange,
+            "IcmpOrch",
+            "configure_neighbor_discovery"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_type("neighbor_discovery")
+        .with_details(serde_json::json!({
+            "enabled": config.enabled,
+            "max_solicitation_delay": config.max_solicitation_delay
+        })));
         Ok(())
     }
 
@@ -123,36 +256,99 @@ impl<C: IcmpOrchCallbacks> IcmpOrch<C> {
         dst_ip: &str,
         gateway_ip: &str,
     ) -> Result<()> {
+        debug_log!("IcmpOrch", src = %src_ip, dst = %dst_ip, gateway = %gateway_ip, "Processing ICMP redirect");
+
         if self.redirect_config.is_none() {
+            error_log!("IcmpOrch", "Redirect not configured");
+            audit_log!(AuditRecord::new(
+                AuditCategory::NetworkConfig,
+                "IcmpOrch",
+                "process_redirect"
+            )
+            .with_object_id(src_ip)
+            .with_object_type("icmp_redirect")
+            .with_error("Redirect not configured"));
             return Err(IcmpOrchError::InvalidConfig(
                 "Redirect not configured".to_string(),
             ));
         }
 
-        let callbacks = self.callbacks.as_ref().ok_or(IcmpOrchError::SaiError(
-            "No callbacks available".to_string(),
-        ))?;
-        callbacks.process_redirect(src_ip, dst_ip, gateway_ip)?;
+        let callbacks = self.callbacks.as_ref().ok_or_else(|| {
+            error_log!("IcmpOrch", "Callbacks not configured");
+            IcmpOrchError::NotInitialized
+        })?;
+        callbacks.process_redirect(src_ip, dst_ip, gateway_ip).map_err(|e| {
+            error_log!("IcmpOrch", src = %src_ip, dst = %dst_ip, error = %e, "Failed to process redirect");
+            audit_log!(AuditRecord::new(
+                AuditCategory::NetworkConfig,
+                "IcmpOrch",
+                "process_redirect"
+            )
+            .with_object_id(src_ip)
+            .with_object_type("icmp_redirect")
+            .with_error(e.to_string()));
+            e
+        })?;
 
         self.stats.redirects_processed += 1;
         callbacks.on_redirect_processed(src_ip);
+
+        info_log!("IcmpOrch", src = %src_ip, dst = %dst_ip, gateway = %gateway_ip, "ICMP redirect processed successfully");
+        audit_log!(AuditRecord::new(
+            AuditCategory::NetworkConfig,
+            "IcmpOrch",
+            "process_redirect"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(src_ip)
+        .with_object_type("icmp_redirect")
+        .with_details(serde_json::json!({
+            "source_ip": src_ip,
+            "destination_ip": dst_ip,
+            "gateway_ip": gateway_ip
+        })));
 
         Ok(())
     }
 
     pub fn process_neighbor_discovery(&mut self, neighbor_ip: &str) -> Result<()> {
+        debug_log!("IcmpOrch", neighbor = %neighbor_ip, "Processing neighbor discovery");
+
         if self.nd_config.is_none() {
+            error_log!("IcmpOrch", "Neighbor discovery not configured");
+            audit_log!(AuditRecord::new(
+                AuditCategory::NetworkConfig,
+                "IcmpOrch",
+                "process_neighbor_discovery"
+            )
+            .with_object_id(neighbor_ip)
+            .with_object_type("neighbor_discovery")
+            .with_error("Neighbor discovery not configured"));
             return Err(IcmpOrchError::InvalidConfig(
                 "Neighbor discovery not configured".to_string(),
             ));
         }
 
-        let callbacks = self.callbacks.as_ref().ok_or(IcmpOrchError::SaiError(
-            "No callbacks available".to_string(),
-        ))?;
+        let callbacks = self.callbacks.as_ref().ok_or_else(|| {
+            error_log!("IcmpOrch", "Callbacks not configured");
+            IcmpOrchError::NotInitialized
+        })?;
 
         self.stats.nd_solicitations_processed += 1;
         callbacks.on_neighbor_discovery_complete(neighbor_ip);
+
+        info_log!("IcmpOrch", neighbor = %neighbor_ip, "Neighbor discovery completed successfully");
+        audit_log!(AuditRecord::new(
+            AuditCategory::NetworkConfig,
+            "IcmpOrch",
+            "process_neighbor_discovery"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(neighbor_ip)
+        .with_object_type("neighbor_discovery")
+        .with_details(serde_json::json!({
+            "neighbor_ip": neighbor_ip
+        })));
 
         Ok(())
     }
