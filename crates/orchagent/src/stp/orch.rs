@@ -5,6 +5,7 @@ use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
+use crate::audit_log;
 
 /// STP orchestrator error types.
 #[derive(Debug, Clone, thiserror::Error)]

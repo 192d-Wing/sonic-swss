@@ -9,7 +9,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome, audit_log};
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
+use crate::audit_log;
 
 use super::group::{FlexCounterGroup, FlexCounterGroupMap};
 use super::state::{

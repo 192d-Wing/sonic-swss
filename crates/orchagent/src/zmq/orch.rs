@@ -3,6 +3,7 @@
 use super::types::{ZmqEndpoint, ZmqStats};
 use std::collections::HashMap;
 use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
+use crate::audit_log;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ZmqOrchError {

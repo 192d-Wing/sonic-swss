@@ -2,7 +2,8 @@
 
 use super::types::{FgNhgEntry, FgNhgPrefix, FgNhgStats};
 use std::collections::HashMap;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome, audit_log};
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
+use crate::audit_log;
 
 #[derive(Debug, Clone)]
 pub enum FgNhgOrchError {
@@ -79,8 +80,8 @@ impl FgNhgOrch {
             return Err(FgNhgOrchError::NhgNotFound(prefix));
         }
 
-        let member_count = entry.members.len();
-        let total_weight: u32 = entry.members.iter().map(|m| m.weight).sum();
+        let member_count = entry.next_hops.len();
+        let total_weight: u32 = entry.next_hops.iter().map(|nh| nh.weight).sum();
 
         self.nhgs.insert(prefix.clone(), entry);
         self.stats.stats.nhgs_created += 1;
@@ -108,8 +109,8 @@ impl FgNhgOrch {
         let old_entry = self.nhgs.get(&prefix)
             .ok_or_else(|| FgNhgOrchError::NhgNotFound(prefix.clone()))?;
 
-        let old_member_count = old_entry.members.len();
-        let new_member_count = entry.members.len();
+        let old_member_count = old_entry.next_hops.len();
+        let new_member_count = entry.next_hops.len();
 
         self.nhgs.insert(prefix.clone(), entry);
         self.stats.stats.members_added += (new_member_count - old_member_count.min(new_member_count)) as u64;
@@ -150,7 +151,7 @@ impl FgNhgOrch {
             })?;
 
         self.stats.stats.nhgs_created -= 1;
-        self.stats.stats.members_added -= entry.members.len() as u64;
+        self.stats.stats.members_added -= entry.next_hops.len() as u64;
 
         let record = AuditRecord::new(
             AuditCategory::ResourceDelete,
@@ -161,7 +162,7 @@ impl FgNhgOrch {
         .with_object_id(&prefix.ip_prefix)
         .with_object_type("fg_nhg")
         .with_details(serde_json::json!({
-            "member_count": entry.members.len(),
+            "member_count": entry.next_hops.len(),
         }));
         audit_log!(record);
 

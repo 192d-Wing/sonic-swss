@@ -3,6 +3,7 @@
 use super::types::{BufferPoolEntry, BufferProfileEntry, BufferStats};
 use std::collections::HashMap;
 use thiserror::Error;
+use crate::audit_log;
 
 #[derive(Debug, Clone, Error)]
 pub enum BufferOrchError {
@@ -66,35 +67,38 @@ impl BufferOrch {
         let name = entry.name.clone();
 
         if self.pools.contains_key(&name) {
-            audit_log!(
-                resource_id: &name,
-                action: "create_buffer_pool",
-                category: "ResourceCreate",
-                outcome: "FAIL",
-                details: serde_json::json!({
-                    "error": "Pool already exists",
-                    "pool_name": name,
-                })
-            );
+            let record = crate::audit::AuditRecord::new(
+                crate::audit::AuditCategory::ErrorCondition,
+                "BufferOrch",
+                format!("create_buffer_pool_failed: {}", name),
+            )
+            .with_outcome(crate::audit::AuditOutcome::Failure)
+            .with_object_id(&name)
+            .with_object_type("buffer_pool")
+            .with_error("Pool already exists");
+            audit_log!(record);
             return Err(BufferOrchError::SaiError("Pool already exists".to_string()));
         }
 
         self.stats.stats.pools_created = self.stats.stats.pools_created.saturating_add(1);
         self.pools.insert(name.clone(), entry.clone());
 
-        audit_log!(
-            resource_id: &name,
-            action: "create_buffer_pool",
-            category: "ResourceCreate",
-            outcome: "SUCCESS",
-            details: serde_json::json!({
-                "pool_name": name,
-                "size": entry.config.size,
-                "pool_type": format!("{:?}", entry.config.pool_type),
-                "mode": format!("{:?}", entry.config.mode),
-                "sai_oid": entry.sai_oid,
-            })
-        );
+        let record = crate::audit::AuditRecord::new(
+            crate::audit::AuditCategory::ResourceCreate,
+            "BufferOrch",
+            format!("create_buffer_pool: {}", name),
+        )
+        .with_outcome(crate::audit::AuditOutcome::Success)
+        .with_object_id(&name)
+        .with_object_type("buffer_pool")
+        .with_details(serde_json::json!({
+            "pool_name": name,
+            "size": entry.config.size,
+            "pool_type": format!("{:?}", entry.config.pool_type),
+            "mode": format!("{:?}", entry.config.mode),
+            "sai_oid": entry.sai_oid,
+        }));
+        audit_log!(record);
 
         Ok(())
     }

@@ -13,7 +13,8 @@ use super::types::{FabricPortState, IsolationState, LinkStatus, PortHealthState}
 use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome, audit_log};
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
+use crate::audit_log;
 
 /// Result type for FabricPortsOrch operations.
 pub type Result<T> = std::result::Result<T, FabricPortsOrchError>;

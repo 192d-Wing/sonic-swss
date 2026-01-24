@@ -10,7 +10,8 @@ use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome, audit_log};
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
+use crate::audit_log;
 
 /// Result type for DtelOrch operations.
 pub type Result<T> = std::result::Result<T, DtelOrchError>;

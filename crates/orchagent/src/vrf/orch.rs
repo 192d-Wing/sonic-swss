@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use super::types::{L3VniEntry, Vni, VrfConfig, VrfEntry, VrfId, VrfName, VrfVlanId};
 use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
+use crate::audit_log;
 
 /// Error type for VRF operations.
 #[derive(Debug, Clone, thiserror::Error)]

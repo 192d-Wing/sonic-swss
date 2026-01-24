@@ -12,7 +12,8 @@ use sonic_orch_common::{Orch, OrchContext};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome, audit_log};
+use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
+use crate::audit_log;
 
 /// Configuration for the OrchDaemon.
 #[derive(Debug, Clone)]

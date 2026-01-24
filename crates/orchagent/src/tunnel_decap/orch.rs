@@ -6,6 +6,7 @@ use sonic_types::IpAddress;
 use std::collections::HashMap;
 use std::sync::Arc;
 use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
+use crate::audit_log;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum TunnelDecapOrchError {

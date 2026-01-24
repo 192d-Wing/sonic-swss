@@ -7,6 +7,7 @@ use sonic_sai::types::RawSaiObjectId;
 
 use super::types::{PolicerConfig, PolicerEntry, StormType};
 use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
 
 /// Policer orchestrator error type.
 #[derive(Debug, Clone, PartialEq, Eq)]

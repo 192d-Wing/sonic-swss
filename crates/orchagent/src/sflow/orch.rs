@@ -8,6 +8,7 @@ use sonic_sai::types::RawSaiObjectId;
 
 use super::types::{PortSflowInfo, SampleDirection, SflowConfig, SflowSession};
 use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
 
 /// Sflow orchestrator error type.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -3,6 +3,7 @@
 use super::types::{QosMapEntry, QosStats, SchedulerEntry, WredProfile};
 use std::collections::HashMap;
 use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
 
 #[derive(Debug, Clone)]
 pub enum QosOrchError {

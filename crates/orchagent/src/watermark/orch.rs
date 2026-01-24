@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
+use crate::audit_log;
 
 use super::types::{
     ClearRequest, QueueIds, QueueType, WatermarkConfig, WatermarkGroup, WatermarkStatus,

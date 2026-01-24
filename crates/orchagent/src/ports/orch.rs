@@ -30,6 +30,7 @@ use super::types::{
     VlanTable, VlanTaggingMode,
 };
 use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
 
 /// Error type for PortsOrch operations.
 #[derive(Debug, Clone)]

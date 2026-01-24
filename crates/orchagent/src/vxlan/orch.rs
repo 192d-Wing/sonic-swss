@@ -3,6 +3,7 @@
 use super::types::{VxlanStats, VxlanTunnelEntry, VxlanTunnelKey, VxlanVlanMapEntry, VxlanVlanMapKey, VxlanVrfMapEntry, VxlanVrfMapKey};
 use std::collections::HashMap;
 use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
+use crate::audit_log;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum VxlanOrchError {

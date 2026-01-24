@@ -13,6 +13,7 @@ use super::types::{
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
+use crate::audit_log;
 
 /// Result type for ChassisOrch operations.
 pub type Result<T> = std::result::Result<T, ChassisOrchError>;

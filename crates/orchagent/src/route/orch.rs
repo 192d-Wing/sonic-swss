@@ -15,6 +15,7 @@ use super::nexthop::NextHopKey;
 use super::nhg::{NextHopGroupEntry, NextHopGroupKey, NextHopGroupTable};
 use super::types::{RouteEntry, RouteNhg, RouteTables};
 use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
 
 /// Error type for RouteOrch operations.
 #[derive(Debug, thiserror::Error)]

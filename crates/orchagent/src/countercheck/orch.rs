@@ -3,6 +3,7 @@
 use super::types::{CounterCheckEntry, CounterCheckKey, CounterCheckStats};
 use std::collections::HashMap;
 use thiserror::Error;
+use crate::audit_log;
 
 #[derive(Debug, Clone, Error)]
 pub enum CounterCheckOrchError {

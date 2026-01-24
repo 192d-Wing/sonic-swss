@@ -3,6 +3,7 @@
 use super::types::{Srv6LocalSidEntry, Srv6Sid, Srv6SidListEntry, Srv6Stats};
 use std::collections::HashMap;
 use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
 
 #[derive(Debug, Clone)]
 pub enum Srv6OrchError {
