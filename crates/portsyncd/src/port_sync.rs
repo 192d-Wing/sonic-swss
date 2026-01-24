@@ -4,6 +4,7 @@
 //! with the current operational status of ports.
 
 use crate::error::Result;
+use crate::config::DatabaseConnection;
 use std::collections::HashSet;
 
 /// Link status values
@@ -21,6 +22,16 @@ impl LinkStatus {
         match self {
             LinkStatus::Up => "up",
             LinkStatus::Down => "down",
+        }
+    }
+
+    /// Parse from netlink flags
+    pub fn from_netlink_flags(flags: u32) -> Self {
+        // IFF_UP = 0x1 in netlink
+        if (flags & 0x1) != 0 {
+            LinkStatus::Up
+        } else {
+            LinkStatus::Down
         }
     }
 }
@@ -71,8 +82,29 @@ impl PortLinkState {
     }
 }
 
+/// Netlink event types
+#[derive(Clone, Debug, PartialEq)]
+pub enum NetlinkEventType {
+    /// RTM_NEWLINK: New or updated link
+    NewLink,
+    /// RTM_DELLINK: Deleted link
+    DelLink,
+}
+
+/// Netlink event for port state changes
+#[derive(Clone, Debug)]
+pub struct NetlinkEvent {
+    /// Event type (RTM_NEWLINK or RTM_DELLINK)
+    pub event_type: NetlinkEventType,
+    /// Port/interface name
+    pub port_name: String,
+    /// Flags from netlink message (for NewLink events)
+    pub flags: Option<u32>,
+    /// MTU value (for NewLink events)
+    pub mtu: Option<u32>,
+}
+
 /// Port synchronization daemon state
-/// (Stub - will be fully implemented in Day 3)
 pub struct LinkSync {
     /// Uninitialized ports awaiting their first netlink event
     uninitialized_ports: HashSet<String>,
@@ -127,6 +159,72 @@ impl LinkSync {
     /// Get count of uninitialized ports
     pub fn uninitialized_count(&self) -> usize {
         self.uninitialized_ports.len()
+    }
+
+    /// Handle RTM_NEWLINK netlink event
+    pub async fn handle_new_link(
+        &mut self,
+        event: &NetlinkEvent,
+        state_db: &mut DatabaseConnection,
+    ) -> Result<()> {
+        // Ignore non-front-panel and management interfaces
+        if self.should_ignore(&event.port_name) {
+            return Ok(());
+        }
+
+        // Extract status and MTU from event
+        let oper_status = event
+            .flags
+            .map(LinkStatus::from_netlink_flags)
+            .unwrap_or(LinkStatus::Up);
+        let mtu = event.mtu.unwrap_or(9100);
+
+        // Create port link state entry
+        let port_state = PortLinkState::new(
+            event.port_name.clone(),
+            oper_status,
+            LinkStatus::Up, // Admin status assumed up for now (from CONFIG_DB in prod)
+            mtu,
+        );
+
+        // Write to STATE_DB
+        let key = format!("PORT_TABLE|{}", port_state.name);
+        let field_values = port_state.to_field_values();
+        state_db.hset(&key, &field_values).await?;
+
+        // Mark port as initialized
+        self.mark_port_initialized(&event.port_name);
+
+        Ok(())
+    }
+
+    /// Handle RTM_DELLINK netlink event
+    pub async fn handle_del_link(
+        &mut self,
+        port_name: &str,
+        state_db: &mut DatabaseConnection,
+    ) -> Result<()> {
+        // Ignore non-front-panel and management interfaces
+        if self.should_ignore(port_name) {
+            return Ok(());
+        }
+
+        // Delete from STATE_DB
+        let key = format!("PORT_TABLE|{}", port_name);
+        state_db.delete(&key).await?;
+
+        Ok(())
+    }
+
+    /// Initialize port list from port names
+    /// Used to pre-populate the set of ports we're waiting for
+    pub fn initialize_ports(&mut self, port_names: Vec<String>) {
+        self.uninitialized_ports = port_names.into_iter().collect();
+    }
+
+    /// Check if we should send PortInitDone signal
+    pub fn should_send_port_init_done(&self) -> bool {
+        self.are_all_ports_initialized() && !self.port_init_done
     }
 }
 
@@ -242,5 +340,282 @@ mod tests {
             .iter()
             .find(|(k, v)| k == "netdev_oper_status" && v == "down")
             .is_some());
+    }
+
+    #[test]
+    fn test_link_status_from_netlink_flags_up() {
+        // IFF_UP = 0x1
+        let status = LinkStatus::from_netlink_flags(0x1);
+        assert_eq!(status, LinkStatus::Up);
+    }
+
+    #[test]
+    fn test_link_status_from_netlink_flags_down() {
+        // No IFF_UP flag
+        let status = LinkStatus::from_netlink_flags(0x0);
+        assert_eq!(status, LinkStatus::Down);
+    }
+
+    #[test]
+    fn test_link_status_from_netlink_flags_with_other_bits() {
+        // IFF_UP (0x1) with other flags set (e.g., IFF_BROADCAST 0x2, IFF_RUNNING 0x40)
+        let status = LinkStatus::from_netlink_flags(0x43); // 0x1 | 0x2 | 0x40
+        assert_eq!(status, LinkStatus::Up);
+    }
+
+    #[test]
+    fn test_netlink_event_new_link() {
+        let event = NetlinkEvent {
+            event_type: NetlinkEventType::NewLink,
+            port_name: "Ethernet0".to_string(),
+            flags: Some(0x1),
+            mtu: Some(9100),
+        };
+        assert_eq!(event.event_type, NetlinkEventType::NewLink);
+        assert_eq!(event.port_name, "Ethernet0");
+        assert_eq!(event.flags, Some(0x1));
+        assert_eq!(event.mtu, Some(9100));
+    }
+
+    #[test]
+    fn test_netlink_event_del_link() {
+        let event = NetlinkEvent {
+            event_type: NetlinkEventType::DelLink,
+            port_name: "Ethernet0".to_string(),
+            flags: None,
+            mtu: None,
+        };
+        assert_eq!(event.event_type, NetlinkEventType::DelLink);
+        assert_eq!(event.port_name, "Ethernet0");
+    }
+
+    #[tokio::test]
+    async fn test_handle_new_link_writes_to_state_db() {
+        use crate::config::DatabaseConnection;
+
+        let mut sync = LinkSync::new().expect("Failed to create LinkSync");
+        let mut state_db = DatabaseConnection::new("STATE_DB".to_string());
+
+        let event = NetlinkEvent {
+            event_type: NetlinkEventType::NewLink,
+            port_name: "Ethernet0".to_string(),
+            flags: Some(0x1), // Up
+            mtu: Some(9100),
+        };
+
+        sync.handle_new_link(&event, &mut state_db)
+            .await
+            .expect("Failed to handle new link");
+
+        // Verify port was written to STATE_DB
+        let result = state_db
+            .hgetall("PORT_TABLE|Ethernet0")
+            .await
+            .expect("Failed to read from STATE_DB");
+        assert!(!result.is_empty());
+        assert_eq!(result.get("mtu"), Some(&"9100".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_handle_new_link_marks_port_initialized() {
+        use crate::config::DatabaseConnection;
+
+        let mut sync = LinkSync::new().expect("Failed to create LinkSync");
+        sync.initialize_ports(vec!["Ethernet0".to_string()]);
+        let mut state_db = DatabaseConnection::new("STATE_DB".to_string());
+
+        assert_eq!(sync.uninitialized_count(), 1);
+
+        let event = NetlinkEvent {
+            event_type: NetlinkEventType::NewLink,
+            port_name: "Ethernet0".to_string(),
+            flags: Some(0x1),
+            mtu: Some(9100),
+        };
+
+        sync.handle_new_link(&event, &mut state_db)
+            .await
+            .expect("Failed to handle new link");
+
+        assert_eq!(sync.uninitialized_count(), 0);
+        assert!(sync.are_all_ports_initialized());
+    }
+
+    #[tokio::test]
+    async fn test_handle_new_link_ignores_eth0() {
+        use crate::config::DatabaseConnection;
+
+        let mut sync = LinkSync::new().expect("Failed to create LinkSync");
+        let mut state_db = DatabaseConnection::new("STATE_DB".to_string());
+
+        let event = NetlinkEvent {
+            event_type: NetlinkEventType::NewLink,
+            port_name: "eth0".to_string(),
+            flags: Some(0x1),
+            mtu: Some(1500),
+        };
+
+        sync.handle_new_link(&event, &mut state_db)
+            .await
+            .expect("Failed to handle new link");
+
+        // Verify eth0 was not written to STATE_DB
+        let result = state_db
+            .hgetall("PORT_TABLE|eth0")
+            .await
+            .expect("Failed to read from STATE_DB");
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_handle_del_link_removes_from_state_db() {
+        use crate::config::DatabaseConnection;
+
+        let mut sync = LinkSync::new().expect("Failed to create LinkSync");
+        let mut state_db = DatabaseConnection::new("STATE_DB".to_string());
+
+        // First add a port
+        let event = NetlinkEvent {
+            event_type: NetlinkEventType::NewLink,
+            port_name: "Ethernet0".to_string(),
+            flags: Some(0x1),
+            mtu: Some(9100),
+        };
+        sync.handle_new_link(&event, &mut state_db)
+            .await
+            .expect("Failed to add port");
+
+        // Verify it exists
+        let result = state_db
+            .hgetall("PORT_TABLE|Ethernet0")
+            .await
+            .expect("Failed to read from STATE_DB");
+        assert!(!result.is_empty());
+
+        // Delete it
+        sync.handle_del_link("Ethernet0", &mut state_db)
+            .await
+            .expect("Failed to delete link");
+
+        // Verify it's gone
+        let result = state_db
+            .hgetall("PORT_TABLE|Ethernet0")
+            .await
+            .expect("Failed to read from STATE_DB");
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_handle_del_link_ignores_eth0() {
+        use crate::config::DatabaseConnection;
+
+        let mut sync = LinkSync::new().expect("Failed to create LinkSync");
+        let mut state_db = DatabaseConnection::new("STATE_DB".to_string());
+
+        // Should not fail even though eth0 doesn't exist
+        sync.handle_del_link("eth0", &mut state_db)
+            .await
+            .expect("Failed to delete eth0");
+    }
+
+    #[test]
+    fn test_initialize_ports() {
+        let mut sync = LinkSync::new().expect("Failed to create LinkSync");
+        assert_eq!(sync.uninitialized_count(), 0);
+
+        sync.initialize_ports(vec![
+            "Ethernet0".to_string(),
+            "Ethernet4".to_string(),
+            "Ethernet8".to_string(),
+        ]);
+
+        assert_eq!(sync.uninitialized_count(), 3);
+        assert!(!sync.are_all_ports_initialized());
+    }
+
+    #[test]
+    fn test_should_send_port_init_done_when_all_initialized() {
+        let mut sync = LinkSync::new().expect("Failed to create LinkSync");
+        sync.initialize_ports(vec!["Ethernet0".to_string()]);
+
+        assert!(!sync.are_all_ports_initialized());
+        assert!(!sync.should_send_port_init_done());
+
+        sync.mark_port_initialized("Ethernet0");
+
+        assert!(sync.are_all_ports_initialized());
+        assert!(sync.should_send_port_init_done());
+
+        sync.set_port_init_done();
+
+        assert!(!sync.should_send_port_init_done());
+    }
+
+    #[tokio::test]
+    async fn test_handle_multiple_new_links() {
+        use crate::config::DatabaseConnection;
+
+        let mut sync = LinkSync::new().expect("Failed to create LinkSync");
+        sync.initialize_ports(vec![
+            "Ethernet0".to_string(),
+            "Ethernet4".to_string(),
+        ]);
+        let mut state_db = DatabaseConnection::new("STATE_DB".to_string());
+
+        // Handle first port
+        let event1 = NetlinkEvent {
+            event_type: NetlinkEventType::NewLink,
+            port_name: "Ethernet0".to_string(),
+            flags: Some(0x1),
+            mtu: Some(9100),
+        };
+        sync.handle_new_link(&event1, &mut state_db)
+            .await
+            .expect("Failed to handle new link");
+
+        assert_eq!(sync.uninitialized_count(), 1);
+
+        // Handle second port
+        let event2 = NetlinkEvent {
+            event_type: NetlinkEventType::NewLink,
+            port_name: "Ethernet4".to_string(),
+            flags: Some(0x1),
+            mtu: Some(9100),
+        };
+        sync.handle_new_link(&event2, &mut state_db)
+            .await
+            .expect("Failed to handle new link");
+
+        assert_eq!(sync.uninitialized_count(), 0);
+        assert!(sync.should_send_port_init_done());
+    }
+
+    #[tokio::test]
+    async fn test_handle_new_link_down_status() {
+        use crate::config::DatabaseConnection;
+
+        let mut sync = LinkSync::new().expect("Failed to create LinkSync");
+        let mut state_db = DatabaseConnection::new("STATE_DB".to_string());
+
+        let event = NetlinkEvent {
+            event_type: NetlinkEventType::NewLink,
+            port_name: "Ethernet0".to_string(),
+            flags: Some(0x0), // Down
+            mtu: Some(9100),
+        };
+
+        sync.handle_new_link(&event, &mut state_db)
+            .await
+            .expect("Failed to handle new link");
+
+        // Verify port status is down
+        let result = state_db
+            .hgetall("PORT_TABLE|Ethernet0")
+            .await
+            .expect("Failed to read from STATE_DB");
+        assert_eq!(
+            result.get("netdev_oper_status"),
+            Some(&"down".to_string())
+        );
     }
 }
