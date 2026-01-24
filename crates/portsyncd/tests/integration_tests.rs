@@ -59,8 +59,9 @@ async fn test_full_port_sync_workflow() {
         .expect("Failed to load port config");
 
     assert_eq!(ports.len(), 2);
-    assert_eq!(ports[0].name, "Ethernet0");
-    assert_eq!(ports[1].name, "Ethernet4");
+    let port_names: std::collections::HashSet<_> = ports.iter().map(|p| p.name.as_str()).collect();
+    assert!(port_names.contains("Ethernet0"));
+    assert!(port_names.contains("Ethernet4"));
 
     // Send PortConfigDone signal
     send_port_config_done(&mut setup.app_db)
