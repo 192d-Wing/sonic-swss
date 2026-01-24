@@ -11,6 +11,7 @@ use super::types::{
     CRM_COUNTERS_TABLE_KEY, DEFAULT_HIGH_THRESHOLD, DEFAULT_LOW_THRESHOLD,
     DEFAULT_POLLING_INTERVAL,
 };
+use crate::{audit_log, audit::{AuditCategory, AuditOutcome, AuditRecord}};
 
 /// CRM orchestrator error type.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,22 +41,6 @@ impl std::fmt::Display for CrmOrchError {
 }
 
 impl std::error::Error for CrmOrchError {}
-
-// Audit logging macro for CRM operations
-macro_rules! audit_log {
-    (
-        resource_id: $rid:expr,
-        action: $act:expr,
-        category: $cat:expr,
-        outcome: $out:expr,
-        details: $det:expr
-    ) => {
-        // This is a placeholder for actual audit logging
-        // In production, this would log to syslog, audit trails, or security logging system
-        eprintln!("[AUDIT] Resource: {}, Action: {}, Category: {}, Outcome: {}, Details: {}",
-            $rid, $act, $cat, $out, $det);
-    };
-}
 
 /// Callbacks for CrmOrch operations.
 pub trait CrmOrchCallbacks: Send + Sync {
@@ -204,14 +189,12 @@ impl CrmOrch {
         self.config.polling_interval = interval;
         self.stats.config_updates += 1;
 
-        audit_log!(
-            resource_id: "crm_config",
-            action: "set_polling_interval",
-            category: "ConfigurationChange",
-            outcome: "SUCCESS",
-            details: serde_json::json!({
+        audit_log!(AuditRecord::new(AuditCategory::ConfigurationChange, "CrmOrch", "set_polling_interval")
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id("crm_config")
+            .with_details(serde_json::json!({
                 "polling_interval_seconds": interval.as_secs(),
-            })
+            }))
         );
     }
 
@@ -251,15 +234,13 @@ impl CrmOrch {
             .resources
             .get_mut(&resource_type)
             .ok_or_else(|| {
-                audit_log!(
-                    resource_id: &resource_type.name().to_string(),
-                    action: "increment_used",
-                    category: "ResourceModify",
-                    outcome: "FAIL",
-                    details: serde_json::json!({
+                audit_log!(AuditRecord::new(AuditCategory::ResourceModify, "CrmOrch", "increment_used")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(resource_type.name())
+                    .with_details(serde_json::json!({
                         "error": "Resource not found",
                         "resource_type": resource_type.name(),
-                    })
+                    }))
                 );
                 CrmOrchError::ResourceNotFound(resource_type)
             })?;
@@ -268,16 +249,14 @@ impl CrmOrch {
         let new_used = counter.increment_used();
         self.stats.increments += 1;
 
-        audit_log!(
-            resource_id: &resource_type.name().to_string(),
-            action: "increment_used",
-            category: "ResourceModify",
-            outcome: "SUCCESS",
-            details: serde_json::json!({
+        audit_log!(AuditRecord::new(AuditCategory::ResourceModify, "CrmOrch", "increment_used")
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(resource_type.name())
+            .with_details(serde_json::json!({
                 "resource_type": resource_type.name(),
                 "used": new_used,
                 "available": counter.available,
-            })
+            }))
         );
 
         Ok(new_used)
@@ -289,15 +268,13 @@ impl CrmOrch {
             .resources
             .get_mut(&resource_type)
             .ok_or_else(|| {
-                audit_log!(
-                    resource_id: &resource_type.name().to_string(),
-                    action: "decrement_used",
-                    category: "ResourceModify",
-                    outcome: "FAIL",
-                    details: serde_json::json!({
+                audit_log!(AuditRecord::new(AuditCategory::ResourceModify, "CrmOrch", "decrement_used")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(resource_type.name())
+                    .with_details(serde_json::json!({
                         "error": "Resource not found",
                         "resource_type": resource_type.name(),
-                    })
+                    }))
                 );
                 CrmOrchError::ResourceNotFound(resource_type)
             })?;
@@ -305,15 +282,13 @@ impl CrmOrch {
         let counter = entry
             .get_counter_mut(CRM_COUNTERS_TABLE_KEY)
             .ok_or_else(|| {
-                audit_log!(
-                    resource_id: &resource_type.name().to_string(),
-                    action: "decrement_used",
-                    category: "ResourceModify",
-                    outcome: "FAIL",
-                    details: serde_json::json!({
+                audit_log!(AuditRecord::new(AuditCategory::ResourceModify, "CrmOrch", "decrement_used")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(resource_type.name())
+                    .with_details(serde_json::json!({
                         "error": "Counter not found",
                         "resource_type": resource_type.name(),
-                    })
+                    }))
                 );
                 CrmOrchError::CounterNotFound(CRM_COUNTERS_TABLE_KEY.to_string())
             })?;
@@ -322,28 +297,24 @@ impl CrmOrch {
         counter
             .decrement_used()
             .ok_or_else(|| {
-                audit_log!(
-                    resource_id: &resource_type.name().to_string(),
-                    action: "decrement_used",
-                    category: "ResourceModify",
-                    outcome: "FAIL",
-                    details: serde_json::json!({
+                audit_log!(AuditRecord::new(AuditCategory::ResourceModify, "CrmOrch", "decrement_used")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(resource_type.name())
+                    .with_details(serde_json::json!({
                         "error": "Counter underflow",
                         "resource_type": resource_type.name(),
-                    })
+                    }))
                 );
                 CrmOrchError::InvalidThreshold("Counter underflow".to_string())
             })
             .map(|new_used| {
-                audit_log!(
-                    resource_id: &resource_type.name().to_string(),
-                    action: "decrement_used",
-                    category: "ResourceModify",
-                    outcome: "SUCCESS",
-                    details: serde_json::json!({
+                audit_log!(AuditRecord::new(AuditCategory::ResourceModify, "CrmOrch", "decrement_used")
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_id(resource_type.name())
+                    .with_details(serde_json::json!({
                         "resource_type": resource_type.name(),
                         "used": new_used,
-                    })
+                    }))
                 );
                 new_used
             })
@@ -719,17 +690,15 @@ impl CrmOrch {
                     // Don't overwrite used - it's tracked by increment/decrement
 
                     // Log successful query for critical resources
-                    audit_log!(
-                        resource_id: &res_type.name().to_string(),
-                        action: "query_resource_availability",
-                        category: "Read",
-                        outcome: "SUCCESS",
-                        details: serde_json::json!({
+                    audit_log!(AuditRecord::new(AuditCategory::SystemLifecycle, "CrmOrch", "query_resource_availability")
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_id(res_type.name())
+                        .with_details(serde_json::json!({
                             "resource_type": res_type.name(),
                             "used": used,
                             "available": available,
                             "utilization_percent": counter.utilization_percent(),
-                        })
+                        }))
                     );
                 }
             }
