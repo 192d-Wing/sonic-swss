@@ -2,6 +2,7 @@
 resolver = '2'
 members = [
     "crates/countersyncd",
+    "crates/portsyncd",
     "crates/sonic-types",
     "crates/sonic-sai",
     "crates/sonic-orch-common",
