@@ -7,8 +7,8 @@
 //! - Initialization signaling
 
 use sonic_portsyncd::{
-    DatabaseConnection, LinkSync, NetlinkEvent, NetlinkEventType, PortConfig, PortLinkState,
-    LinkStatus, load_port_config, send_port_config_done, send_port_init_done,
+    DatabaseConnection, LinkStatus, LinkSync, NetlinkEvent, NetlinkEventType, PortConfig,
+    PortLinkState, load_port_config, send_port_config_done, send_port_init_done,
 };
 
 /// Test fixture: Setup mock databases with port configuration
@@ -28,7 +28,12 @@ impl TestSetup {
     }
 
     /// Add a port configuration to CONFIG_DB
-    async fn add_port_config(&mut self, port_name: &str, speed: &str, lanes: &str) -> Result<(), Box<dyn std::error::Error>> {
+    async fn add_port_config(
+        &mut self,
+        port_name: &str,
+        speed: &str,
+        lanes: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let key = format!("PORT|{}", port_name);
         let fields = vec![
             ("speed".to_string(), speed.to_string()),
@@ -83,10 +88,7 @@ async fn test_port_initialization_flow() {
     let mut link_sync = LinkSync::new().expect("Failed to create LinkSync");
 
     // Initialize with two ports
-    link_sync.initialize_ports(vec![
-        "Ethernet0".to_string(),
-        "Ethernet4".to_string(),
-    ]);
+    link_sync.initialize_ports(vec!["Ethernet0".to_string(), "Ethernet4".to_string()]);
 
     assert_eq!(link_sync.uninitialized_count(), 2);
     assert!(!link_sync.should_send_port_init_done());
@@ -160,10 +162,7 @@ async fn test_port_state_updates_in_state_db() {
         .expect("Failed to read state");
 
     assert_eq!(state.get("mtu"), Some(&"9100".to_string()));
-    assert_eq!(
-        state.get("netdev_oper_status"),
-        Some(&"up".to_string())
-    );
+    assert_eq!(state.get("netdev_oper_status"), Some(&"up".to_string()));
 
     // Simulate link going down
     let event_down = NetlinkEvent {
@@ -185,10 +184,7 @@ async fn test_port_state_updates_in_state_db() {
         .await
         .expect("Failed to read state");
 
-    assert_eq!(
-        state.get("netdev_oper_status"),
-        Some(&"down".to_string())
-    );
+    assert_eq!(state.get("netdev_oper_status"), Some(&"down".to_string()));
 }
 
 #[tokio::test]
@@ -273,7 +269,11 @@ async fn test_multi_port_convergence() {
             .hgetall(&format!("PORT_TABLE|{}", port_name))
             .await
             .expect("Failed to read state");
-        assert!(!state.is_empty(), "Port {} not found in STATE_DB", port_name);
+        assert!(
+            !state.is_empty(),
+            "Port {} not found in STATE_DB",
+            port_name
+        );
     }
 }
 

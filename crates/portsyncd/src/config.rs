@@ -32,7 +32,7 @@ impl DatabaseConnection {
 
     /// Set hash field values in database
     pub async fn hset(&mut self, key: &str, fields: &[(String, String)]) -> Result<()> {
-        let entry = self.data.entry(key.to_string()).or_insert_with(HashMap::new);
+        let entry = self.data.entry(key.to_string()).or_default();
         for (field, value) in fields {
             entry.insert(field.clone(), value.clone());
         }
@@ -54,7 +54,7 @@ impl DatabaseConnection {
                 if pattern == "*" {
                     true
                 } else if pattern.ends_with('*') {
-                    let prefix = &pattern[..pattern.len() - 1];
+                    let prefix = pattern.strip_suffix('*').unwrap();
                     k.starts_with(prefix)
                 } else {
                     k.as_str() == pattern
@@ -112,6 +112,7 @@ impl PortConfig {
     }
 
     /// Validate port configuration
+    #[allow(clippy::collapsible_if)]
     pub fn validate(&self) -> Result<()> {
         if self.name.is_empty() {
             return Err(PortsyncError::PortValidation(
@@ -129,9 +130,10 @@ impl PortConfig {
 
         if let Some(mtu) = &self.mtu {
             if mtu.parse::<u32>().is_err() {
-                return Err(PortsyncError::PortValidation(
-                    format!("Invalid MTU value: {}", mtu),
-                ));
+                return Err(PortsyncError::PortValidation(format!(
+                    "Invalid MTU value: {}",
+                    mtu
+                )));
             }
         }
 
@@ -330,7 +332,9 @@ mod tests {
         let config_db = DatabaseConnection::new("CONFIG_DB".to_string());
         let mut app_db = DatabaseConnection::new("APP_DB".to_string());
 
-        let ports = load_port_config(&config_db, &mut app_db, false).await.unwrap();
+        let ports = load_port_config(&config_db, &mut app_db, false)
+            .await
+            .unwrap();
         assert!(ports.is_empty());
     }
 

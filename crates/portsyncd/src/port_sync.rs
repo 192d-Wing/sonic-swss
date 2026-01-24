@@ -3,8 +3,8 @@
 //! Handles RTM_NEWLINK and RTM_DELLINK netlink events and updates STATE_DB
 //! with the current operational status of ports.
 
-use crate::error::Result;
 use crate::config::DatabaseConnection;
+use crate::error::Result;
 use std::collections::HashSet;
 
 /// Link status values
@@ -271,20 +271,34 @@ mod tests {
         let fields = state.to_field_values();
         assert_eq!(fields.len(), 4);
         assert!(fields.iter().any(|(k, _)| k == "state"));
-        assert!(fields.iter().any(|(k, v)| k == "netdev_oper_status" && v == "up"));
+        assert!(
+            fields
+                .iter()
+                .any(|(k, v)| k == "netdev_oper_status" && v == "up")
+        );
         assert!(fields.iter().any(|(k, v)| k == "admin_status" && v == "up"));
         assert!(fields.iter().any(|(k, v)| k == "mtu" && v == "9100"));
     }
 
     #[test]
     fn test_port_is_front_panel_ethernet() {
-        let state = PortLinkState::new("Ethernet0".to_string(), LinkStatus::Up, LinkStatus::Up, 9100);
+        let state = PortLinkState::new(
+            "Ethernet0".to_string(),
+            LinkStatus::Up,
+            LinkStatus::Up,
+            9100,
+        );
         assert!(state.is_front_panel());
     }
 
     #[test]
     fn test_port_is_front_panel_port_channel() {
-        let state = PortLinkState::new("PortChannel001".to_string(), LinkStatus::Up, LinkStatus::Up, 9100);
+        let state = PortLinkState::new(
+            "PortChannel001".to_string(),
+            LinkStatus::Up,
+            LinkStatus::Up,
+            9100,
+        );
         assert!(state.is_front_panel());
     }
 
@@ -336,10 +350,11 @@ mod tests {
             9100,
         );
         let fields = state.to_field_values();
-        assert!(fields
-            .iter()
-            .find(|(k, v)| k == "netdev_oper_status" && v == "down")
-            .is_some());
+        assert!(
+            fields
+                .iter()
+                .any(|(k, v)| k == "netdev_oper_status" && v == "down")
+        );
     }
 
     #[test]
@@ -556,10 +571,7 @@ mod tests {
         use crate::config::DatabaseConnection;
 
         let mut sync = LinkSync::new().expect("Failed to create LinkSync");
-        sync.initialize_ports(vec![
-            "Ethernet0".to_string(),
-            "Ethernet4".to_string(),
-        ]);
+        sync.initialize_ports(vec!["Ethernet0".to_string(), "Ethernet4".to_string()]);
         let mut state_db = DatabaseConnection::new("STATE_DB".to_string());
 
         // Handle first port
@@ -613,9 +625,6 @@ mod tests {
             .hgetall("PORT_TABLE|Ethernet0")
             .await
             .expect("Failed to read from STATE_DB");
-        assert_eq!(
-            result.get("netdev_oper_status"),
-            Some(&"down".to_string())
-        );
+        assert_eq!(result.get("netdev_oper_status"), Some(&"down".to_string()));
     }
 }

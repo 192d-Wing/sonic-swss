@@ -4,11 +4,11 @@
 //! Listens for kernel netlink events and synchronizes port status to SONiC databases.
 
 use sonic_portsyncd::{
-    DatabaseConnection, LinkSync, PortsyncError, load_port_config,
-    send_port_config_done, send_port_init_done,
+    DatabaseConnection, LinkSync, PortsyncError, load_port_config, send_port_config_done,
+    send_port_init_done,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::signal;
 
 #[tokio::main]
@@ -19,7 +19,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("portsyncd: Starting port synchronization daemon");
 
     // Run daemon with signal handling
-    run_daemon().await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+    run_daemon()
+        .await
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
     eprintln!("portsyncd: Port synchronization daemon exiting");
 
@@ -99,7 +101,7 @@ fn setup_signal_handlers() -> Arc<AtomicBool> {
 
     // Handle SIGTERM (graceful shutdown)
     tokio::spawn(async move {
-        if let Ok(_) = signal::ctrl_c().await {
+        if signal::ctrl_c().await.is_ok() {
             eprintln!("portsyncd: Received SIGTERM/SIGINT");
             shutdown_flag_clone.store(true, Ordering::Relaxed);
         }
@@ -124,6 +126,5 @@ mod tests {
     async fn test_run_daemon_requires_databases() {
         // This test verifies the basic structure is correct
         // Full integration testing in Day 5
-        assert!(true); // Placeholder for integration test structure
     }
 }

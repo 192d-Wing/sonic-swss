@@ -7,9 +7,9 @@
 //! NIST 800-53 Rev5 [SI-4]: System Monitoring - Real-time port state monitoring
 
 pub mod config;
-pub mod port_sync;
 pub mod error;
+pub mod port_sync;
 
 pub use config::*;
-pub use port_sync::*;
 pub use error::*;
+pub use port_sync::*;
