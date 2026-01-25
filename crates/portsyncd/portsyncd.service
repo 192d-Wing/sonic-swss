@@ -1,0 +1,41 @@
+[Unit]
+Description=SONiC Port Synchronization Daemon (Rust)
+After=network.target redis.service
+PartOf=sonic-services.target
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/portsyncd
+ExecStopPost=/usr/bin/true
+
+# Service restart policy
+Restart=on-failure
+RestartSec=5
+StartLimitInterval=300s
+StartLimitBurst=3
+
+# Watchdog timeout - systemd will restart if no WATCHDOG signal for 30s
+WatchdogSec=30s
+NotifyAccess=main
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Resource limits
+MemoryLimit=512M
+MemoryAccounting=true
+CPUAccounting=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=portsyncd
+
+# Process management
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target

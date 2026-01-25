@@ -4,8 +4,8 @@
 //! Listens for kernel netlink events and synchronizes port status to SONiC databases.
 
 use sonic_portsyncd::{
-    DatabaseConnection, LinkSync, PortsyncError, load_port_config, send_port_config_done,
-    send_port_init_done,
+    LinkSync, MetricsCollector, MetricsServer, MetricsServerConfig, PortsyncError, RedisAdapter,
+    load_port_config, send_port_config_done, send_port_init_done,
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,9 +40,49 @@ async fn run_daemon() -> Result<(), PortsyncError> {
     // Setup signal handlers for graceful shutdown
     let shutdown = setup_signal_handlers();
 
-    // Connect to databases
-    let config_db = DatabaseConnection::new("CONFIG_DB".to_string());
-    let mut app_db = DatabaseConnection::new("APP_DB".to_string());
+    // Initialize metrics collector
+    let metrics = Arc::new(
+        MetricsCollector::new()
+            .map_err(|e| PortsyncError::Other(format!("Failed to initialize metrics: {}", e)))?,
+    );
+    eprintln!("portsyncd: Initialized metrics collector");
+
+    // Spawn metrics server with mandatory mTLS on IPv6 [::1]:9090
+    // Certificate paths can be configured via environment variables or config file
+    let cert_path = std::env::var("PORTSYNCD_METRICS_CERT")
+        .unwrap_or_else(|_| "/etc/portsyncd/metrics/server.crt".to_string());
+    let key_path = std::env::var("PORTSYNCD_METRICS_KEY")
+        .unwrap_or_else(|_| "/etc/portsyncd/metrics/server.key".to_string());
+    let ca_cert_path = std::env::var("PORTSYNCD_METRICS_CA")
+        .unwrap_or_else(|_| "/etc/portsyncd/metrics/ca.crt".to_string());
+
+    let metrics_server_handle = tokio::spawn({
+        let metrics_clone = metrics.clone();
+        async move {
+            let config = MetricsServerConfig::new(cert_path, key_path, ca_cert_path);
+            let server = MetricsServer::new(config, metrics_clone)?;
+            server.start().await
+        }
+    });
+    eprintln!("portsyncd: Spawned metrics server with mandatory mTLS on IPv6 [::1]:9090");
+
+    // Connect to databases via Redis adapter
+    #[cfg(not(test))]
+    let (config_db, mut app_db) = {
+        let mut c = RedisAdapter::config_db("127.0.0.1", 6379);
+        let mut a = RedisAdapter::app_db("127.0.0.1", 6379);
+        c.connect().await?;
+        a.connect().await?;
+        (c, a)
+    };
+
+    #[cfg(test)]
+    let (config_db, mut app_db) = {
+        (
+            RedisAdapter::config_db("127.0.0.1", 6379),
+            RedisAdapter::app_db("127.0.0.1", 6379),
+        )
+    };
 
     eprintln!("portsyncd: Connected to databases");
 
@@ -83,14 +123,29 @@ async fn run_daemon() -> Result<(), PortsyncError> {
 
         // Check if all ports have been initialized and send signal
         if link_sync.should_send_port_init_done() {
-            send_port_init_done(&mut app_db).await?;
-            link_sync.set_port_init_done();
-            eprintln!("portsyncd: Sent PortInitDone signal");
+            let timer = metrics.start_event_latency();
+            match send_port_init_done(&mut app_db).await {
+                Ok(_) => {
+                    metrics.record_event_success();
+                    drop(timer);
+                    link_sync.set_port_init_done();
+                    eprintln!("portsyncd: Sent PortInitDone signal");
+                }
+                Err(e) => {
+                    metrics.record_event_failure();
+                    drop(timer);
+                    eprintln!("portsyncd: Failed to send PortInitDone: {}", e);
+                }
+            }
         }
     }
 
     // Graceful shutdown
     eprintln!("portsyncd: Performing graceful shutdown");
+
+    // Attempt graceful shutdown of metrics server
+    drop(metrics_server_handle);
+
     Ok(())
 }
 

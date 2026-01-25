@@ -6,6 +6,23 @@
 use crate::error::{PortsyncError, Result};
 use std::collections::HashMap;
 
+/// Common interface for database adapters (DatabaseConnection, RedisAdapter)
+/// Allows load_port_config to work with both mock and real implementations
+#[async_trait::async_trait]
+pub trait DatabaseAdapter: Send + Sync {
+    /// Get hash values from database
+    async fn hgetall(&self, key: &str) -> Result<HashMap<String, String>>;
+
+    /// Set hash field values in database
+    async fn hset(&mut self, key: &str, fields: &[(String, String)]) -> Result<()>;
+
+    /// Delete key from database
+    async fn delete(&mut self, key: &str) -> Result<()>;
+
+    /// Get all keys matching pattern
+    async fn keys(&self, pattern: &str) -> Result<Vec<String>>;
+}
+
 /// Database connection abstraction (mock for testing)
 /// In production, this will use sonic-redis connections
 #[derive(Clone, Debug)]
@@ -63,6 +80,25 @@ impl DatabaseConnection {
             .cloned()
             .collect();
         Ok(keys)
+    }
+}
+
+#[async_trait::async_trait]
+impl DatabaseAdapter for DatabaseConnection {
+    async fn hgetall(&self, key: &str) -> Result<HashMap<String, String>> {
+        DatabaseConnection::hgetall(self, key).await
+    }
+
+    async fn hset(&mut self, key: &str, fields: &[(String, String)]) -> Result<()> {
+        DatabaseConnection::hset(self, key, fields).await
+    }
+
+    async fn delete(&mut self, key: &str) -> Result<()> {
+        DatabaseConnection::delete(self, key).await
+    }
+
+    async fn keys(&self, pattern: &str) -> Result<Vec<String>> {
+        DatabaseConnection::keys(self, pattern).await
     }
 }
 
@@ -169,8 +205,8 @@ impl PortConfig {
 
 /// Load port configuration from CONFIG_DB
 pub async fn load_port_config(
-    config_db: &DatabaseConnection,
-    app_db: &mut DatabaseConnection,
+    config_db: &dyn DatabaseAdapter,
+    app_db: &mut dyn DatabaseAdapter,
     warm_restart: bool,
 ) -> Result<Vec<PortConfig>> {
     // Get all PORT table entries from CONFIG_DB
@@ -216,7 +252,7 @@ pub fn validate_port_config(port: &PortConfig) -> Result<()> {
 }
 
 /// Send PortConfigDone signal to APP_DB
-pub async fn send_port_config_done(app_db: &mut DatabaseConnection) -> Result<()> {
+pub async fn send_port_config_done(app_db: &mut dyn DatabaseAdapter) -> Result<()> {
     // Write PortConfigDone marker to APP_DB
     let fields = vec![("".to_string(), "".to_string())];
     app_db.hset("PortConfigDone", &fields).await?;
@@ -224,7 +260,7 @@ pub async fn send_port_config_done(app_db: &mut DatabaseConnection) -> Result<()
 }
 
 /// Send PortInitDone signal to APP_DB
-pub async fn send_port_init_done(app_db: &mut DatabaseConnection) -> Result<()> {
+pub async fn send_port_init_done(app_db: &mut dyn DatabaseAdapter) -> Result<()> {
     // Write PortInitDone marker with lanes=0 to signal initialization complete
     let fields = vec![("lanes".to_string(), "0".to_string())];
     app_db.hset("PortInitDone", &fields).await?;
