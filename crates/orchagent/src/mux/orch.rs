@@ -32,23 +32,6 @@ pub enum MuxOrchError {
     StateTransitionFailed(String),
 }
 
-impl std::fmt::Display for MuxOrchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::PortNotFound(port) => write!(f, "MUX port not found: {}", port),
-            Self::InvalidState(state) => write!(f, "Invalid MUX state: {}", state),
-            Self::TunnelCreationFailed(reason) => write!(f, "Tunnel creation failed: {}", reason),
-            Self::AclCreationFailed(reason) => write!(f, "ACL creation failed: {}", reason),
-            Self::SaiError(msg) => write!(f, "SAI error: {}", msg),
-            Self::InvalidConfig(msg) => write!(f, "Invalid configuration: {}", msg),
-            Self::NeighborNotFound(neighbor) => write!(f, "MUX neighbor not found: {}", neighbor),
-            Self::StateTransitionFailed(reason) => write!(f, "State transition failed: {}", reason),
-        }
-    }
-}
-
-impl std::error::Error for MuxOrchError {}
-
 /// Result type for MuxOrch operations.
 pub type Result<T> = std::result::Result<T, MuxOrchError>;
 

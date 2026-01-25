@@ -290,10 +290,17 @@ impl DebugCounterOrch {
         &mut self,
         counter_name: &str,
     ) -> Result<(), DebugCounterOrchError> {
-        let entry = self
-            .debug_counters
-            .get(counter_name)
-            .ok_or_else(|| DebugCounterOrchError::CounterNotFound(counter_name.to_string()))?;
+        let (is_ingress, current_reasons, counter_type) = {
+            let entry = self
+                .debug_counters
+                .get(counter_name)
+                .ok_or_else(|| DebugCounterOrchError::CounterNotFound(counter_name.to_string()))?;
+            (
+                entry.counter_type.is_ingress(),
+                entry.drop_reasons.iter().cloned().collect::<Vec<_>>(),
+                entry.counter_type.clone(),
+            )
+        };
 
         let callbacks = Arc::clone(
             self.callbacks
@@ -301,11 +308,9 @@ impl DebugCounterOrch {
                 .ok_or_else(|| DebugCounterOrchError::SaiError("No callbacks set".to_string()))?,
         );
 
-        let is_ingress = entry.counter_type.is_ingress();
         let available_reasons = callbacks.get_available_drop_reasons(is_ingress);
 
         // Remove invalid reasons
-        let current_reasons: Vec<String> = entry.drop_reasons.iter().cloned().collect();
         let mut removed_count = 0;
         for reason in current_reasons {
             if !available_reasons.contains(&reason) {
@@ -313,6 +318,14 @@ impl DebugCounterOrch {
                 removed_count += 1;
             }
         }
+
+        let remaining_reasons = {
+            let entry = self
+                .debug_counters
+                .get(counter_name)
+                .ok_or_else(|| DebugCounterOrchError::CounterNotFound(counter_name.to_string()))?;
+            entry.drop_reasons.len() - removed_count
+        };
 
         let record = AuditRecord::new(
             AuditCategory::ConfigurationChange,
@@ -323,9 +336,9 @@ impl DebugCounterOrch {
         .with_object_id(counter_name)
         .with_object_type("debug_counter")
         .with_details(serde_json::json!({
-            "counter_type": entry.counter_type.as_str(),
+            "counter_type": counter_type.as_str(),
             "removed_count": removed_count,
-            "remaining_reasons": entry.drop_reasons.len() - removed_count,
+            "remaining_reasons": remaining_reasons,
         }));
         audit_log!(record);
 

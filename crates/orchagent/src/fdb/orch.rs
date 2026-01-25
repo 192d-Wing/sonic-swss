@@ -105,13 +105,13 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
 
     pub fn add_entry(&mut self, entry: FdbEntry) -> Result<()> {
         let key = entry.key.clone();
-        debug_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, port = %entry.port_name, "Adding FDB entry");
+        debug_log!("FdbOrch", mac = %key.mac, vlan = key.vlan_id, port = %entry.port_name, "Adding FDB entry");
 
         if self.entries.contains_key(&key) {
-            warn_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, "FDB entry already exists");
+            warn_log!("FdbOrch", mac = %key.mac, vlan = key.vlan_id, "FDB entry already exists");
             audit_log!(
                 AuditRecord::new(AuditCategory::ResourceCreate, "FdbOrch", "add_entry")
-                    .with_object_id(format!("{}:{}", key.mac_address, key.vlan_id))
+                    .with_object_id(format!("{}:{}", key.mac, key.vlan_id))
                     .with_object_type("fdb_entry")
                     .with_error(format!("Entry already exists: {:?}", key))
             );
@@ -124,13 +124,13 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
         })?;
 
         callbacks.add_fdb_entry(&entry).map_err(|e| {
-            error_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, error = %e, "SAI add_fdb_entry failed");
+            error_log!("FdbOrch", mac = %key.mac, vlan = key.vlan_id, error = %e, "SAI add_fdb_entry failed");
             audit_log!(AuditRecord::new(
                 AuditCategory::SaiOperation,
                 "FdbOrch",
                 "add_fdb_entry"
             )
-            .with_object_id(format!("{}:{}", key.mac_address, key.vlan_id))
+            .with_object_id(format!("{}:{}", key.mac, key.vlan_id))
             .with_object_type("fdb_entry")
             .with_error(e.to_string()));
             e
@@ -140,14 +140,14 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
         self.stats.entries_added += 1;
         callbacks.on_fdb_entry_added(&entry);
 
-        info_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, port = %entry.port_name, "FDB entry created successfully");
+        info_log!("FdbOrch", mac = %key.mac, vlan = key.vlan_id, port = %entry.port_name, "FDB entry created successfully");
         audit_log!(
             AuditRecord::new(AuditCategory::ResourceCreate, "FdbOrch", "add_entry")
                 .with_outcome(AuditOutcome::Success)
-                .with_object_id(format!("{}:{}", key.mac_address, key.vlan_id))
+                .with_object_id(format!("{}:{}", key.mac, key.vlan_id))
                 .with_object_type("fdb_entry")
                 .with_details(serde_json::json!({
-                    "mac_address": key.mac_address.to_string(),
+                    "mac_address": key.mac.to_string(),
                     "vlan_id": key.vlan_id,
                     "port_name": entry.port_name
                 }))
@@ -157,17 +157,17 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
     }
 
     pub fn remove_entry(&mut self, key: &FdbKey) -> Result<()> {
-        debug_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, "Removing FDB entry");
+        debug_log!("FdbOrch", mac = %key.mac, vlan = key.vlan_id, "Removing FDB entry");
 
         self.entries.remove(key)
             .ok_or_else(|| {
-                warn_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, "FDB entry not found for removal");
+                warn_log!("FdbOrch", mac = %key.mac, vlan = key.vlan_id, "FDB entry not found for removal");
                 audit_log!(AuditRecord::new(
                     AuditCategory::ResourceDelete,
                     "FdbOrch",
                     "remove_entry"
                 )
-                .with_object_id(format!("{}:{}", key.mac_address, key.vlan_id))
+                .with_object_id(format!("{}:{}", key.mac, key.vlan_id))
                 .with_object_type("fdb_entry")
                 .with_error("Entry not found"));
                 FdbOrchError::EntryNotFound(key.clone())
@@ -179,13 +179,13 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
         })?;
 
         callbacks.remove_fdb_entry(key).map_err(|e| {
-            error_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, error = %e, "SAI remove_fdb_entry failed");
+            error_log!("FdbOrch", mac = %key.mac, vlan = key.vlan_id, error = %e, "SAI remove_fdb_entry failed");
             audit_log!(AuditRecord::new(
                 AuditCategory::SaiOperation,
                 "FdbOrch",
                 "remove_fdb_entry"
             )
-            .with_object_id(format!("{}:{}", key.mac_address, key.vlan_id))
+            .with_object_id(format!("{}:{}", key.mac, key.vlan_id))
             .with_object_type("fdb_entry")
             .with_error(e.to_string()));
             e
@@ -194,14 +194,14 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
         self.stats.entries_removed += 1;
         callbacks.on_fdb_entry_removed(key);
 
-        info_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, "FDB entry removed successfully");
+        info_log!("FdbOrch", mac = %key.mac, vlan = key.vlan_id, "FDB entry removed successfully");
         audit_log!(
             AuditRecord::new(AuditCategory::ResourceDelete, "FdbOrch", "remove_entry")
                 .with_outcome(AuditOutcome::Success)
-                .with_object_id(format!("{}:{}", key.mac_address, key.vlan_id))
+                .with_object_id(format!("{}:{}", key.mac, key.vlan_id))
                 .with_object_type("fdb_entry")
                 .with_details(serde_json::json!({
-                    "mac_address": key.mac_address.to_string(),
+                    "mac_address": key.mac.to_string(),
                     "vlan_id": key.vlan_id
                 }))
         );
@@ -210,11 +210,11 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
     }
 
     pub fn update_entry(&mut self, key: &FdbKey, entry: FdbEntry) -> Result<()> {
-        debug_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, port = %entry.port_name, "Updating FDB entry");
+        debug_log!("FdbOrch", mac = %key.mac, vlan = key.vlan_id, port = %entry.port_name, "Updating FDB entry");
 
         let old_entry = self.entries.get(key)
             .ok_or_else(|| {
-                warn_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, "FDB entry not found for update");
+                warn_log!("FdbOrch", mac = %key.mac, vlan = key.vlan_id, "FDB entry not found for update");
                 FdbOrchError::EntryNotFound(key.clone())
             })?;
 
@@ -226,13 +226,13 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
         })?;
 
         callbacks.update_fdb_entry(key, &entry).map_err(|e| {
-            error_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, error = %e, "SAI update_fdb_entry failed");
+            error_log!("FdbOrch", mac = %key.mac, vlan = key.vlan_id, error = %e, "SAI update_fdb_entry failed");
             audit_log!(AuditRecord::new(
                 AuditCategory::SaiOperation,
                 "FdbOrch",
                 "update_fdb_entry"
             )
-            .with_object_id(format!("{}:{}", key.mac_address, key.vlan_id))
+            .with_object_id(format!("{}:{}", key.mac, key.vlan_id))
             .with_object_type("fdb_entry")
             .with_error(e.to_string()));
             e
@@ -241,14 +241,14 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
         self.entries.insert(key.clone(), entry.clone());
         self.stats.entries_updated += 1;
 
-        info_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, old_port = %old_port, new_port = %entry.port_name, "FDB entry updated successfully");
+        info_log!("FdbOrch", mac = %key.mac, vlan = key.vlan_id, old_port = %old_port, new_port = %entry.port_name, "FDB entry updated successfully");
         audit_log!(
             AuditRecord::new(AuditCategory::ResourceModify, "FdbOrch", "update_entry")
                 .with_outcome(AuditOutcome::Success)
-                .with_object_id(format!("{}:{}", key.mac_address, key.vlan_id))
+                .with_object_id(format!("{}:{}", key.mac, key.vlan_id))
                 .with_object_type("fdb_entry")
                 .with_details(serde_json::json!({
-                    "mac_address": key.mac_address.to_string(),
+                    "mac_address": key.mac.to_string(),
                     "vlan_id": key.vlan_id,
                     "old_port": old_port,
                     "new_port": entry.port_name

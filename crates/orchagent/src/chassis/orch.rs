@@ -10,6 +10,7 @@ use super::types::{
     ChassisStats, FabricPortEntry, FabricPortKey, RawSaiObjectId, SystemPortConfig,
     SystemPortEntry, SystemPortKey,
 };
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
 use crate::audit_log;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -139,17 +140,20 @@ impl<C: ChassisOrchCallbacks> ChassisOrch<C> {
         let key = SystemPortKey::new(config.system_port_id);
 
         if self.system_ports.contains_key(&key) {
-            audit_log!(
-                resource_id: &format!("system_port_{}", config.system_port_id),
-                action: "add_system_port",
-                category: "ResourceCreate",
-                outcome: "FAIL",
-                details: serde_json::json!({
-                    "error": "System port already exists",
-                    "system_port_id": config.system_port_id,
-                    "switch_id": config.switch_id,
-                })
-            );
+            let record = AuditRecord::new(
+                AuditCategory::ErrorCondition,
+                "ChassisOrch",
+                "add_system_port",
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&format!("system_port_{}", config.system_port_id))
+            .with_object_type("system_port")
+            .with_error("System port already exists")
+            .with_details(serde_json::json!({
+                "system_port_id": config.system_port_id,
+                "switch_id": config.switch_id,
+            }));
+            audit_log!(record);
             return Err(ChassisOrchError::SystemPortExists(key));
         }
 
@@ -175,20 +179,23 @@ impl<C: ChassisOrchCallbacks> ChassisOrch<C> {
         self.system_ports.insert(key, entry);
         self.stats.stats.system_ports_created += 1;
 
-        audit_log!(
-            resource_id: &format!("system_port_{}", config.system_port_id),
-            action: "add_system_port",
-            category: "ResourceCreate",
-            outcome: "SUCCESS",
-            details: serde_json::json!({
-                "system_port_id": config.system_port_id,
-                "switch_id": config.switch_id,
-                "core_index": config.core_index,
-                "core_port_index": config.core_port_index,
-                "speed": config.speed,
-                "sai_oid": sai_oid,
-            })
-        );
+        let record = AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "ChassisOrch",
+            "add_system_port",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&format!("system_port_{}", config.system_port_id))
+        .with_object_type("system_port")
+        .with_details(serde_json::json!({
+            "system_port_id": config.system_port_id,
+            "switch_id": config.switch_id,
+            "core_index": config.core_index,
+            "core_port_index": config.core_port_index,
+            "speed": config.speed,
+            "sai_oid": sai_oid,
+        }));
+        audit_log!(record);
 
         Ok(())
     }
@@ -196,16 +203,19 @@ impl<C: ChassisOrchCallbacks> ChassisOrch<C> {
     /// Remove a system port.
     pub fn remove_system_port(&mut self, key: &SystemPortKey) -> Result<()> {
         let entry = self.system_ports.remove(key).ok_or_else(|| {
-            audit_log!(
-                resource_id: &format!("system_port_{}", key.system_port_id),
-                action: "remove_system_port",
-                category: "ResourceDelete",
-                outcome: "FAIL",
-                details: serde_json::json!({
-                    "error": "System port not found",
-                    "system_port_id": key.system_port_id,
-                })
-            );
+            let record = AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "ChassisOrch",
+                "remove_system_port",
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&format!("system_port_{}", key.system_port_id))
+            .with_object_type("system_port")
+            .with_error("System port not found")
+            .with_details(serde_json::json!({
+                "system_port_id": key.system_port_id,
+            }));
+            audit_log!(record);
             ChassisOrchError::SystemPortNotFound(key.clone())
         })?;
 
@@ -215,17 +225,20 @@ impl<C: ChassisOrchCallbacks> ChassisOrch<C> {
             let _ = callbacks.remove_system_port_state(key);
         }
 
-        audit_log!(
-            resource_id: &format!("system_port_{}", key.system_port_id),
-            action: "remove_system_port",
-            category: "ResourceDelete",
-            outcome: "SUCCESS",
-            details: serde_json::json!({
-                "system_port_id": key.system_port_id,
-                "switch_id": entry.config.switch_id,
-                "speed": entry.config.speed,
-            })
-        );
+        let record = AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "ChassisOrch",
+            "remove_system_port",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&format!("system_port_{}", key.system_port_id))
+        .with_object_type("system_port")
+        .with_details(serde_json::json!({
+            "system_port_id": key.system_port_id,
+            "switch_id": entry.config.switch_id,
+            "speed": entry.config.speed,
+        }));
+        audit_log!(record);
 
         Ok(())
     }
@@ -312,16 +325,19 @@ impl<C: ChassisOrchCallbacks> ChassisOrch<C> {
     /// Set fabric port isolation state.
     pub fn set_fabric_port_isolate(&mut self, key: &FabricPortKey, isolate: bool) -> Result<()> {
         let entry = self.fabric_ports.get_mut(key).ok_or_else(|| {
-            audit_log!(
-                resource_id: &format!("fabric_port_{}", key.fabric_port_id),
-                action: "update_fabric_port",
-                category: "ResourceModify",
-                outcome: "FAIL",
-                details: serde_json::json!({
-                    "error": "Fabric port not found",
-                    "fabric_port_id": key.fabric_port_id,
-                })
-            );
+            let record = AuditRecord::new(
+                AuditCategory::ResourceModify,
+                "ChassisOrch",
+                "update_fabric_port",
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&format!("fabric_port_{}", key.fabric_port_id))
+            .with_object_type("fabric_port")
+            .with_error("Fabric port not found")
+            .with_details(serde_json::json!({
+                "fabric_port_id": key.fabric_port_id,
+            }));
+            audit_log!(record);
             ChassisOrchError::FabricPortNotFound(key.clone())
         })?;
 
@@ -336,17 +352,20 @@ impl<C: ChassisOrchCallbacks> ChassisOrch<C> {
 
         entry.isolate = isolate;
 
-        audit_log!(
-            resource_id: &format!("fabric_port_{}", key.fabric_port_id),
-            action: "update_fabric_port",
-            category: "ResourceModify",
-            outcome: "SUCCESS",
-            details: serde_json::json!({
-                "fabric_port_id": key.fabric_port_id,
-                "isolate": isolate,
-                "sai_oid": entry.sai_oid,
-            })
-        );
+        let record = AuditRecord::new(
+            AuditCategory::ResourceModify,
+            "ChassisOrch",
+            "update_fabric_port",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&format!("fabric_port_{}", key.fabric_port_id))
+        .with_object_type("fabric_port")
+        .with_details(serde_json::json!({
+            "fabric_port_id": key.fabric_port_id,
+            "isolate": isolate,
+            "sai_oid": entry.sai_oid,
+        }));
+        audit_log!(record);
 
         Ok(())
     }

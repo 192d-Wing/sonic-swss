@@ -338,6 +338,10 @@ impl VrfOrch {
             entry.fallback = fallback;
         }
 
+        // Capture values before moving entry
+        let v4_enabled = entry.admin_v4_state;
+        let v6_enabled = entry.admin_v6_state;
+
         // Store entry
         self.vrf_table.insert(name.clone(), entry);
         self.vrf_id_to_name.insert(vrf_id, name.clone());
@@ -365,8 +369,8 @@ impl VrfOrch {
                 .with_details(serde_json::json!({
                     "vrf_name": name,
                     "vrf_id": vrf_id,
-                    "v4_enabled": entry.admin_v4_state,
-                    "v6_enabled": entry.admin_v6_state,
+                    "v4_enabled": v4_enabled,
+                    "v6_enabled": v6_enabled,
                     "vni": config.vni,
                     "stats": {
                         "vrfs_created": self.stats.vrfs_created

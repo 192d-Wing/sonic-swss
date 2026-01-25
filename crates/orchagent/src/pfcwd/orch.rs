@@ -129,8 +129,8 @@ impl PfcWdOrch {
         .with_object_type("pfcwd_queue")
         .with_details(serde_json::json!({
             "action": format!("{:?}", config.action),
-            "detection_time_ms": config.detection_time.as_millis(),
-            "restoration_time_ms": config.restoration_time.as_millis(),
+            "detection_time_ms": config.detection_time.value(),
+            "restoration_time_ms": config.restoration_time.value(),
         })));
 
         Ok(())
@@ -242,7 +242,7 @@ impl PfcWdOrch {
             .with_object_type("pfcwd_queue")
             .with_details(serde_json::json!({
                 "event": "storm_detected",
-                "detection_time_ms": entry.detection_time.as_millis(),
+                "detection_time_ms": entry.detection_time.value(),
             })));
         }
     }
@@ -262,7 +262,7 @@ impl PfcWdOrch {
             .with_object_type("pfcwd_queue")
             .with_details(serde_json::json!({
                 "event": "storm_restored",
-                "restoration_time_ms": entry.restoration_time.as_millis(),
+                "restoration_time_ms": entry.restoration_time.value(),
             })));
         }
     }
@@ -270,7 +270,7 @@ impl PfcWdOrch {
     pub fn get_hw_stats(&self, queue_name: &str) -> Option<serde_json::Value> {
         if let Some(_entry) = self.queues.get(queue_name) {
             audit_log!(
-                AuditRecord::new(AuditCategory::Read, "PfcWdOrch", "get_hw_stats")
+                AuditRecord::new(AuditCategory::AdminAction, "PfcWdOrch", "get_hw_stats")
                     .with_outcome(AuditOutcome::Success)
                     .with_object_id(queue_name)
                     .with_object_type("pfcwd_queue_stats")

@@ -2,4 +2,4 @@
 
 mod orchdaemon;
 
-pub use orchdaemon::OrchDaemon;
+pub use orchdaemon::{OrchDaemon, OrchDaemonConfig};

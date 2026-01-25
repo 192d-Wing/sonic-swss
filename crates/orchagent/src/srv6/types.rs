@@ -28,6 +28,12 @@ impl Srv6Sid {
     }
 }
 
+impl std::fmt::Display for Srv6Sid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.sid)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Srv6EndpointBehavior {
     End,

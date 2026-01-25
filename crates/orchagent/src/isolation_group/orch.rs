@@ -185,13 +185,16 @@ impl IsolationGroupOrch {
         }
 
         // Remove all members
+        let members_count = entry.members.len();
+        let bind_ports_count = entry.bind_ports.len();
+        let sai_oid = entry.oid;
         for (_, member_oid) in entry.members {
             let _ = callbacks.remove_isolation_group_member(member_oid);
         }
 
         // Remove group
         callbacks
-            .remove_isolation_group(entry.oid)
+            .remove_isolation_group(sai_oid)
             .map_err(IsolationGroupOrchError::SaiError)?;
 
         let audit_record = AuditRecord::new(
@@ -204,9 +207,9 @@ impl IsolationGroupOrch {
         .with_object_type("isolation_group")
         .with_details(serde_json::json!({
             "group_name": name,
-            "sai_oid": format!("0x{:x}", entry.oid),
-            "members_removed": entry.members.len(),
-            "bindings_removed": entry.bind_ports.len(),
+            "sai_oid": format!("0x{:x}", sai_oid),
+            "members_removed": members_count,
+            "bindings_removed": bind_ports_count,
         }));
         audit_log!(audit_record);
 

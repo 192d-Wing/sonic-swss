@@ -1,6 +1,7 @@
 //! Counter check orchestration logic.
 
 use super::types::{CounterCheckEntry, CounterCheckKey, CounterCheckStats};
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
 use crate::audit_log;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -46,18 +47,21 @@ impl CounterCheckOrch {
         let resource_id = format!("{}_{}", key.port_name, key.counter_type);
         self.checks.insert(key.clone(), entry.clone());
 
-        audit_log!(
-            resource_id: &resource_id,
-            action: "add_counter_check",
-            category: "ResourceCreate",
-            outcome: "SUCCESS",
-            details: serde_json::json!({
-                "port_name": key.port_name,
-                "counter_type": key.counter_type,
-                "expected_value": entry.config.expected_value,
-                "tolerance": entry.config.tolerance,
-            })
-        );
+        let record = AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "CounterCheckOrch",
+            "add_counter_check",
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&resource_id)
+        .with_object_type("counter_check")
+        .with_details(serde_json::json!({
+            "port_name": key.port_name,
+            "counter_type": key.counter_type,
+            "expected_value": entry.config.expected_value,
+            "tolerance": entry.config.tolerance,
+        }));
+        audit_log!(record);
     }
 
     pub fn remove_check(&mut self, key: &CounterCheckKey) -> Option<CounterCheckEntry> {
@@ -65,28 +69,34 @@ impl CounterCheckOrch {
         let removed = self.checks.remove(key);
 
         if removed.is_some() {
-            audit_log!(
-                resource_id: &resource_id,
-                action: "remove_counter_check",
-                category: "ResourceDelete",
-                outcome: "SUCCESS",
-                details: serde_json::json!({
-                    "port_name": key.port_name,
-                    "counter_type": key.counter_type,
-                })
-            );
+            let record = AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "CounterCheckOrch",
+                "remove_counter_check",
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(&resource_id)
+            .with_object_type("counter_check")
+            .with_details(serde_json::json!({
+                "port_name": key.port_name,
+                "counter_type": key.counter_type,
+            }));
+            audit_log!(record);
         } else {
-            audit_log!(
-                resource_id: &resource_id,
-                action: "remove_counter_check",
-                category: "ResourceDelete",
-                outcome: "FAIL",
-                details: serde_json::json!({
-                    "error": "Check not found",
-                    "port_name": key.port_name,
-                    "counter_type": key.counter_type,
-                })
-            );
+            let record = AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "CounterCheckOrch",
+                "remove_counter_check",
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&resource_id)
+            .with_object_type("counter_check")
+            .with_error("Check not found")
+            .with_details(serde_json::json!({
+                "port_name": key.port_name,
+                "counter_type": key.counter_type,
+            }));
+            audit_log!(record);
         }
 
         removed
@@ -101,21 +111,30 @@ impl CounterCheckOrch {
 
         for (key, entry) in &self.checks {
             let is_valid = entry.is_within_tolerance(entry.last_value);
+            let resource_id = format!("{}_{}", key.port_name, key.counter_type);
+            let outcome = if is_valid {
+                AuditOutcome::Success
+            } else {
+                AuditOutcome::Failure
+            };
 
-            audit_log!(
-                resource_id: &format!("{}_{}", key.port_name, key.counter_type),
-                action: "validate_counters",
-                category: "SecurityPolicy",
-                outcome: if is_valid { "SUCCESS" } else { "FAIL" },
-                details: serde_json::json!({
-                    "port_name": key.port_name,
-                    "counter_type": key.counter_type,
-                    "last_value": entry.last_value,
-                    "expected_value": entry.config.expected_value,
-                    "tolerance": entry.config.tolerance,
-                    "within_tolerance": is_valid,
-                })
-            );
+            let record = AuditRecord::new(
+                AuditCategory::SecurityPolicy,
+                "CounterCheckOrch",
+                "validate_counters",
+            )
+            .with_outcome(outcome)
+            .with_object_id(&resource_id)
+            .with_object_type("counter_check")
+            .with_details(serde_json::json!({
+                "port_name": key.port_name,
+                "counter_type": key.counter_type,
+                "last_value": entry.last_value,
+                "expected_value": entry.config.expected_value,
+                "tolerance": entry.config.tolerance,
+                "within_tolerance": is_valid,
+            }));
+            audit_log!(record);
 
             if is_valid {
                 validated += 1;

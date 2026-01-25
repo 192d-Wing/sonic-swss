@@ -26,19 +26,6 @@ pub enum MlagOrchError {
     PortsNotReady,
 }
 
-impl std::fmt::Display for MlagOrchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InterfaceNotFound(name) => write!(f, "Interface not found: {}", name),
-            Self::DuplicateInterface(name) => write!(f, "Duplicate interface: {}", name),
-            Self::IslNotSet => write!(f, "ISL not set"),
-            Self::PortsNotReady => write!(f, "Ports not ready"),
-        }
-    }
-}
-
-impl std::error::Error for MlagOrchError {}
-
 /// Callbacks for MlagOrch operations.
 pub trait MlagOrchCallbacks: Send + Sync {
     /// Notifies observers about an MLAG change.

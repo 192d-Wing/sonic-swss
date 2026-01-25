@@ -71,6 +71,8 @@ impl Srv6Orch {
             return Err(Srv6OrchError::SaiError(error_msg));
         }
 
+        let endpoint_behavior = entry.config.endpoint_behavior;
+
         self.stats.stats.local_sids_created = self.stats.stats.local_sids_created.saturating_add(1);
         self.local_sids.insert(sid.clone(), entry);
 
@@ -80,7 +82,7 @@ impl Srv6Orch {
                 .with_object_id(&sid.to_string())
                 .with_object_type("local_sid")
                 .with_details(serde_json::json!({
-                    "endpoint_behavior": format!("{:?}", entry.config.endpoint_behavior)
+                    "endpoint_behavior": format!("{:?}", endpoint_behavior)
                 }))
         );
 
@@ -150,6 +152,8 @@ impl Srv6Orch {
             }
         }
 
+        let sid_count = entry.config.sids.len();
+
         self.stats.stats.sidlists_created = self.stats.stats.sidlists_created.saturating_add(1);
         self.sidlists.insert(name.clone(), entry);
 
@@ -159,7 +163,7 @@ impl Srv6Orch {
                 .with_object_id(&name)
                 .with_object_type("sid_list")
                 .with_details(serde_json::json!({
-                    "sid_count": entry.config.sids.len()
+                    "sid_count": sid_count
                 }))
         );
 

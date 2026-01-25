@@ -295,6 +295,10 @@ impl NvgreOrch {
             .as_ref()
             .ok_or_else(|| NvgreOrchError::SaiError("No callbacks set".to_string()))?;
 
+        // Store values before consuming the tunnel
+        let src_ip = tunnel.src_ip.clone();
+        let map_entries_len = tunnel.map_entries.len();
+
         // Remove all map entries first
         for (_, entry) in tunnel.map_entries {
             let _ = callbacks.remove_tunnel_map_entry(entry.map_entry_id);
@@ -322,8 +326,8 @@ impl NvgreOrch {
                 .with_object_id(name)
                 .with_object_type("nvgre_tunnel")
                 .with_details(serde_json::json!({
-                    "src_ip": tunnel.src_ip.to_string(),
-                    "map_entries_removed": tunnel.map_entries.len(),
+                    "src_ip": src_ip.to_string(),
+                    "map_entries_removed": map_entries_len,
                 }))
         );
 
