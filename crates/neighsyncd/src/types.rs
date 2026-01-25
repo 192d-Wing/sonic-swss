@@ -8,58 +8,9 @@
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv6Addr};
 
-/// MAC address representation
-///
-/// # NIST Controls
-/// - IA-3: Device Identification - MAC addresses for device identification
-/// - AU-3: Content of Audit Records - MAC included in neighbor audit records
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct MacAddress(pub [u8; 6]);
-
-impl MacAddress {
-    /// Zero MAC address (used for unresolved neighbors on dual-ToR)
-    /// NIST: SC-7 - Boundary protection for unresolved neighbors
-    pub const ZERO: Self = Self([0, 0, 0, 0, 0, 0]);
-
-    /// Broadcast MAC address (filtered out)
-    /// NIST: SC-5 - Denial of service protection (filter broadcast)
-    pub const BROADCAST: Self = Self([0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
-
-    /// Check if this is a zero MAC
-    #[inline]
-    pub fn is_zero(&self) -> bool {
-        self.0 == Self::ZERO.0
-    }
-
-    /// Check if this is a broadcast MAC
-    #[inline]
-    pub fn is_broadcast(&self) -> bool {
-        self.0 == Self::BROADCAST.0
-    }
-
-    /// Parse MAC from colon-separated string (e.g., "00:11:22:33:44:55")
-    pub fn parse(s: &str) -> Option<Self> {
-        let parts: Vec<&str> = s.split(':').collect();
-        if parts.len() != 6 {
-            return None;
-        }
-        let mut bytes = [0u8; 6];
-        for (i, part) in parts.iter().enumerate() {
-            bytes[i] = u8::from_str_radix(part, 16).ok()?;
-        }
-        Some(Self(bytes))
-    }
-}
-
-impl std::fmt::Display for MacAddress {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-            self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5]
-        )
-    }
-}
+// Re-export MacAddress from sonic-types for consistent usage across SONiC
+// NIST: IA-3 - Device Identification - MAC addresses for device identification
+pub use sonic_types::MacAddress;
 
 /// Kernel neighbor state (NUD_* values from linux/neighbour.h)
 ///
@@ -129,7 +80,7 @@ pub struct NeighborEntry {
     pub interface: String,
     /// Neighbor IP address (IPv6 only by default, IPv4 with feature)
     pub ip: IpAddr,
-    /// Neighbor MAC address
+    /// Neighbor MAC address (from sonic-types)
     pub mac: MacAddress,
     /// Kernel neighbor state
     pub state: NeighborState,
@@ -236,15 +187,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_mac_address_display() {
-        let mac = MacAddress([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+    fn test_mac_address_from_sonic_types() {
+        // Test that sonic-types MacAddress works correctly
+        let mac = MacAddress::new([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
         assert_eq!(mac.to_string(), "00:11:22:33:44:55");
-    }
-
-    #[test]
-    fn test_mac_address_parse() {
-        let mac = MacAddress::parse("00:11:22:33:44:55").unwrap();
-        assert_eq!(mac.0, [0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+        assert!(!mac.is_broadcast());
+        assert!(!mac.is_zero());
     }
 
     #[test]

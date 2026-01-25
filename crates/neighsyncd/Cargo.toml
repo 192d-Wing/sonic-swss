@@ -41,6 +41,9 @@ async-trait = "0.1"
 # Redis client for SWSS database
 redis = { version = "0.28", features = ["tokio-comp", "connection-manager"] }
 
+# SONiC shared types (MacAddress, IpAddress, etc.)
+sonic-types = { path = "../sonic-types" }
+
 # Netlink for kernel socket integration - Linux only
 [target.'cfg(target_os = "linux")'.dependencies]
 netlink-packet-route = "0.28"

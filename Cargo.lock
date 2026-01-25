@@ -2695,6 +2695,7 @@ dependencies = [
  "redis 0.28.2",
  "serde",
  "serde_json",
+ "sonic-types",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

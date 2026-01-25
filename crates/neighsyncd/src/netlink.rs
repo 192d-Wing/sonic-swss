@@ -221,7 +221,7 @@ mod linux {
                         if bytes.len() == 6 {
                             let mut arr = [0u8; 6];
                             arr.copy_from_slice(bytes);
-                            mac = Some(MacAddress(arr));
+                            mac = Some(MacAddress::new(arr));
                         }
                     }
                     _ => {}

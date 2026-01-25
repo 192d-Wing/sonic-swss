@@ -341,14 +341,13 @@ impl NeighSync {
 mod tests {
     use super::*;
     use crate::types::NeighborState;
-    use std::net::Ipv6Addr;
 
     fn make_test_entry(ip: &str, state: NeighborState) -> NeighborEntry {
         NeighborEntry {
             ifindex: 1,
             interface: "Ethernet0".to_string(),
             ip: ip.parse().unwrap(),
-            mac: MacAddress([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]),
+            mac: MacAddress::new([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]),
             state,
             externally_learned: false,
         }
