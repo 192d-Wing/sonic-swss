@@ -21,12 +21,12 @@ anyhow = "1.0"
 
 # Logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.8"
+toml = "0.9"
 
 # Standard library extensions
 parking_lot = "0.12"
@@ -34,21 +34,21 @@ futures = "0.3"
 async-trait = "0.1"
 
 # Redis client for SWSS database (Phase 5 Week 1)
-redis = { version = "0.25", features = ["tokio-comp", "connection-manager"] }
+redis = { version = "1", features = ["tokio-comp", "connection-manager"] }
 
 # Systemd integration (Phase 5 Week 3)
 sd-notify = "0.4"
 
 # Prometheus metrics (Phase 6 Week 1)
-prometheus = "0.13"
-axum = "0.7"
+prometheus = "0.14"
+axum = "0.8"
 
 # Netlink for kernel socket integration (Phase 5 Week 2) - Linux only
 [target.'cfg(target_os = "linux")'.dependencies]
-netlink-packet-route = "0.19"
-netlink-packet-core = "0.7"
+netlink-packet-route = "0.28"
+netlink-packet-core = "0.8"
 netlink-sys = { workspace = true }
-nix = { version = "0.29", features = ["net", "socket"] }
+nix = { version = "0.31", features = ["net", "socket"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 # Mock implementation on non-Linux platforms
