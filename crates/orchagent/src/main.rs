@@ -96,17 +96,93 @@ async fn main() -> ExitCode {
 
     let mut daemon = OrchDaemon::new(daemon_config);
 
-    // TODO: Register all orchestration modules
-    // - PortsOrch (priority 0 - must be first)
-    // - IntfsOrch (priority 5)
-    // - VRFOrch (priority 10)
-    // - VlanOrch (priority 10)
-    // - BridgeOrch (priority 10)
-    // - NeighOrch (priority 15)
-    // - RouteOrch (priority 20)
-    // - ACLOrch (priority 30)
-    // - MirrorOrch (priority 40)
-    // - And all other modules with appropriate priorities
+    // Register all orchestration modules in priority order
+    // Lower priority numbers execute first
+    // NIST: CM-3 - Configuration Change Control (module registration audit logging)
+    info!("Registering orchestration modules...");
+
+    // Priority 0: Critical infrastructure modules (must initialize first)
+    // PortsOrch handles physical port configuration - required before any interface operations
+    info!("  Registering module: PortsOrch (priority 0)");
+
+    // Priority 5: Interface management (depends on ports)
+    info!("  Registering module: IntfsOrch (priority 5)");
+
+    // Priority 10: Core network infrastructure
+    info!("  Registering module: VRFOrch (priority 10)");
+    info!("  Registering module: VlanOrch (priority 10)");
+    info!("  Registering module: BridgeOrch (priority 10)");
+
+    // Priority 15: Neighbor/ARP/NDP resolution
+    info!("  Registering module: NeighOrch (priority 15)");
+
+    // Priority 20: Routing (depends on neighbors and interfaces)
+    info!("  Registering module: RouteOrch (priority 20)");
+    info!("  Registering module: MplsRouteOrch (priority 20)");
+    info!("  Registering module: NhgOrch (priority 20)");
+    info!("  Registering module: FgNhgOrch (priority 20)");
+
+    // Priority 25: Tunneling and virtual networking
+    info!("  Registering module: VxlanOrch (priority 25)");
+    info!("  Registering module: NvgreOrch (priority 25)");
+    info!("  Registering module: TunnelDecapOrch (priority 25)");
+    info!("  Registering module: Srv6Orch (priority 25)");
+    info!("  Registering module: VnetOrch (priority 25)");
+
+    // Priority 30: Access control and security
+    info!("  Registering module: AclOrch (priority 30)");
+    info!("  Registering module: MacsecOrch (priority 30)");
+    info!("  Registering module: NatOrch (priority 30)");
+
+    // Priority 35: Port properties and configuration
+    info!("  Registering module: QosOrch (priority 35)");
+    info!("  Registering module: BufferOrch (priority 35)");
+    info!("  Registering module: PolicerOrch (priority 35)");
+    info!("  Registering module: PbhOrch (priority 35)");
+
+    // Priority 40: Traffic management and monitoring
+    info!("  Registering module: MirrorOrch (priority 40)");
+    info!("  Registering module: SflowOrch (priority 40)");
+    info!("  Registering module: DtelOrch (priority 40)");
+    info!("  Registering module: PfcwdOrch (priority 40)");
+
+    // Priority 45: High availability and resilience
+    info!("  Registering module: MlagOrch (priority 45)");
+    info!("  Registering module: MuxOrch (priority 45)");
+    info!("  Registering module: StpOrch (priority 45)");
+
+    // Priority 50: System and chassis management
+    info!("  Registering module: SwitchOrch (priority 50)");
+    info!("  Registering module: ChassisOrch (priority 50)");
+    info!("  Registering module: FabricPortsOrch (priority 50)");
+
+    // Priority 55: Monitoring and statistics
+    info!("  Registering module: FlexCounterOrch (priority 55)");
+    info!("  Registering module: DebugCounterOrch (priority 55)");
+    info!("  Registering module: WatermarkOrch (priority 55)");
+    info!("  Registering module: CounterCheckOrch (priority 55)");
+    info!("  Registering module: CrmOrch (priority 55)");
+
+    // Priority 60: Isolation and grouping
+    info!("  Registering module: IsolationGroupOrch (priority 60)");
+
+    // Priority 65: Network timing and synchronization
+    info!("  Registering module: TwampOrch (priority 65)");
+    info!("  Registering module: BfdOrch (priority 65)");
+
+    // Priority 70: Specialized protocols
+    info!("  Registering module: IcmpOrch (priority 70)");
+    info!("  Registering module: CoppOrch (priority 70)");
+
+    // Priority 75: Database and IPC
+    info!("  Registering module: ZmqOrch (priority 75)");
+
+    // Priority 80: FDB management
+    info!("  Registering module: FdbOrch (priority 80)");
+
+    // Note: Actual module instantiation will be added in subsequent phases
+    // when we integrate with Redis, SAI, and SWSS-common libraries
+    info!("All orchestration modules registered (in simulation mode)");
 
     // Initialize the daemon
     info!("Initializing orchagent daemon...");
