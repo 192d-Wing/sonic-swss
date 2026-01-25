@@ -11,6 +11,10 @@ license.workspace = true
 name = "neighsyncd"
 path = "src/main.rs"
 
+[[bin]]
+name = "neighsyncd-benchmark"
+path = "src/bin/benchmark.rs"
+
 [features]
 default = []
 # Enable IPv4/ARP neighbor discovery support (disabled by default)
@@ -54,6 +58,9 @@ rustc-hash = { version = "2.1", optional = true }
 
 # libc for socket options
 libc = "0.2"
+
+# CLI argument parsing for benchmark tool
+clap = { version = "4.4", features = ["derive"] }
 
 # Netlink for kernel socket integration - Linux only
 [target.'cfg(target_os = "linux")'.dependencies]
