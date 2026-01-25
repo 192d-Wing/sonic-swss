@@ -66,6 +66,7 @@ impl Ipv6Address {
     pub const UNSPECIFIED: Self = Ipv6Address(Ipv6Addr::UNSPECIFIED);
     pub const LOCALHOST: Self = Ipv6Address(Ipv6Addr::LOCALHOST);
 
+    #[allow(clippy::too_many_arguments)]
     pub const fn new(a: u16, b: u16, c: u16, d: u16, e: u16, f: u16, g: u16, h: u16) -> Self {
         Ipv6Address(Ipv6Addr::new(a, b, c, d, e, f, g, h))
     }

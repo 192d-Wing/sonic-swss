@@ -11,6 +11,7 @@ use crate::types::NeighborEntry;
 use redis::aio::ConnectionManager;
 use redis::{AsyncCommands, Client};
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 use tracing::{debug, instrument};
 
 /// SONiC database indices
@@ -27,6 +28,17 @@ const CFG_LAG_INTF_TABLE_NAME: &str = "PORTCHANNEL_INTERFACE";
 const CFG_VLAN_INTF_TABLE_NAME: &str = "VLAN_INTERFACE";
 const CFG_PEER_SWITCH_TABLE_NAME: &str = "PEER_SWITCH";
 
+/// Link-local cache TTL
+/// NIST: SC-5 - Performance optimization to reduce DB queries
+const LINK_LOCAL_CACHE_TTL: Duration = Duration::from_secs(60);
+
+/// Link-local configuration cache entry
+#[derive(Debug, Clone)]
+struct LinkLocalCacheEntry {
+    enabled: bool,
+    timestamp: Instant,
+}
+
 /// Redis adapter for SONiC database operations
 ///
 /// # NIST Controls
@@ -36,6 +48,9 @@ pub struct RedisAdapter {
     appl_db: ConnectionManager,
     config_db: ConnectionManager,
     state_db: ConnectionManager,
+    /// Cache for link-local configuration lookups
+    /// NIST: SC-5 - Performance optimization
+    link_local_cache: HashMap<String, LinkLocalCacheEntry>,
 }
 
 impl RedisAdapter {
@@ -57,6 +72,7 @@ impl RedisAdapter {
             appl_db,
             config_db,
             state_db,
+            link_local_cache: HashMap::new(),
         })
     }
 
@@ -132,11 +148,22 @@ impl RedisAdapter {
 
     /// Check if IPv6 link-local is enabled on an interface
     ///
+    /// Uses TTL-based cache to reduce CONFIG_DB queries.
+    ///
     /// # NIST Controls
     /// - CM-6: Configuration Settings - Interface configuration
     /// - SC-7: Boundary Protection - Link-local filtering config
+    /// - SC-5: DoS Protection - Cache reduces DB load
     #[instrument(skip(self))]
     pub async fn is_ipv6_link_local_enabled(&mut self, interface: &str) -> Result<bool> {
+        // Check cache first
+        if let Some(entry) = self.link_local_cache.get(interface) {
+            if entry.timestamp.elapsed() < LINK_LOCAL_CACHE_TTL {
+                debug!(interface, enabled = entry.enabled, "Link-local cache hit");
+                return Ok(entry.enabled);
+            }
+        }
+
         // Determine which table to check based on interface name
         let table = if interface.starts_with("Vlan") {
             CFG_VLAN_INTF_TABLE_NAME
@@ -156,8 +183,78 @@ impl RedisAdapter {
             .get("ipv6_use_link_local_only")
             .is_some_and(|v| v == "enable");
 
-        debug!(interface, table, enabled, "Checked IPv6 link-local status");
+        // Update cache
+        self.link_local_cache.insert(
+            interface.to_string(),
+            LinkLocalCacheEntry {
+                enabled,
+                timestamp: Instant::now(),
+            },
+        );
+
+        debug!(
+            interface,
+            table, enabled, "Checked IPv6 link-local status (cached)"
+        );
         Ok(enabled)
+    }
+
+    /// Clear the link-local cache (useful for testing or config reload)
+    pub fn clear_link_local_cache(&mut self) {
+        self.link_local_cache.clear();
+    }
+
+    /// Batch set multiple neighbor entries using Redis pipelining
+    ///
+    /// # NIST Controls
+    /// - AU-12: Audit Record Generation - Efficient bulk audit records
+    /// - SC-5: DoS Protection - Reduce round-trips under high load
+    #[instrument(skip(self, entries), fields(count = entries.len()))]
+    pub async fn set_neighbors_batch(&mut self, entries: &[NeighborEntry]) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+
+        let mut pipe = redis::pipe();
+        pipe.atomic(); // Execute as transaction
+
+        for entry in entries {
+            let key = format!("{}:{}", APP_NEIGH_TABLE_NAME, entry.redis_key());
+            pipe.hset_multiple::<_, _, _>(
+                &key,
+                &[
+                    ("neigh", entry.mac.to_string()),
+                    ("family", entry.family_str().to_string()),
+                ],
+            );
+        }
+
+        let _: () = pipe.query_async(&mut self.appl_db).await?;
+        debug!(count = entries.len(), "Batch set neighbors");
+        Ok(())
+    }
+
+    /// Batch delete multiple neighbor entries using Redis pipelining
+    ///
+    /// # NIST Controls
+    /// - AU-12: Audit Record Generation - Efficient bulk audit records
+    /// - SC-5: DoS Protection - Reduce round-trips under high load
+    #[instrument(skip(self, entries), fields(count = entries.len()))]
+    pub async fn delete_neighbors_batch(&mut self, entries: &[NeighborEntry]) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+
+        let mut pipe = redis::pipe();
+
+        for entry in entries {
+            let key = format!("{}:{}", APP_NEIGH_TABLE_NAME, entry.redis_key());
+            pipe.del::<_>(&key);
+        }
+
+        let _: () = pipe.query_async(&mut self.appl_db).await?;
+        debug!(count = entries.len(), "Batch deleted neighbors");
+        Ok(())
     }
 
     /// Get all current neighbor entries from APPL_DB (for warm restart reconciliation)

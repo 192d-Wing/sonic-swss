@@ -23,6 +23,10 @@ mod linux {
     /// Netlink group for neighbor notifications (RTNLGRP_NEIGH = 3)
     const RTNLGRP_NEIGH: u32 = 3;
 
+    /// Socket receive buffer size (1MB) for handling burst loads
+    /// NIST: SC-5 - DoS protection via adequate buffer sizing
+    const SOCKET_RECV_BUFFER_SIZE: usize = 1024 * 1024;
+
     /// Interface name cache
     ///
     /// # NIST Controls
@@ -94,11 +98,60 @@ mod linux {
 
             debug!("Netlink socket bound to RTNLGRP_NEIGH");
 
-            Ok(Self {
+            let mut nl_socket = Self {
                 socket,
                 buffer: vec![0u8; 65536],
                 interface_cache: InterfaceCache::default(),
-            })
+            };
+
+            // Tune socket for high-throughput scenarios
+            nl_socket.tune_socket()?;
+
+            Ok(nl_socket)
+        }
+
+        /// Tune socket buffer settings for high-throughput scenarios
+        ///
+        /// # NIST Controls
+        /// - SC-5: DoS Protection - Prevent buffer overflow under burst load
+        fn tune_socket(&self) -> Result<()> {
+            let fd = self.socket.as_raw_fd();
+
+            // Set receive buffer to 1MB
+            // NIST: SC-5 - Adequate buffering prevents event loss
+            unsafe {
+                let size = SOCKET_RECV_BUFFER_SIZE as libc::c_int;
+                let ret = libc::setsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_RCVBUF,
+                    &size as *const _ as *const libc::c_void,
+                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                );
+                if ret < 0 {
+                    warn!("Failed to set SO_RCVBUF, using default buffer size");
+                } else {
+                    debug!(size = SOCKET_RECV_BUFFER_SIZE, "Set socket receive buffer");
+                }
+
+                // Enable NETLINK_NO_ENOBUFS to prevent ENOBUFS errors under load
+                // NIST: SC-5 - Graceful handling of high event rates
+                let enable: libc::c_int = 1;
+                let ret = libc::setsockopt(
+                    fd,
+                    libc::SOL_NETLINK,
+                    libc::NETLINK_NO_ENOBUFS,
+                    &enable as *const _ as *const libc::c_void,
+                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                );
+                if ret < 0 {
+                    warn!("Failed to set NETLINK_NO_ENOBUFS");
+                } else {
+                    debug!("Enabled NETLINK_NO_ENOBUFS");
+                }
+            }
+
+            Ok(())
         }
 
         /// Get the raw file descriptor for async polling

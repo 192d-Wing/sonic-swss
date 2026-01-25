@@ -18,6 +18,11 @@ ipv4 = []
 # Enable both IPv4 and IPv6 (convenience feature)
 dual-stack = ["ipv4"]
 
+# Performance optimizations (see docs/rust/neighsyncd/PERFORMANCE.md)
+# NIST: SC-5 - DoS protection via optimized event handling
+perf-fxhash = ["rustc-hash"]           # FxHashMap for faster interface lookups
+perf-all = ["perf-fxhash"]             # Enable all performance features
+
 [dependencies]
 # Async runtime - use workspace version for compatibility
 tokio = { workspace = true }
@@ -43,6 +48,12 @@ redis = { version = "0.28", features = ["tokio-comp", "connection-manager"] }
 
 # SONiC shared types (MacAddress, IpAddress, etc.)
 sonic-types = { path = "../sonic-types" }
+
+# Performance: FxHashMap for faster small-key lookups
+rustc-hash = { version = "2.1", optional = true }
+
+# libc for socket options
+libc = "0.2"
 
 # Netlink for kernel socket integration - Linux only
 [target.'cfg(target_os = "linux")'.dependencies]
