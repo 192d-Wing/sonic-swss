@@ -175,7 +175,6 @@ impl MetricsCollector {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

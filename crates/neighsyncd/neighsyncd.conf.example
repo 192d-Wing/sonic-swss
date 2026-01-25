@@ -1,0 +1,254 @@
+# neighsyncd configuration file
+#
+# This file contains configuration options for the SONiC Neighbor Sync Daemon.
+# Copy this file to /etc/sonic/neighsyncd/neighsyncd.conf and customize as needed.
+#
+# Format: TOML (https://toml.io/)
+# Documentation: See docs/rust/neighsyncd/CONFIGURATION.md
+
+# =============================================================================
+# Redis Configuration
+# =============================================================================
+
+[redis]
+# Redis server host (IPv6 loopback recommended)
+# Default: "::1"
+host = "::1"
+
+# Redis server port
+# Default: 6379
+port = 6379
+
+# Redis database number
+# Default: 0 (APPL_DB)
+database = 0
+
+# Connection timeout in milliseconds
+# Default: 5000 (5 seconds)
+# timeout_ms = 5000
+
+# Maximum number of reconnection attempts
+# Default: 10
+# max_retries = 10
+
+# Retry backoff in milliseconds
+# Default: 1000 (1 second)
+# retry_backoff_ms = 1000
+
+# =============================================================================
+# Netlink Configuration
+# =============================================================================
+
+[netlink]
+# Socket receive buffer size in bytes
+# Larger buffer reduces packet loss under high neighbor event rates
+# Default: 262144 (256 KB)
+# Recommended: 262144 for < 100 interfaces, 524288 for 100+ interfaces
+socket_buffer_size = 262144
+
+# Netlink socket timeout in milliseconds
+# Default: 5000 (5 seconds)
+timeout_ms = 5000
+
+# Netlink groups to listen on
+# Default: ["neigh"] (neighbor events only)
+# Options: "neigh", "link", "route"
+# groups = ["neigh"]
+
+# =============================================================================
+# Logging Configuration
+# =============================================================================
+
+[logging]
+# Log level
+# Options: "trace", "debug", "info", "warn", "error"
+# Default: "info"
+# Production recommended: "info"
+# Troubleshooting: "debug" or "trace"
+level = "info"
+
+# Log format
+# Options: "json", "text"
+# Default: "json" (structured logging for log aggregation)
+# Use "text" for human-readable console output
+format = "json"
+
+# Log target
+# Options: "stdout", "stderr", "file", "journald"
+# Default: "journald" (systemd journal)
+# target = "journald"
+
+# Log file path (only used if target = "file")
+# file_path = "/var/log/sonic/neighsyncd/neighsyncd.log"
+
+# =============================================================================
+# Performance Configuration
+# =============================================================================
+
+[performance]
+# Batch size for Redis operations
+# Larger batches improve throughput but increase latency
+# Default: 100
+# Range: 10-1000
+batch_size = 100
+
+# Warm restart reconciliation timeout in milliseconds
+# Time to wait before reconciling cached state with kernel state
+# Default: 5000 (5 seconds)
+# Range: 1000-30000
+reconcile_timeout_ms = 5000
+
+# Event queue depth
+# Maximum number of pending neighbor events
+# Default: 10000
+# Range: 1000-100000
+# queue_depth = 10000
+
+# Worker threads for async runtime
+# Default: 4 (number of CPU cores)
+# Set to 0 to use all available cores
+# worker_threads = 4
+
+# =============================================================================
+# Metrics and Monitoring
+# =============================================================================
+
+[metrics]
+# Enable Prometheus metrics endpoint
+# Default: true
+enabled = true
+
+# Metrics server port (IPv6 loopback [::1])
+# Default: 9091
+port = 9091
+
+# Enable mTLS for metrics endpoint (CNSA 2.0 compliant)
+# Default: true (highly recommended for production)
+mtls_enabled = true
+
+# Server certificate path (PEM format)
+# Required if mtls_enabled = true
+server_cert = "/etc/sonic/metrics/server/server-cert.pem"
+
+# Server private key path (PEM format)
+# Required if mtls_enabled = true
+# Must be EC P-384 or P-521 for CNSA 2.0 compliance
+server_key = "/etc/sonic/metrics/server/server-key.pem"
+
+# CA certificate for client verification (PEM format)
+# Required if mtls_enabled = true
+ca_cert = "/etc/sonic/metrics/ca/ca-cert.pem"
+
+# Health check endpoint
+# Default: true
+# health_enabled = true
+
+# =============================================================================
+# Deployment Configuration
+# =============================================================================
+
+[deployment]
+# Enable dual-ToR support
+# Default: false
+# Set to true for multi-instance neighbor synchronization
+dual_tor = false
+
+# Enable IPv4 neighbor synchronization
+# Default: true
+ipv4_enabled = true
+
+# Enable IPv6 neighbor synchronization
+# Default: true
+ipv6_enabled = true
+
+# Chassis name (for dual-ToR deployments)
+# Default: "sonic"
+# chassis_name = "sonic"
+
+# =============================================================================
+# Advanced Configuration
+# =============================================================================
+
+[advanced]
+# Enable memory profiling
+# Default: false
+# Warning: Adds overhead, use only for troubleshooting
+# memory_profiling = false
+
+# Enable CPU profiling
+# Default: false
+# Warning: Adds overhead, use only for troubleshooting
+# cpu_profiling = false
+
+# Enable tracing
+# Default: false
+# tracing_enabled = false
+
+# Tracing endpoint (Jaeger, Zipkin, etc.)
+# tracing_endpoint = "http://localhost:9411/api/v2/spans"
+
+# =============================================================================
+# Feature Flags (Experimental)
+# =============================================================================
+
+[features]
+# Use FxHash for HashMap (faster but non-cryptographic)
+# Default: true if compiled with "perf-fxhash" feature
+# fxhash = true
+
+# Enable interface batching optimization
+# Default: true
+# interface_batching = true
+
+# Enable state diffing optimization
+# Default: true
+# state_diffing = true
+
+# =============================================================================
+# Security Configuration
+# =============================================================================
+
+[security]
+# Enforce CNSA 2.0 compliance for all TLS connections
+# Default: true
+# cnsa_enforcement = true
+
+# Allowed TLS versions
+# Default: ["TLSv1.3"]
+# tls_versions = ["TLSv1.3"]
+
+# Allowed cipher suites (CNSA 2.0: TLS_AES_256_GCM_SHA384 only)
+# Default: ["TLS_AES_256_GCM_SHA384"]
+# cipher_suites = ["TLS_AES_256_GCM_SHA384"]
+
+# Minimum elliptic curve size (CNSA 2.0: P-384 or P-521)
+# Default: 384
+# min_ec_key_size = 384
+
+# Disable session resumption (maximum security)
+# Default: true
+# disable_session_resumption = true
+
+# =============================================================================
+# Development/Testing Configuration
+# =============================================================================
+
+# Uncomment for development/testing environments:
+
+# [development]
+# # Disable mTLS for local testing (NOT for production)
+# # mtls_enabled = false
+#
+# # Use plain text logging for easier debugging
+# # log_format = "text"
+# # log_level = "debug"
+#
+# # Reduce batch size for faster iteration
+# # batch_size = 10
+#
+# # Shorter reconcile timeout
+# # reconcile_timeout_ms = 1000
+
+# =============================================================================
+# End of Configuration File
+# =============================================================================

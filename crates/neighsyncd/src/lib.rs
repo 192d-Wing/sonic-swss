@@ -48,12 +48,18 @@
 //! ```
 
 pub mod error;
+pub mod health_monitor;
+pub mod metrics;
+pub mod metrics_server;
 pub mod neigh_sync;
 pub mod netlink;
 pub mod redis_adapter;
 pub mod types;
 
 pub use error::{NeighsyncError, Result};
+pub use health_monitor::HealthMonitor;
+pub use metrics::{HealthStatus, MetricsCollector};
+pub use metrics_server::{start_metrics_server, start_metrics_server_insecure, MetricsServerConfig};
 pub use neigh_sync::{AsyncNeighSync, NeighSync};
 pub use netlink::{AsyncNetlinkSocket, NetlinkSocket};
 pub use redis_adapter::RedisAdapter;

@@ -1,0 +1,62 @@
+[Unit]
+Description=SONiC Neighbor Sync Daemon (Rust)
+Documentation=https://github.com/sonic-net/sonic-swss
+Documentation=file:///usr/share/doc/neighsyncd/DEPLOYMENT.md
+After=network-online.target redis.service
+Wants=network-online.target
+Requires=redis.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=sonic
+Group=sonic
+
+# Environment
+Environment="RUST_LOG=info"
+Environment="RUST_BACKTRACE=1"
+
+# Execution
+ExecStart=/usr/local/bin/sonic-neighsyncd
+Restart=on-failure
+RestartSec=5s
+WatchdogSec=15s
+TimeoutStartSec=30s
+TimeoutStopSec=10s
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/sonic/neighsyncd /var/run/sonic/neighsyncd
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictSUIDSGID=true
+RemoveIPC=true
+PrivateMounts=true
+
+# Resource limits
+MemoryLimit=256M
+MemoryHigh=200M
+TasksMax=32
+LimitNOFILE=65536
+LimitNPROC=64
+
+# Capabilities (minimal required for netlink operations)
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=neighsyncd
+
+[Install]
+WantedBy=multi-user.target
