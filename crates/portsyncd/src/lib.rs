@@ -6,6 +6,7 @@
 //! NIST 800-53 Rev5 [SC-7]: Boundary Protection - Port status synchronization
 //! NIST 800-53 Rev5 [SI-4]: System Monitoring - Real-time port state monitoring
 
+pub mod alerting;
 pub mod config;
 pub mod config_file;
 pub mod eoiu_detector;
@@ -19,8 +20,13 @@ pub mod port_sync;
 pub mod production_db;
 pub mod production_features;
 pub mod redis_adapter;
+pub mod trend_analysis;
 pub mod warm_restart;
 
+pub use alerting::{
+    Alert, AlertAction, AlertCondition, AlertRule, AlertSeverity, AlertState, AlertingEngine,
+    create_default_alert_rules,
+};
 pub use config::*;
 pub use config_file::{HealthConfig, PerformanceConfig, PortsyncConfig};
 pub use eoiu_detector::{EoiuDetectionState, EoiuDetector};
@@ -34,6 +40,10 @@ pub use port_sync::*;
 pub use production_db::ProductionDatabase;
 pub use production_features::{HealthMonitor, ShutdownCoordinator, SystemdNotifier};
 pub use redis_adapter::RedisAdapter;
+pub use trend_analysis::{
+    Anomaly, AnomalySeverity, HistoricalMetrics, MetricObservation, PredictiveScorer,
+    SeasonalPattern, TrendAnalysis, TrendAnalyzer, TrendDirection,
+};
 pub use warm_restart::{
     PersistedPortState, PortState, WarmRestartManager, WarmRestartMetrics, WarmRestartState,
 };
