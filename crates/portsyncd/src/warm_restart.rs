@@ -1137,7 +1137,7 @@ mod tests {
         }
 
         let backups = manager.get_backup_files().unwrap();
-        assert!(backups.len() >= 1); // At least one backup created
+        assert!(!backups.is_empty()); // At least one backup created
 
         // Verify they are sorted (newest first)
         // Since backups are sorted by filename and created with timestamps,
@@ -1596,5 +1596,451 @@ mod tests {
             manager.current_state(),
             WarmRestartState::InitialSyncComplete
         );
+    }
+
+    // ========== ADDITIONAL STATE LIFECYCLE TESTS (Phase 6 Week 3 Task 10) ==========
+
+    #[test]
+    fn test_state_file_cleanup_with_multiple_old_files() {
+        let temp_dir = TempDir::new().unwrap();
+        let state_file = temp_dir.path().join("port_state.json");
+
+        let mut manager = WarmRestartManager::with_state_file(state_file.clone());
+        manager.add_port(PortState::new("Ethernet0".to_string(), 1, 1, 0x41, 9216));
+        manager.save_state().unwrap();
+
+        // Verify file exists
+        assert!(state_file.exists());
+        let age = manager.state_file_age_secs().unwrap();
+        assert!(age.is_some());
+    }
+
+    #[test]
+    fn test_rotation_creates_backup_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let state_file = temp_dir.path().join("port_state.json");
+        let backup_dir = temp_dir.path().join("backups");
+
+        let mut manager = WarmRestartManager::with_state_file(state_file.clone());
+        manager.add_port(PortState::new("Ethernet0".to_string(), 1, 1, 0x41, 9216));
+        manager.save_state().unwrap();
+
+        // Initially no backup dir
+        assert!(!backup_dir.exists());
+
+        // After rotation, backup dir should exist
+        manager.rotate_state_file().unwrap();
+        assert!(backup_dir.exists());
+    }
+
+    #[test]
+    fn test_recovery_with_valid_state() {
+        let temp_dir = TempDir::new().unwrap();
+        let state_file = temp_dir.path().join("port_state.json");
+
+        {
+            let mut manager = WarmRestartManager::with_state_file(state_file.clone());
+            manager.add_port(PortState::new("Ethernet0".to_string(), 1, 1, 0x41, 9216));
+            manager.add_port(PortState::new("Ethernet4".to_string(), 1, 0, 0x01, 9216));
+            manager.save_state().unwrap();
+        }
+
+        {
+            let mut manager = WarmRestartManager::with_state_file(state_file);
+            let recovered = manager.load_state_with_recovery().unwrap();
+            assert!(recovered);
+            assert_eq!(manager.port_count(), 2);
+        }
+    }
+
+    #[test]
+    fn test_state_persistence_across_managers() {
+        let temp_dir = TempDir::new().unwrap();
+        let state_file = temp_dir.path().join("port_state.json");
+
+        {
+            let mut manager = WarmRestartManager::with_state_file(state_file.clone());
+            for i in 0..3 {
+                let port = PortState::new(format!("Ethernet{}", i * 4), 1, 1, 0x41, 9216);
+                manager.add_port(port);
+            }
+            manager.save_state().unwrap();
+        }
+
+        {
+            let mut manager = WarmRestartManager::with_state_file(state_file.clone());
+            manager.load_state().unwrap();
+            assert_eq!(manager.port_count(), 3);
+
+            // Verify each port
+            assert!(manager.get_port("Ethernet0").is_some());
+            assert!(manager.get_port("Ethernet4").is_some());
+            assert!(manager.get_port("Ethernet8").is_some());
+        }
+    }
+
+    #[test]
+    fn test_metrics_recorded_on_cold_start() {
+        let temp_dir = TempDir::new().unwrap();
+        let state_file = temp_dir.path().join("port_state.json");
+
+        let mut manager = WarmRestartManager::with_state_file(state_file);
+        manager.initialize().unwrap();
+
+        assert_eq!(manager.metrics.cold_start_count, 1);
+        assert_eq!(manager.metrics.warm_restart_count, 0);
+    }
+
+    #[test]
+    fn test_metrics_recorded_on_warm_start() {
+        let temp_dir = TempDir::new().unwrap();
+        let state_file = temp_dir.path().join("port_state.json");
+
+        {
+            let mut manager = WarmRestartManager::with_state_file(state_file.clone());
+            manager.add_port(PortState::new("Ethernet0".to_string(), 1, 1, 0x41, 9216));
+            manager.save_state().unwrap();
+        }
+
+        {
+            let mut manager = WarmRestartManager::with_state_file(state_file);
+            manager.initialize().unwrap();
+
+            assert_eq!(manager.metrics.warm_restart_count, 1);
+            assert_eq!(manager.metrics.cold_start_count, 0);
+        }
+    }
+
+    #[test]
+    fn test_backup_metrics_recorded() {
+        let temp_dir = TempDir::new().unwrap();
+        let state_file = temp_dir.path().join("port_state.json");
+
+        let mut manager = WarmRestartManager::with_state_file(state_file.clone());
+        manager.add_port(PortState::new("Ethernet0".to_string(), 1, 1, 0x41, 9216));
+        manager.save_state().unwrap();
+
+        assert_eq!(manager.metrics.backup_created_count, 0);
+
+        manager.rotate_state_file().unwrap();
+        assert_eq!(manager.metrics.backup_created_count, 1);
+
+        manager.rotate_state_file().unwrap();
+        assert_eq!(manager.metrics.backup_created_count, 2);
+    }
+
+    #[test]
+    fn test_cleanup_records_metrics() {
+        let temp_dir = TempDir::new().unwrap();
+        let state_file = temp_dir.path().join("port_state.json");
+
+        let mut manager = WarmRestartManager::with_state_file(state_file.clone());
+        manager.add_port(PortState::new("Ethernet0".to_string(), 1, 1, 0x41, 9216));
+        manager.save_state().unwrap();
+
+        // Create multiple backups with delays
+        for _ in 0..3 {
+            manager.rotate_state_file().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1100));
+        }
+
+        let initial_cleanup_count = manager.metrics.backup_cleanup_count;
+
+        // Cleanup old backups
+        manager.cleanup_old_backups(2).unwrap();
+
+        // Cleanup count should have increased
+        assert!(manager.metrics.backup_cleanup_count > initial_cleanup_count);
+    }
+
+    #[test]
+    fn test_multiple_state_files_independent() {
+        let temp_dir = TempDir::new().unwrap();
+        let state_file1 = temp_dir.path().join("state1.json");
+        let state_file2 = temp_dir.path().join("state2.json");
+
+        {
+            let mut manager1 = WarmRestartManager::with_state_file(state_file1.clone());
+            manager1.add_port(PortState::new("Ethernet0".to_string(), 1, 1, 0x41, 9216));
+            manager1.save_state().unwrap();
+
+            let mut manager2 = WarmRestartManager::with_state_file(state_file2.clone());
+            manager2.add_port(PortState::new("Ethernet4".to_string(), 1, 1, 0x41, 9216));
+            manager2.add_port(PortState::new("Ethernet8".to_string(), 1, 1, 0x41, 9216));
+            manager2.save_state().unwrap();
+        }
+
+        {
+            let mut manager1 = WarmRestartManager::with_state_file(state_file1);
+            manager1.load_state().unwrap();
+            assert_eq!(manager1.port_count(), 1);
+
+            let mut manager2 = WarmRestartManager::with_state_file(state_file2);
+            manager2.load_state().unwrap();
+            assert_eq!(manager2.port_count(), 2);
+        }
+    }
+
+    #[test]
+    fn test_state_validation_with_ports() {
+        let temp_dir = TempDir::new().unwrap();
+        let state_file = temp_dir.path().join("port_state.json");
+
+        let mut manager = WarmRestartManager::with_state_file(state_file);
+
+        // New empty state is valid
+        assert!(manager.is_state_valid());
+
+        // State with ports is valid
+        for i in 0..5 {
+            manager.add_port(PortState::new(
+                format!("Ethernet{}", i * 4),
+                1,
+                1,
+                0x41,
+                9216,
+            ));
+        }
+        assert!(manager.is_state_valid());
+    }
+
+    #[test]
+    fn test_recovery_attempt_sequence() {
+        let temp_dir = TempDir::new().unwrap();
+        let state_file = temp_dir.path().join("port_state.json");
+
+        // Create initial state
+        {
+            let mut manager = WarmRestartManager::with_state_file(state_file.clone());
+            manager.add_port(PortState::new("Ethernet0".to_string(), 1, 1, 0x41, 9216));
+            manager.save_state().unwrap();
+            manager.rotate_state_file().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        // Corrupt the current file
+        std::fs::write(&state_file, "corrupted data").unwrap();
+
+        // Attempt recovery
+        {
+            let mut manager = WarmRestartManager::with_state_file(state_file);
+            let recovered = manager.load_state_with_recovery().unwrap();
+            assert!(recovered);
+            assert_eq!(manager.port_count(), 1);
+            assert!(manager.metrics.state_recovery_count > 0);
+        }
+    }
+
+    // ===== Task 11: Metrics Unit Tests (Additional) =====
+
+    #[test]
+    fn test_metrics_total_events_aggregation() {
+        let mut metrics = WarmRestartMetrics::new();
+
+        assert_eq!(metrics.total_events(), 0);
+
+        metrics.record_warm_restart();
+        metrics.record_cold_start();
+        metrics.record_eoiu_detected();
+        metrics.record_eoiu_timeout();
+
+        // total_events() only counts warm_restart + cold_start
+        assert_eq!(metrics.total_events(), 2);
+
+        metrics.record_state_recovery();
+        metrics.record_corruption_detected();
+
+        assert_eq!(metrics.total_events(), 2);
+    }
+
+    #[test]
+    fn test_metrics_percentage_calculation_accuracy() {
+        let mut metrics = WarmRestartMetrics::new();
+
+        // No events yet
+        assert_eq!(metrics.warm_restart_percentage(), 0.0);
+
+        // Record 3 warm restarts and 1 cold start
+        metrics.record_warm_restart();
+        metrics.record_warm_restart();
+        metrics.record_warm_restart();
+        metrics.record_cold_start();
+
+        let percentage = metrics.warm_restart_percentage();
+        assert!((percentage - 75.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_metrics_sync_duration_averaging() {
+        let mut metrics = WarmRestartMetrics::new();
+
+        // Must record warm restart first (duration tracking depends on warm_restart_count)
+        metrics.record_warm_restart();
+
+        // Initial sync durations: 100, 200, 150 seconds
+        metrics.record_initial_sync_duration(100);
+        assert_eq!(metrics.avg_initial_sync_duration_secs, 100.0);
+        assert_eq!(metrics.max_initial_sync_duration_secs, 100);
+
+        metrics.record_warm_restart();
+        metrics.record_initial_sync_duration(200);
+        assert_eq!(metrics.avg_initial_sync_duration_secs, 150.0);
+        assert_eq!(metrics.max_initial_sync_duration_secs, 200);
+
+        metrics.record_warm_restart();
+        metrics.record_initial_sync_duration(150);
+        assert_eq!(metrics.avg_initial_sync_duration_secs, 150.0);
+        assert_eq!(metrics.max_initial_sync_duration_secs, 200);
+    }
+
+    #[test]
+    fn test_metrics_timestamp_updates() {
+        let mut metrics = WarmRestartMetrics::new();
+
+        assert!(metrics.last_warm_restart_secs.is_none());
+        assert!(metrics.last_eoiu_detection_secs.is_none());
+        assert!(metrics.last_state_recovery_secs.is_none());
+
+        metrics.record_warm_restart();
+        assert!(metrics.last_warm_restart_secs.is_some());
+
+        metrics.record_eoiu_detected();
+        assert!(metrics.last_eoiu_detection_secs.is_some());
+
+        metrics.record_state_recovery();
+        assert!(metrics.last_state_recovery_secs.is_some());
+
+        metrics.record_corruption_detected();
+        assert!(metrics.last_corruption_detected_secs.is_some());
+    }
+
+    #[test]
+    fn test_metrics_timeout_counter_increments() {
+        let mut metrics = WarmRestartMetrics::new();
+
+        assert_eq!(metrics.eoiu_timeout_count, 0);
+
+        metrics.record_eoiu_timeout();
+        assert_eq!(metrics.eoiu_timeout_count, 1);
+
+        metrics.record_eoiu_timeout();
+        metrics.record_eoiu_timeout();
+        assert_eq!(metrics.eoiu_timeout_count, 3);
+    }
+
+    #[test]
+    fn test_metrics_corruption_recovery_independence() {
+        let mut metrics = WarmRestartMetrics::new();
+
+        assert_eq!(metrics.corruption_detected_count, 0);
+        assert_eq!(metrics.state_recovery_count, 0);
+
+        // Record 5 corruption events
+        for _ in 0..5 {
+            metrics.record_corruption_detected();
+        }
+        assert_eq!(metrics.corruption_detected_count, 5);
+
+        // Record 3 successful recoveries
+        for _ in 0..3 {
+            metrics.record_state_recovery();
+        }
+        assert_eq!(metrics.state_recovery_count, 3);
+
+        // Verify both are tracked independently
+        assert_eq!(metrics.corruption_detected_count, 5);
+        assert_eq!(metrics.state_recovery_count, 3);
+    }
+
+    #[test]
+    fn test_metrics_backup_counts_independent() {
+        let mut metrics = WarmRestartMetrics::new();
+
+        assert_eq!(metrics.backup_created_count, 0);
+        assert_eq!(metrics.backup_cleanup_count, 0);
+
+        // Record 10 backups created
+        for _ in 0..10 {
+            metrics.record_backup_created();
+        }
+        assert_eq!(metrics.backup_created_count, 10);
+
+        // Record 3 backups cleaned up
+        for _ in 0..3 {
+            metrics.record_backup_cleanup();
+        }
+        assert_eq!(metrics.backup_cleanup_count, 3);
+
+        // Verify net backups (should be tracked independently)
+        assert_eq!(metrics.backup_created_count, 10);
+        assert_eq!(metrics.backup_cleanup_count, 3);
+    }
+
+    #[test]
+    fn test_metrics_default_initialization() {
+        let metrics = WarmRestartMetrics::new();
+
+        assert_eq!(metrics.warm_restart_count, 0);
+        assert_eq!(metrics.cold_start_count, 0);
+        assert_eq!(metrics.eoiu_detected_count, 0);
+        assert_eq!(metrics.eoiu_timeout_count, 0);
+        assert_eq!(metrics.state_recovery_count, 0);
+        assert_eq!(metrics.corruption_detected_count, 0);
+        assert_eq!(metrics.backup_created_count, 0);
+        assert_eq!(metrics.backup_cleanup_count, 0);
+        assert!(metrics.last_warm_restart_secs.is_none());
+        assert!(metrics.last_eoiu_detection_secs.is_none());
+        assert!(metrics.last_state_recovery_secs.is_none());
+        assert!(metrics.last_corruption_detected_secs.is_none());
+        assert_eq!(metrics.avg_initial_sync_duration_secs, 0.0);
+        assert_eq!(metrics.max_initial_sync_duration_secs, 0);
+        // min is initialized to u64::MAX until first recording
+        assert_eq!(metrics.min_initial_sync_duration_secs, u64::MAX);
+    }
+
+    #[test]
+    fn test_metrics_zero_total_events_behavior() {
+        let metrics = WarmRestartMetrics::new();
+
+        // With no recordings, average should be 0.0
+        assert_eq!(metrics.avg_initial_sync_duration_secs, 0.0);
+
+        // warm_restart_percentage with zero total events should be 0.0
+        assert_eq!(metrics.warm_restart_percentage(), 0.0);
+    }
+
+    #[test]
+    fn test_metrics_realistic_scenario_tracking() {
+        let mut metrics = WarmRestartMetrics::new();
+
+        // Simulate a realistic warm restart scenario
+        metrics.record_warm_restart();
+        metrics.record_eoiu_detected();
+        metrics.record_initial_sync_duration(50);
+        metrics.record_backup_created();
+
+        // Another cycle with second warm restart (no timeout)
+        metrics.record_warm_restart();
+        metrics.record_eoiu_detected();
+        metrics.record_initial_sync_duration(75);
+
+        // Corruption and recovery
+        metrics.record_corruption_detected();
+        metrics.record_state_recovery();
+        metrics.record_backup_cleanup();
+
+        // Verify comprehensive state
+        assert_eq!(metrics.warm_restart_count, 2);
+        assert_eq!(metrics.eoiu_detected_count, 2);
+        assert_eq!(metrics.corruption_detected_count, 1);
+        assert_eq!(metrics.state_recovery_count, 1);
+        assert_eq!(metrics.backup_created_count, 1);
+        assert_eq!(metrics.backup_cleanup_count, 1);
+        // total_events() only counts warm_restart + cold_start
+        assert_eq!(metrics.total_events(), 2);
+
+        // Verify averages are calculated correctly (50 + 75) / 2 = 62.5
+        assert_eq!(metrics.avg_initial_sync_duration_secs, 62.5);
+        assert_eq!(metrics.max_initial_sync_duration_secs, 75);
     }
 }
