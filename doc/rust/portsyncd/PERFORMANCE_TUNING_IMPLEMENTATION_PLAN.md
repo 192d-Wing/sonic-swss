@@ -1,9 +1,9 @@
 # Linux Performance Tuning Implementation Plan for portsyncd
 
-**Version**: 1.0
-**Date**: January 25, 2026
-**Status**: Planning Phase
-**Target Completion**: Phase 8 (8 weeks)
+**Version**: 1.0.  
+**Date**: January 25, 2026.  
+**Status**: Planning Phase.  
+**Target Completion**: Phase 8 (8 weeks).  
 
 ---
 
@@ -12,6 +12,7 @@
 Implementation plan to achieve sub-50μs P50 latency and 25K+ events/second throughput through systematic Linux kernel and application-level optimizations.
 
 **Expected Results**:
+
 - P50 latency: 30-45 μs (35% improvement)
 - P99 latency: 200-300 μs (50% improvement)
 - Throughput: 25K+ eps (67% improvement)
@@ -29,6 +30,7 @@ Implementation plan to achieve sub-50μs P50 latency and 25K+ events/second thro
 #### Tasks
 
 ##### Task 1.1: Implement Socket Buffer Tuning
+
 **File**: `src/netlink_socket.rs`
 **Effort**: 3 days
 
@@ -66,12 +68,14 @@ pub fn new() -> Result<Self> {
 ```
 
 **Tests**:
+
 - [ ] Test SO_RCVBUF is set to 16MB
 - [ ] Test SO_SNDBUF is set to 2MB
 - [ ] Verify socket options via getsockopt
 - [ ] Test buffer overflow handling
 
 **Acceptance Criteria**:
+
 - ✅ Socket options set without errors
 - ✅ No message loss under 15K events/sec burst
 - ✅ All existing tests pass
@@ -79,6 +83,7 @@ pub fn new() -> Result<Self> {
 ---
 
 ##### Task 1.2: Implement MSG_TRUNC for Overflow Handling
+
 **File**: `src/netlink_socket.rs`
 **Effort**: 2 days
 
@@ -109,12 +114,14 @@ pub fn receive_event(&mut self) -> Result<Option<NetlinkEvent>> {
 ```
 
 **Tests**:
+
 - [ ] Test overflow detection (simulate large message)
 - [ ] Test buffer growth (verify resize works)
 - [ ] Test message parsing after buffer resize
 - [ ] Stress test with rapid bursts
 
 **Acceptance Criteria**:
+
 - ✅ Overflow detection working
 - ✅ Buffer dynamically resizes
 - ✅ No message loss with MSG_TRUNC
@@ -122,6 +129,7 @@ pub fn receive_event(&mut self) -> Result<Option<NetlinkEvent>> {
 ---
 
 ##### Task 1.3: Implement Multicast Group Subscription
+
 **File**: `src/netlink_socket.rs`
 **Effort**: 2 days
 
@@ -142,12 +150,14 @@ pub fn connect(&mut self) -> Result<()> {
 ```
 
 **Tests**:
+
 - [ ] Test RTNLGRP_LINK subscription
 - [ ] Verify only relevant events received
 - [ ] Test multiple group subscriptions
 - [ ] Verify kernel-level filtering reduces CPU
 
 **Acceptance Criteria**:
+
 - ✅ Only RTM_NEWLINK/DELLINK events received
 - ✅ Kernel filters other event types
 - ✅ CPU usage reduced by 10-15%
@@ -155,6 +165,7 @@ pub fn connect(&mut self) -> Result<()> {
 ---
 
 **Week 1 Deliverables**:
+
 - ✅ Netlink socket buffer optimization (16MB RCV, 2MB SND)
 - ✅ MSG_TRUNC overflow handling
 - ✅ Multicast group filtering
@@ -162,6 +173,7 @@ pub fn connect(&mut self) -> Result<()> {
 - ✅ Performance baseline captured
 
 **Week 1 Success Metrics**:
+
 - No netlink message drops under 15K events/sec
 - Buffer overflow handling working
 - CPU usage reduced by 10-15% from filtering
@@ -175,6 +187,7 @@ pub fn connect(&mut self) -> Result<()> {
 #### Tasks
 
 ##### Task 2.1: Implement epoll-based Event Reception
+
 **File**: `src/netlink_socket.rs`
 **Effort**: 4 days
 
@@ -205,6 +218,7 @@ pub fn receive_events_blocking(&mut self, timeout_ms: i32) -> Result<Vec<Netlink
 ```
 
 **Tests**:
+
 - [ ] Test blocking poll (wait for events)
 - [ ] Test timeout behavior
 - [ ] Test multiple events in single poll
@@ -212,6 +226,7 @@ pub fn receive_events_blocking(&mut self, timeout_ms: i32) -> Result<Vec<Netlink
 - [ ] Verify no events missed
 
 **Acceptance Criteria**:
+
 - ✅ epoll correctly waits for events
 - ✅ Timeout handling working
 - ✅ All events processed
@@ -220,6 +235,7 @@ pub fn receive_events_blocking(&mut self, timeout_ms: i32) -> Result<Vec<Netlink
 ---
 
 ##### Task 2.2: Integrate epoll into Main Event Loop
+
 **File**: `src/main.rs`
 **Effort**: 3 days
 
@@ -265,6 +281,7 @@ async fn run_daemon() -> Result<(), PortsyncError> {
 ```
 
 **Tests**:
+
 - [ ] Test event loop with epoll
 - [ ] Test shutdown signal handling
 - [ ] Test metrics collection
@@ -272,6 +289,7 @@ async fn run_daemon() -> Result<(), PortsyncError> {
 - [ ] Benchmark latency
 
 **Acceptance Criteria**:
+
 - ✅ Events processed in event loop
 - ✅ Shutdown working
 - ✅ CPU usage < 10%
@@ -281,6 +299,7 @@ async fn run_daemon() -> Result<(), PortsyncError> {
 ---
 
 ##### Task 2.3: Implement Batch Event Processing
+
 **File**: `src/main.rs` + `src/port_sync.rs`
 **Effort**: 3 days
 
@@ -314,6 +333,7 @@ async fn process_events_batch(
 ```
 
 **Tests**:
+
 - [ ] Test single event batch
 - [ ] Test multiple event batch (10-100 events)
 - [ ] Verify Redis PIPE working
@@ -321,6 +341,7 @@ async fn process_events_batch(
 - [ ] Benchmark throughput improvement
 
 **Acceptance Criteria**:
+
 - ✅ Batch processing reduces Redis round-trips
 - ✅ Throughput > 20K events/sec
 - ✅ No message loss in batches
@@ -329,6 +350,7 @@ async fn process_events_batch(
 ---
 
 **Week 2 Deliverables**:
+
 - ✅ epoll-based blocking event reception
 - ✅ Event loop integration
 - ✅ Batch event processing
@@ -336,6 +358,7 @@ async fn process_events_batch(
 - ✅ Performance benchmarking
 
 **Week 2 Success Metrics**:
+
 - CPU usage < 10% (from ~50%)
 - Throughput > 20K events/sec
 - P50 latency < 100μs
@@ -350,6 +373,7 @@ async fn process_events_batch(
 #### Tasks
 
 ##### Task 3.1: Implement Buffer Pool
+
 **File**: `src/netlink_socket.rs`
 **Effort**: 3 days
 
@@ -376,12 +400,14 @@ impl NetlinkSocket {
 ```
 
 **Tests**:
+
 - [ ] Test buffer pool creation
 - [ ] Test buffer reuse (pop/push)
 - [ ] Test pool size limits
 - [ ] Benchmark allocation reduction
 
 **Acceptance Criteria**:
+
 - ✅ Zero-allocation after startup
 - ✅ Pool size limited to max 4 buffers
 - ✅ GC pressure eliminated
@@ -389,6 +415,7 @@ impl NetlinkSocket {
 ---
 
 ##### Task 3.2: Implement Memory Locking (mlock)
+
 **File**: `src/netlink_socket.rs`
 **Effort**: 2 days
 
@@ -416,12 +443,14 @@ pub fn new() -> Result<Self> {
 ```
 
 **Tests**:
+
 - [ ] Test mlock call succeeds
 - [ ] Test mlock failures handled gracefully
 - [ ] Verify page faults reduced
 - [ ] Benchmark latency consistency
 
 **Acceptance Criteria**:
+
 - ✅ mlock succeeds without errors
 - ✅ Page fault rate reduced
 - ✅ Latency variance decreased
@@ -429,6 +458,7 @@ pub fn new() -> Result<Self> {
 ---
 
 ##### Task 3.3: CPU Affinity Support
+
 **File**: `src/main.rs` (systemd service file)
 **Effort**: 2 days
 
@@ -455,12 +485,14 @@ LimitMEMLOCK=infinity
 ```
 
 **Tests**:
+
 - [ ] Verify CPUAffinity=0 via taskset
 - [ ] Test NUMA binding
 - [ ] Test RT scheduling priority
 - [ ] Verify resource limits applied
 
 **Acceptance Criteria**:
+
 - ✅ portsyncd runs on CPU 0 only
 - ✅ Memory bound to NUMA node 0
 - ✅ RT scheduling active
@@ -469,6 +501,7 @@ LimitMEMLOCK=infinity
 ---
 
 **Week 3 Deliverables**:
+
 - ✅ Buffer pooling (zero-allocation)
 - ✅ Memory locking (mlock)
 - ✅ CPU affinity configuration
@@ -476,6 +509,7 @@ LimitMEMLOCK=infinity
 - ✅ All tests passing
 
 **Week 3 Success Metrics**:
+
 - Allocation rate: 0 (after startup)
 - Page faults: <100/sec
 - CPU migrations: 0
@@ -490,6 +524,7 @@ LimitMEMLOCK=infinity
 #### Tasks
 
 ##### Task 4.1: Implement TCP Socket Options
+
 **File**: `src/redis_adapter.rs`
 **Effort**: 3 days
 
@@ -526,6 +561,7 @@ pub async fn connect(&mut self) -> Result<()> {
 ```
 
 **Tests**:
+
 - [ ] Test TCP_NODELAY enabled
 - [ ] Test keepalive settings
 - [ ] Test buffer sizes set
@@ -533,6 +569,7 @@ pub async fn connect(&mut self) -> Result<()> {
 - [ ] Benchmark Redis latency
 
 **Acceptance Criteria**:
+
 - ✅ All socket options set without errors
 - ✅ Redis latency < 50μs (loopback)
 - ✅ No Nagle delays observed
@@ -540,6 +577,7 @@ pub async fn connect(&mut self) -> Result<()> {
 ---
 
 ##### Task 4.2: Implement Connection Pooling
+
 **File**: `src/redis_adapter.rs`
 **Effort**: 4 days
 
@@ -576,6 +614,7 @@ pub struct RedisAdapter {
 ```
 
 **Tests**:
+
 - [ ] Test connection pool creation
 - [ ] Test get/return connection
 - [ ] Test pool exhaustion handling
@@ -583,6 +622,7 @@ pub struct RedisAdapter {
 - [ ] Benchmark throughput improvement
 
 **Acceptance Criteria**:
+
 - ✅ Connection pooling reduces setup overhead
 - ✅ Concurrent connections handled
 - ✅ Throughput improved by 10-20%
@@ -590,6 +630,7 @@ pub struct RedisAdapter {
 ---
 
 ##### Task 4.3: Kernel sysctl Tuning Guide
+
 **File**: Create `/etc/sysctl.d/50-portsyncd.conf`
 **Effort**: 1 day
 
@@ -618,12 +659,14 @@ kernel.sched_min_granularity_ns=100000
 ```
 
 **Tests**:
+
 - [ ] Verify sysctl settings apply
 - [ ] Test with `sysctl -a | grep portsyncd`
 - [ ] Benchmark performance improvement
 - [ ] Test persistence across reboot
 
 **Acceptance Criteria**:
+
 - ✅ All sysctl parameters applied
 - ✅ Performance improved 10-15%
 - ✅ Settings persist after reboot
@@ -631,12 +674,14 @@ kernel.sched_min_granularity_ns=100000
 ---
 
 **Week 4 Deliverables**:
+
 - ✅ TCP socket option configuration
 - ✅ Connection pooling
 - ✅ Kernel sysctl tuning documentation
 - ✅ All tests passing
 
 **Week 4 Success Metrics**:
+
 - Redis latency < 50μs
 - Connection setup overhead eliminated
 - Throughput > 22K events/sec
@@ -651,6 +696,7 @@ kernel.sched_min_granularity_ns=100000
 #### Tasks
 
 ##### Task 5.1: Scheduler Tuning Implementation
+
 **File**: Create tuning scripts
 **Effort**: 2 days
 
@@ -674,12 +720,14 @@ taskset -p $$  # Should show CPU 0 only
 ```
 
 **Tests**:
+
 - [ ] Verify sysctl changes apply
 - [ ] Test scheduler behavior
 - [ ] Benchmark context switch reduction
 - [ ] Verify CPU affinity maintained
 
 **Acceptance Criteria**:
+
 - ✅ Scheduler parameters set correctly
 - ✅ IRQ affinity configured
 - ✅ Context switches < 1500/sec
@@ -687,6 +735,7 @@ taskset -p $$  # Should show CPU 0 only
 ---
 
 ##### Task 5.2: Transparent Huge Pages (THP) Configuration
+
 **File**: Create THP tuning script
 **Effort**: 1 day
 
@@ -703,12 +752,14 @@ cat /sys/kernel/mm/transparent_hugepage/enabled
 ```
 
 **Tests**:
+
 - [ ] Verify THP disabled
 - [ ] Benchmark latency variance
 - [ ] Test memory usage
 - [ ] Verify stability
 
 **Acceptance Criteria**:
+
 - ✅ THP setting changed
 - ✅ Latency variance reduced
 - ✅ No memory regression
@@ -716,6 +767,7 @@ cat /sys/kernel/mm/transparent_hugepage/enabled
 ---
 
 ##### Task 5.3: Performance Profiling and Analysis
+
 **File**: Create profiling scripts
 **Effort**: 2 days
 
@@ -738,12 +790,14 @@ trace-cmd report
 ```
 
 **Tests**:
+
 - [ ] Verify perf recording works
 - [ ] Test trace-cmd tracing
 - [ ] Analyze cache misses
 - [ ] Profile latency hotspots
 
 **Acceptance Criteria**:
+
 - ✅ Profiling tools working
 - ✅ Cache miss rate < 10%
 - ✅ Latency hotspots identified
@@ -751,12 +805,14 @@ trace-cmd report
 ---
 
 **Week 5 Deliverables**:
+
 - ✅ Scheduler tuning scripts
 - ✅ THP configuration
 - ✅ Profiling and analysis tools
 - ✅ Performance baseline documentation
 
 **Week 5 Success Metrics**:
+
 - Context switches < 1200/sec
 - Cache miss rate < 8%
 - CPU migrations: 0
@@ -771,6 +827,7 @@ trace-cmd report
 #### Tasks
 
 ##### Task 6.1: Kernel Metrics Collection
+
 **File**: `src/metrics.rs`
 **Effort**: 3 days
 
@@ -803,12 +860,14 @@ impl KernelMetrics {
 ```
 
 **Tests**:
+
 - [ ] Test /proc/net/netlink parsing
 - [ ] Test /proc/stat parsing
 - [ ] Verify metrics collection
 - [ ] Test error handling
 
 **Acceptance Criteria**:
+
 - ✅ Kernel metrics collected
 - ✅ Metrics exported to Prometheus
 - ✅ No parsing errors
@@ -816,10 +875,12 @@ impl KernelMetrics {
 ---
 
 ##### Task 6.2: Prometheus Dashboard Configuration
+
 **File**: Create Grafana dashboard JSON
 **Effort**: 2 days
 
 **Dashboard panels**:
+
 - Event latency trend (P50/P95/P99)
 - Throughput (events/sec)
 - CPU usage
@@ -830,12 +891,14 @@ impl KernelMetrics {
 - Kernel metrics
 
 **Tests**:
+
 - [ ] Verify dashboard JSON valid
 - [ ] Test dashboard in Grafana
 - [ ] Verify all metrics displayed
 - [ ] Test time range controls
 
 **Acceptance Criteria**:
+
 - ✅ Dashboard created and functional
 - ✅ All metrics visible
 - ✅ Alerting configured
@@ -843,6 +906,7 @@ impl KernelMetrics {
 ---
 
 ##### Task 6.3: Health Check Endpoints
+
 **File**: `src/production_features.rs`
 **Effort**: 2 days
 
@@ -873,12 +937,14 @@ impl HealthCheck {
 ```
 
 **Tests**:
+
 - [ ] Test health check logic
 - [ ] Test status endpoint
 - [ ] Test thresholds
 - [ ] Test JSON serialization
 
 **Acceptance Criteria**:
+
 - ✅ Health check working
 - ✅ Status endpoint functional
 - ✅ Metrics displayed
@@ -886,12 +952,14 @@ impl HealthCheck {
 ---
 
 **Week 6 Deliverables**:
+
 - ✅ Kernel metrics collection
 - ✅ Prometheus dashboard
 - ✅ Health check endpoints
 - ✅ All tests passing
 
 **Week 6 Success Metrics**:
+
 - All metrics exported
 - Dashboard functional
 - Health checks working
@@ -905,6 +973,7 @@ impl HealthCheck {
 #### Tasks
 
 ##### Task 7.1: Performance Regression Tests
+
 **File**: `tests/performance_validation.rs`
 **Effort**: 3 days
 
@@ -940,6 +1009,7 @@ fn test_cpu_usage() {
 ```
 
 **Tests**:
+
 - [ ] Verify latency targets met
 - [ ] Verify throughput targets met
 - [ ] Verify CPU usage targets met
@@ -947,6 +1017,7 @@ fn test_cpu_usage() {
 - [ ] Verify no regressions from baseline
 
 **Acceptance Criteria**:
+
 - ✅ P50 latency < 50μs
 - ✅ P99 latency < 500μs
 - ✅ Throughput > 25K eps
@@ -956,6 +1027,7 @@ fn test_cpu_usage() {
 ---
 
 ##### Task 7.2: Stress Testing with Tuning
+
 **File**: `tests/stress_tuning_validation.rs`
 **Effort**: 3 days
 
@@ -988,6 +1060,7 @@ fn test_burst_handling_with_tuning() {
 ```
 
 **Tests**:
+
 - [ ] Test sustained throughput (1M events)
 - [ ] Test burst handling (10K events/10ms)
 - [ ] Verify no message loss
@@ -995,6 +1068,7 @@ fn test_burst_handling_with_tuning() {
 - [ ] Test recovery after burst
 
 **Acceptance Criteria**:
+
 - ✅ No message loss under sustained load
 - ✅ Burst handling without drops
 - ✅ Latency consistent
@@ -1003,6 +1077,7 @@ fn test_burst_handling_with_tuning() {
 ---
 
 ##### Task 7.3: Baseline Comparison Testing
+
 **File**: `tests/before_after_comparison.rs`
 **Effort**: 2 days
 
@@ -1026,12 +1101,14 @@ fn compare_performance_baseline() {
 ```
 
 **Tests**:
+
 - [ ] Run baseline without tuning
 - [ ] Run with all tunings
 - [ ] Compare metrics
 - [ ] Verify improvement targets met
 
 **Acceptance Criteria**:
+
 - ✅ P50 latency improved ≥35%
 - ✅ Throughput improved ≥50%
 - ✅ CPU usage reduced ≥70%
@@ -1039,6 +1116,7 @@ fn compare_performance_baseline() {
 ---
 
 **Week 7 Deliverables**:
+
 - ✅ Performance regression tests
 - ✅ Stress testing with tuning
 - ✅ Before/after comparison
@@ -1046,6 +1124,7 @@ fn compare_performance_baseline() {
 - ✅ Performance targets met
 
 **Week 7 Success Metrics**:
+
 - P50 latency: 30-45μs (35% improvement) ✅
 - P99 latency: 200-300μs (50% improvement) ✅
 - Throughput: 25K+ eps (67% improvement) ✅
@@ -1060,10 +1139,12 @@ fn compare_performance_baseline() {
 #### Tasks
 
 ##### Task 8.1: Performance Tuning Documentation
+
 **File**: Update LINUX_PERFORMANCE_TUNING.md
 **Effort**: 2 days
 
 Add implementation details:
+
 - [ ] Code examples from actual implementation
 - [ ] Exact kernel parameters used
 - [ ] Systemd configuration applied
@@ -1071,10 +1152,12 @@ Add implementation details:
 - [ ] Deployment procedure
 
 ##### Task 8.2: Deployment Guide
+
 **File**: Create PERFORMANCE_DEPLOYMENT.md
 **Effort**: 2 days
 
 Content:
+
 - [ ] Pre-deployment checklist
 - [ ] Kernel parameter application
 - [ ] systemd service configuration
@@ -1083,10 +1166,12 @@ Content:
 - [ ] Rollback procedure
 
 ##### Task 8.3: Final Testing and Sign-off
+
 **File**: Create PERFORMANCE_SIGNOFF.md
 **Effort**: 2 days
 
 Verification:
+
 - [ ] All tests passing
 - [ ] Performance targets met
 - [ ] No regressions
@@ -1094,6 +1179,7 @@ Verification:
 - [ ] Ready for production
 
 **Week 8 Deliverables**:
+
 - ✅ Complete documentation
 - ✅ Deployment guide
 - ✅ Final test results
@@ -1104,6 +1190,7 @@ Verification:
 ## Implementation Checklist
 
 ### Phase 8 Week 1: Netlink Socket Optimization
+
 - [ ] Implement socket buffer tuning (SO_RCVBUF, SO_SNDBUF)
 - [ ] Add MSG_TRUNC overflow handling
 - [ ] Implement multicast group subscription
@@ -1111,6 +1198,7 @@ Verification:
 - [ ] Performance baseline captured
 
 ### Phase 8 Week 2: I/O Multiplexing
+
 - [ ] Implement epoll-based event reception
 - [ ] Integrate epoll into main event loop
 - [ ] Implement batch event processing
@@ -1118,6 +1206,7 @@ Verification:
 - [ ] CPU usage < 10%, throughput > 20K eps
 
 ### Phase 8 Week 3: Memory Optimization
+
 - [ ] Implement buffer pool
 - [ ] Implement memory locking (mlock)
 - [ ] Configure CPU affinity
@@ -1126,6 +1215,7 @@ Verification:
 - [ ] Allocation rate: 0 after startup
 
 ### Phase 8 Week 4: Network Stack Tuning
+
 - [ ] Implement TCP socket options
 - [ ] Implement connection pooling
 - [ ] Create kernel sysctl tuning guide
@@ -1133,6 +1223,7 @@ Verification:
 - [ ] Redis latency < 50μs
 
 ### Phase 8 Week 5: Kernel Optimization
+
 - [ ] Implement scheduler tuning
 - [ ] Configure THP
 - [ ] Create profiling scripts
@@ -1140,6 +1231,7 @@ Verification:
 - [ ] P50 latency: 30-45μs
 
 ### Phase 8 Week 6: Monitoring Integration
+
 - [ ] Implement kernel metrics collection
 - [ ] Create Prometheus dashboard
 - [ ] Implement health check endpoints
@@ -1147,6 +1239,7 @@ Verification:
 - [ ] All metrics exported
 
 ### Phase 8 Week 7: Testing & Validation
+
 - [ ] Performance regression tests
 - [ ] Stress testing with tuning
 - [ ] Before/after comparison
@@ -1154,6 +1247,7 @@ Verification:
 - [ ] Performance targets met
 
 ### Phase 8 Week 8: Documentation
+
 - [ ] Performance tuning documentation
 - [ ] Deployment guide
 - [ ] Final testing and sign-off
@@ -1164,12 +1258,14 @@ Verification:
 ## Success Criteria
 
 ### Code Quality
+
 - [x] Zero unsafe code
 - [x] All tests passing
 - [x] No compiler warnings
 - [x] Code review approved
 
 ### Performance
+
 - [x] P50 latency: 30-45μs (target: < 50μs)
 - [x] P99 latency: 200-300μs (target: < 500μs)
 - [x] Throughput: 25K+ eps (target: > 25K eps)
@@ -1178,18 +1274,21 @@ Verification:
 - [x] Context switches: ~1500/sec
 
 ### Testing
+
 - [x] All regression tests passing
 - [x] Stress tests passing
 - [x] Before/after comparison verified
 - [x] No regressions from baseline
 
 ### Documentation
+
 - [x] Implementation guide complete
 - [x] Deployment guide complete
 - [x] Performance results documented
 - [x] Troubleshooting guide included
 
 ### Production Readiness
+
 - [x] Kernel parameters documented
 - [x] systemd configuration finalized
 - [x] Monitoring configured
@@ -1232,22 +1331,24 @@ Verification:
 ## Resource Requirements
 
 ### Development
+
 - 1 Rust developer (full-time)
 - 1 Linux systems engineer (part-time)
 - 1 QA engineer (part-time)
 
 ### Infrastructure
+
 - SONiC switch or compatible test environment
 - Performance monitoring (Prometheus + Grafana)
 - Profiling tools (perf, trace-cmd)
 
 ### Documentation
+
 - Technical writer (part-time)
 - Deployment team (part-time)
 
 ---
 
-**Status**: Ready for Implementation
-**Approval Date**: January 25, 2026
-**Next Steps**: Kick-off meeting and Week 1 sprint planning
-
+**Status**: Ready for Implementation.  
+**Approval Date**: January 25, 2026.  
+**Next Steps**: Kick-off meeting and Week 1 sprint planning.  
