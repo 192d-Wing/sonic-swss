@@ -19,6 +19,7 @@ pub mod performance;
 pub mod port_sync;
 pub mod production_db;
 pub mod production_features;
+pub mod promql_queries;
 pub mod redis_adapter;
 pub mod trend_analysis;
 pub mod warm_restart;
@@ -39,6 +40,7 @@ pub use performance::{BenchmarkConfig, BenchmarkResult, PerformanceMetrics};
 pub use port_sync::*;
 pub use production_db::ProductionDatabase;
 pub use production_features::{HealthMonitor, ShutdownCoordinator, SystemdNotifier};
+pub use promql_queries::{PromQLBuilder, PromQLQuery, QueryCategory, TimeWindow};
 pub use redis_adapter::RedisAdapter;
 pub use trend_analysis::{
     Anomaly, AnomalySeverity, HistoricalMetrics, MetricObservation, PredictiveScorer,
