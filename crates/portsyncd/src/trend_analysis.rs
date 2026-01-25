@@ -224,7 +224,7 @@ impl TrendAnalyzer {
             } else if z_score > 2.0 {
                 // Moderate: 2-3 sigma
                 anomalies.push(Anomaly {
-                    metric_name: metric_name.clone(),
+                    metric_name: metric_name.to_string(),
                     timestamp_secs: obs.timestamp_secs,
                     value: obs.value,
                     expected_value: mean,
@@ -237,7 +237,7 @@ impl TrendAnalyzer {
             } else if z_score > 1.5 {
                 // Minor: 1.5-2 sigma
                 anomalies.push(Anomaly {
-                    metric_name: metric_name.clone(),
+                    metric_name: metric_name.to_string(),
                     timestamp_secs: obs.timestamp_secs,
                     value: obs.value,
                     expected_value: mean,

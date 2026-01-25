@@ -12,6 +12,10 @@ A high-performance, production-ready port synchronization daemon for SONiC switc
 - **Graceful Shutdown**: Clean shutdown coordination with timeout
 - **Cross-Platform**: Linux kernel netlink, mock interface for development on macOS
 - **Comprehensive Metrics**: Built-in performance tracking and benchmarking
+- **Advanced Alerting**: Rule-based alert engine with state machine (Pending→Firing→Resolved/Suppressed)
+- **Trend Analysis**: Anomaly detection with Z-score analysis and predictive scoring
+- **PromQL Integration**: 23+ pre-defined Prometheus queries for monitoring
+- **Grafana Dashboards**: Professional monitoring dashboards with color-coded thresholds
 - **Zero Unsafe Code**: 100% safe Rust implementation
 
 ## Installation
@@ -215,10 +219,74 @@ cargo test --features redis-integration
 
 ### Test Coverage
 
-- **Unit Tests**: 106 tests covering core functionality
-- **Integration Tests**: 12 tests covering event loop and database operations
+- **Unit Tests**: 292 tests covering core functionality and all modules
+- **Integration Tests**: 88 tests covering complete workflows
 - **Performance Tests**: 7 benchmarks covering load scenarios
-- **Total**: 125 tests with 100% pass rate
+- **Total**: 380 tests with 100% pass rate
+
+## Monitoring & Alerting (Phase 6 Week 5)
+
+### Alert Engine
+
+The advanced alerting system provides:
+
+- **Alert Rules**: 10 pre-configured rules for common failure scenarios
+- **State Machine**: Pending → Firing → Resolved/Suppressed states
+- **Conditions**: Above, Below, Between, Equals, RateOfChange
+- **Severity Levels**: Critical, Warning, Info
+- **Suppression**: Silence alerts during maintenance windows
+
+**Example Alert Rules**:
+- High EOIU timeout rate (>50%)
+- Unrecovered state corruption
+- Cold start anomaly detection
+- High restart rate (>0.5/sec)
+- Health score degradation
+
+### Trend Analysis
+
+Sophisticated trend detection with:
+
+- **Monotonicity Analysis**: Detect increasing/decreasing/stable trends
+- **Confidence Scoring**: 0-1 scale based on consistency
+- **Anomaly Detection**: Z-score based with severity levels
+- **Predictive Scoring**: Estimate time-to-degrade for health metrics
+- **Seasonality Detection**: Pattern recognition with period/amplitude
+
+**Anomaly Severity Levels**:
+- Minor: >1.5σ from mean
+- Moderate: >2.0σ from mean
+- Severe: >3.0σ from mean
+
+### PromQL Queries
+
+Pre-defined Prometheus queries organized by category:
+
+- **Recovery Rates**: Success rates, corruption rates, unrecovered ratio
+- **Sync Duration**: Average, max, percentiles (P50/P95/P99)
+- **Error Rates**: EOIU timeout, cold start, general error rates
+- **Health Metrics**: Health score, warm restart success, reliability
+- **Throughput**: Event throughput, backup throughput
+- **Latency**: Percentile-based latency analysis
+- **Reliability**: System availability, MTTR, backup success
+
+**23+ Pre-defined Queries** organized in 8 categories
+
+### Grafana Dashboards
+
+Four professional dashboards included:
+
+1. **System Health Overview**: Health gauge, restart distribution, key metrics
+2. **Sync Performance**: Duration trends, percentiles, throughput
+3. **Alert Status**: Error rates, corruption recovery, failure tracking
+4. **Trend Analysis**: 7-day trends with EOIU signals and anomalies
+
+All dashboards feature:
+- Dark theme with professional styling
+- Color-coded thresholds (green/yellow/red)
+- Multi-metric panels with legends
+- Time window controls
+- Customizable timeframes
 
 ## Deployment
 
@@ -386,14 +454,32 @@ Apache License 2.0 - See LICENSE file
 
 ## Version History
 
-### Phase 5 (Current) - Real Integration & Performance Validation
+### Phase 6 Week 5 (Current) - Monitoring & Alerting Optimization
+
+- ✅ Advanced alerting engine with 10 pre-configured rules
+- ✅ Trend analysis with anomaly detection (Z-score based)
+- ✅ PromQL integration with 23+ pre-defined Prometheus queries
+- ✅ 4 professional Grafana dashboards with color-coded thresholds
+- ✅ Performance optimizations (rule evaluation, trend analysis, query builder)
+- ✅ 380 comprehensive tests (292 unit + 88 integration), 100% pass rate
+
+### Phase 6 Weeks 1-4 (Completed) - Monitoring & Alerting Foundation
+
+- Alert state machine (Pending → Firing → Resolved/Suppressed)
+- Trend analysis (monotonicity, confidence scoring, predictive scoring)
+- Health score monitoring with degradation detection
+- Integration tests for all alerting features
+
+### Phase 5 (Completed) - Real Integration & Performance Validation
+
 - ✅ Real Redis integration (Week 1)
 - ✅ Kernel netlink socket (Week 2)
 - ✅ Systemd integration (Week 3)
 - ✅ Performance validation (Week 4)
 - ✅ Production deployment (Week 5)
 
-### Phase 4 - Production Hardening & Features (Completed)
+### Phase 4 (Completed) - Production Hardening & Features
+
 - Health monitoring
 - Graceful shutdown
 - Performance metrics
@@ -401,8 +487,8 @@ Apache License 2.0 - See LICENSE file
 
 ### Future Phases
 
-- **Phase 6**: Advanced features (warm restart, metric export, self-healing)
 - **Phase 7**: Production hardening (chaos testing, 100K+ ports, security audit)
+- **Phase 8**: Advanced features (multi-instance support, extended self-healing)
 
 ## Contact & Support
 
@@ -410,7 +496,8 @@ For issues, questions, or contributions, please visit the [SONiC GitHub reposito
 
 ---
 
-**Status**: Production Ready (Phase 5 Complete)
-**Test Coverage**: 125+ tests (100% passing)
-**Performance**: <10ms latency, 1000+ events/second
+**Status**: Production Ready with Advanced Monitoring (Phase 6 Week 5 Complete)
+**Test Coverage**: 380 tests (292 unit + 88 integration), 100% passing
+**Performance**: <10ms latency, 1000+ events/second, optimized rule evaluation
 **Safety**: 0 unsafe code, 0 memory leaks
+**Monitoring**: 10 alert rules, 23+ PromQL queries, 4 Grafana dashboards

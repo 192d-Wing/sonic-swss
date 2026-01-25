@@ -183,12 +183,15 @@ impl AlertingEngine {
     pub fn evaluate(&mut self, metrics: &WarmRestartMetrics) -> Vec<&Alert> {
         let now = current_timestamp_secs();
 
-        let rules_to_eval: Vec<_> = self.rules.values().cloned().collect();
-        for rule in rules_to_eval {
-            if !rule.enabled {
-                continue;
-            }
+        // Collect enabled rules first to avoid borrow checker issues
+        let enabled_rules: Vec<_> = self
+            .rules
+            .values()
+            .filter(|rule| rule.enabled)
+            .cloned()
+            .collect();
 
+        for rule in enabled_rules {
             let metric_value = self.get_metric_value(&rule, metrics);
             if metric_value.is_nan() {
                 continue;

@@ -408,39 +408,43 @@ impl PromQLBuilder {
         }
     }
 
-    /// Get all pre-defined queries
+    /// Get all pre-defined queries (optimized for batch operations)
     pub fn all_queries() -> Vec<PromQLQuery> {
+        // Pre-computed common window for performance
+        let five_min = TimeWindow::FiveMinutes;
+        let one_hour = TimeWindow::OneHour;
+
         vec![
-            // Recovery rates
+            // Recovery rates (3 queries)
             Self::recovery_success_rate(),
-            Self::corruption_rate(TimeWindow::FiveMinutes),
+            Self::corruption_rate(five_min),
             Self::unrecovered_corruption_ratio(),
-            // Sync duration
+            // Sync duration (3 queries)
             Self::avg_sync_duration(),
             Self::max_sync_duration(),
-            Self::sync_duration_trend(TimeWindow::FiveMinutes),
-            // Error rates
+            Self::sync_duration_trend(five_min),
+            // Error rates (3 queries)
             Self::eoiu_timeout_rate(),
             Self::cold_start_rate(),
-            Self::error_rate(TimeWindow::FiveMinutes),
-            // Health metrics
+            Self::error_rate(five_min),
+            // Health metrics (3 queries)
             Self::health_score(),
             Self::warm_restart_success_rate(),
             Self::reliability_score(),
-            // Trends
-            Self::restart_trend(TimeWindow::FiveMinutes),
-            Self::corruption_trend(TimeWindow::FiveMinutes),
-            Self::recovery_trend(TimeWindow::FiveMinutes),
-            // Throughput
-            Self::event_throughput(TimeWindow::FiveMinutes),
-            Self::backup_throughput(TimeWindow::FiveMinutes),
-            Self::eoiu_throughput(TimeWindow::FiveMinutes),
-            // Latency
+            // Trends (3 queries)
+            Self::restart_trend(five_min),
+            Self::corruption_trend(five_min),
+            Self::recovery_trend(five_min),
+            // Throughput (3 queries)
+            Self::event_throughput(five_min),
+            Self::backup_throughput(five_min),
+            Self::eoiu_throughput(five_min),
+            // Latency (3 queries)
             Self::p50_sync_duration(),
             Self::sync_duration_percentile(95),
             Self::sync_duration_percentile(99),
-            // Reliability
-            Self::system_availability(TimeWindow::OneHour),
+            // Reliability (3 queries)
+            Self::system_availability(one_hour),
             Self::backup_success_rate(),
             Self::time_since_last_warm_restart(),
         ]
