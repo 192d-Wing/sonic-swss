@@ -1,6 +1,17 @@
 use crate::message::{otel::OtelMetrics, saistats::SAIStatsMessage};
+use crate::message::{otel::OtelMetrics, saistats::SAIStatsMessage};
+use crate::utilities::{record_comm_stats, ChannelLabel};
 use log::{debug, error, info, warn};
 use opentelemetry::ExportError;
+use opentelemetry::ExportError;
+use opentelemetry_proto::tonic::{
+    collector::metrics::v1::{
+        metrics_service_client::MetricsServiceClient, ExportMetricsServiceRequest,
+    },
+    common::v1::{any_value::Value, AnyValue, InstrumentationScope, KeyValue as ProtoKeyValue},
+    metrics::v1::{Gauge as ProtoGauge, Metric, ResourceMetrics, ScopeMetrics},
+    resource::v1::Resource as ProtoResource,
+};
 use opentelemetry_proto::tonic::{
     collector::metrics::v1::{
         metrics_service_client::MetricsServiceClient, ExportMetricsServiceRequest,
@@ -160,6 +171,10 @@ impl OtelActor {
                 stats_msg = self.stats_receiver.recv() => {
                     match stats_msg {
                         Some(stats) => {
+                            record_comm_stats(
+                                ChannelLabel::IpfixToOtel,
+                                self.stats_receiver.len(),
+                            );
                             self.handle_stats_message(stats).await?;
                             self.reset_flush_timer(&mut flush_timer);
                         }

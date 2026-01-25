@@ -20,6 +20,7 @@ use super::super::message::{
     ipfix::IPFixTemplatesMessage,
     saistats::{SAIStat, SAIStats, SAIStatsMessage},
 };
+use crate::utilities::{record_comm_stats, ChannelLabel};
 
 /// Helper functions for debug logging formatting
 impl IpfixActor {
@@ -912,6 +913,10 @@ impl IpfixActor {
                 templates = actor.template_recipient.recv() => {
                     match templates {
                         Some(templates) => {
+                            record_comm_stats(
+                                ChannelLabel::SwssToIpfixTemplates,
+                                actor.template_recipient.len(),
+                            );
                             actor.handle_template(templates);
                         },
                         None => {
@@ -922,6 +927,10 @@ impl IpfixActor {
                 record = actor.record_recipient.recv() => {
                     match record {
                         Some(record) => {
+                            record_comm_stats(
+                                ChannelLabel::DataNetlinkToIpfixRecords,
+                                actor.record_recipient.len(),
+                            );
                             let messages = actor.handle_record(record);
                             for recipient in &actor.saistats_recipients {
                                 for message in &messages {

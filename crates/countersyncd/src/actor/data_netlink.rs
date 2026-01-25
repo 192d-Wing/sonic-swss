@@ -24,6 +24,7 @@ use super::super::message::{
 };
 #[cfg(not(test))]
 use super::netlink_utils;
+use crate::utilities::{format_hex_lines, record_comm_stats, ChannelLabel};
 
 #[cfg(not(test))]
 type SocketType = Socket;
@@ -711,7 +712,6 @@ impl DataNetlinkActor {
 
         // Try to receive with non-blocking mode (socket should already be set to non-blocking)
         debug!("Attempting to receive netlink message...");
-
         #[cfg(not(test))]
         let result = {
             let fd = socket.as_raw_fd();
@@ -747,6 +747,11 @@ impl DataNetlinkActor {
 
                 // Resize buffer to actual received size
                 buffer.resize(size, 0);
+
+                if log::log_enabled!(log::Level::Debug) {
+                    let hex_dump = format_hex_lines(&buffer);
+                    debug!("Raw netlink recv buffer ({} bytes):\n{}", size, hex_dump);
+                }
 
                 // Parse buffer which may contain multiple messages and/or incomplete messages
                 let messages = message_parser.parse_buffer(&buffer)?;
@@ -853,6 +858,10 @@ impl DataNetlinkActor {
 
             // Check for pending commands first (non-blocking)
             if let Ok(command) = actor.command_recipient.try_recv() {
+                record_comm_stats(
+                    ChannelLabel::ControlNetlinkToDataNetlink,
+                    actor.command_recipient.len(),
+                );
                 match command {
                     NetlinkCommand::SocketConnect(SocketConnect { family, group }) => {
                         actor.reset(&family, &group);
@@ -896,6 +905,16 @@ impl DataNetlinkActor {
                                     // This ensures each IPFIX message (contained in one netlink message)
                                     // is sent as a separate operation to the downstream actors
                                     for (i, message) in messages.iter().enumerate() {
+                                        if log::log_enabled!(log::Level::Debug) {
+                                            let hex_dump = format_hex_lines(message.as_ref());
+                                            debug!(
+                                                "Outgoing netlink payload {}/{} ({} bytes):\n{}",
+                                                i + 1,
+                                                messages.len(),
+                                                message.len(),
+                                                hex_dump
+                                            );
+                                        }
                                         debug!(
                                             "Processing netlink message {}/{}: {} bytes",
                                             i + 1,
