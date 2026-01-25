@@ -7,6 +7,7 @@
 //! - [`Consumer`]: Trait for consuming table entries from Redis
 //! - [`SyncMap`]: Type-safe map that prevents auto-vivification bugs
 //! - [`TaskStatus`]: Result type for task processing
+//! - [`redis_backend`]: Redis database connectivity (feature-gated)
 //!
 //! # Architecture
 //!
@@ -50,8 +51,16 @@ mod retry;
 mod sync_map;
 mod task;
 
+#[cfg(feature = "redis")]
+pub mod redis_backend;
+
 pub use consumer::{Consumer, ConsumerConfig, KeyOpFieldsValues, Operation};
 pub use orch::{Orch, OrchContext};
 pub use retry::{Constraint, RetryCache};
 pub use sync_map::SyncMap;
 pub use task::{TaskResult, TaskStatus};
+
+#[cfg(feature = "redis")]
+pub use redis_backend::{
+    RedisBackendError, RedisBoundConsumer, RedisConfig, RedisDatabase, RedisDb,
+};

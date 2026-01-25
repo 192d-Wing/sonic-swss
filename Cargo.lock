@@ -2719,6 +2719,7 @@ dependencies = [
  "async-trait",
  "log",
  "pretty_assertions",
+ "redis 0.28.2",
  "serde",
  "sonic-sai",
  "sonic-types",

@@ -13,6 +13,7 @@ description = "Common orchestration abstractions for SONiC (Orch trait, Consumer
 sonic-types = { path = "../sonic-types" }
 sonic-sai = { path = "../sonic-sai" }
 swss-common = { workspace = true, optional = true }
+redis = { version = "0.28", features = ["tokio-comp", "connection-manager"], optional = true }
 async-trait.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 thiserror.workspace = true
@@ -24,9 +25,11 @@ pretty_assertions.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [features]
-default = []
+default = ["redis"]
 # Enable when swss-common native library is available
 swss = ["swss-common"]
+# Redis database backend support
+redis = ["dep:redis"]
 
 [lints]
 workspace = true
