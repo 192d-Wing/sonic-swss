@@ -10,8 +10,7 @@ use crate::constants::*;
 use crate::fields;
 use crate::types::SflowPortInfo;
 use crate::{
-    APP_SFLOW_SESSION_TABLE_NAME, APP_SFLOW_TABLE_NAME, CFG_PORT_TABLE_NAME,
-    CFG_SFLOW_SESSION_TABLE_NAME, CFG_SFLOW_TABLE_NAME, STATE_PORT_TABLE_NAME,
+    CFG_PORT_TABLE_NAME, CFG_SFLOW_SESSION_TABLE_NAME, CFG_SFLOW_TABLE_NAME, STATE_PORT_TABLE_NAME,
 };
 
 /// SflowMgr manages sFlow sampling configuration
@@ -166,8 +165,14 @@ impl SflowMgr {
     /// Builds field-value tuples for global sFlow session configuration
     fn build_global_session_fvs(&self, alias: &str, direction: &str) -> FieldValues {
         vec![
-            (fields::ADMIN_STATE.to_string(), DEFAULT_ADMIN_STATE.to_string()),
-            (fields::SAMPLE_RATE.to_string(), self.find_sampling_rate(alias)),
+            (
+                fields::ADMIN_STATE.to_string(),
+                DEFAULT_ADMIN_STATE.to_string(),
+            ),
+            (
+                fields::SAMPLE_RATE.to_string(),
+                self.find_sampling_rate(alias),
+            ),
             (fields::SAMPLE_DIRECTION.to_string(), direction.to_string()),
         ]
     }
@@ -201,7 +206,10 @@ impl SflowMgr {
 
                     // Use global admin state if not locally configured
                     if !port_info.local_admin_cfg {
-                        fvs.push((fields::ADMIN_STATE.to_string(), DEFAULT_ADMIN_STATE.to_string()));
+                        fvs.push((
+                            fields::ADMIN_STATE.to_string(),
+                            DEFAULT_ADMIN_STATE.to_string(),
+                        ));
                     }
 
                     // Use global direction if not locally configured
@@ -252,35 +260,28 @@ impl SflowMgr {
         alias: &str,
         values: &FieldValues,
     ) -> CfgMgrResult<FieldValues> {
-        let port_info = self
-            .port_config_map
-            .entry(alias.to_string())
-            .or_insert_with(SflowPortInfo::new);
-
+        // First pass: collect values and determine what's present
         let mut rate_present = false;
         let mut admin_present = false;
         let mut dir_present = false;
         let mut fvs = Vec::new();
+
+        // Extract alias clone for find_sampling_rate call
+        let alias_owned = alias.to_string();
 
         // Process provided values
         for (field, value) in values {
             match field.as_str() {
                 fields::SAMPLE_RATE => {
                     rate_present = true;
-                    port_info.rate = value.clone();
-                    port_info.local_rate_cfg = true;
                     fvs.push((field.clone(), value.clone()));
                 }
                 fields::ADMIN_STATE => {
                     admin_present = true;
-                    port_info.admin = value.clone();
-                    port_info.local_admin_cfg = true;
                     fvs.push((field.clone(), value.clone()));
                 }
                 fields::SAMPLE_DIRECTION => {
                     dir_present = true;
-                    port_info.dir = value.clone();
-                    port_info.local_dir_cfg = true;
                     fvs.push((field.clone(), value.clone()));
                 }
                 "NULL" => continue,
@@ -288,30 +289,60 @@ impl SflowMgr {
             }
         }
 
+        // Get or create port_info and update it
+        let port_info = self.port_config_map.entry(alias_owned.clone()).or_default();
+
+        // Update port_info based on what was present
+        for (field, value) in values {
+            match field.as_str() {
+                fields::SAMPLE_RATE => {
+                    port_info.rate = value.clone();
+                    port_info.local_rate_cfg = true;
+                }
+                fields::ADMIN_STATE => {
+                    port_info.admin = value.clone();
+                    port_info.local_admin_cfg = true;
+                }
+                fields::SAMPLE_DIRECTION => {
+                    port_info.dir = value.clone();
+                    port_info.local_dir_cfg = true;
+                }
+                _ => {}
+            }
+        }
+
         // Fill missing values with defaults
         if !rate_present {
-            // Revert to default if rate was previously configured but now removed
-            if port_info.rate.is_empty() || port_info.local_rate_cfg {
-                port_info.rate = self.find_sampling_rate(alias);
-            }
-            port_info.local_rate_cfg = false;
-            fvs.push((fields::SAMPLE_RATE.to_string(), port_info.rate.clone()));
+            let default_rate = if port_info.rate.is_empty() || port_info.local_rate_cfg {
+                self.find_sampling_rate(&alias_owned)
+            } else {
+                port_info.rate.clone()
+            };
+
+            let port_info_mut = self.port_config_map.get_mut(&alias_owned).unwrap();
+            port_info_mut.rate = default_rate.clone();
+            port_info_mut.local_rate_cfg = false;
+            fvs.push((fields::SAMPLE_RATE.to_string(), default_rate));
         }
 
         if !admin_present {
-            if port_info.admin.is_empty() {
-                port_info.admin = DEFAULT_ADMIN_STATE.to_string();
+            let port_info_mut = self.port_config_map.get_mut(&alias_owned).unwrap();
+            if port_info_mut.admin.is_empty() {
+                port_info_mut.admin = DEFAULT_ADMIN_STATE.to_string();
             }
-            port_info.local_admin_cfg = false;
-            fvs.push((fields::ADMIN_STATE.to_string(), port_info.admin.clone()));
+            let admin_value = port_info_mut.admin.clone();
+            port_info_mut.local_admin_cfg = false;
+            fvs.push((fields::ADMIN_STATE.to_string(), admin_value));
         }
 
         if !dir_present {
-            if port_info.dir.is_empty() {
-                port_info.dir = self.global_direction.clone();
+            let port_info_mut = self.port_config_map.get_mut(&alias_owned).unwrap();
+            if port_info_mut.dir.is_empty() {
+                port_info_mut.dir = self.global_direction.clone();
             }
-            port_info.local_dir_cfg = false;
-            fvs.push((fields::SAMPLE_DIRECTION.to_string(), port_info.dir.clone()));
+            let dir_value = port_info_mut.dir.clone();
+            port_info_mut.local_dir_cfg = false;
+            fvs.push((fields::SAMPLE_DIRECTION.to_string(), dir_value));
         }
 
         Ok(fvs)
@@ -401,9 +432,16 @@ impl Default for SflowMgr {
 /// Orch trait implementation
 #[async_trait]
 impl Orch for SflowMgr {
-    async fn do_task(&mut self, _table_name: &str, _key: &str, _op: &str, _values: FieldValues) -> CfgMgrResult<()> {
-        // Placeholder - actual implementation would dispatch based on table_name
-        Ok(())
+    fn name(&self) -> &str {
+        "sflowmgr"
+    }
+
+    async fn do_task(&mut self) {
+        // Placeholder - actual implementation would:
+        // 1. Drain consumers for each subscribed table
+        // 2. Process entries based on table type
+        // 3. Update APPL_DB via producers
+        debug!("do_task called (placeholder)");
     }
 }
 
@@ -461,7 +499,8 @@ mod tests {
         let mut port_info = SflowPortInfo::new();
         port_info.local_admin_cfg = true;
         port_info.admin = "up".to_string();
-        mgr.port_config_map.insert("Ethernet0".to_string(), port_info);
+        mgr.port_config_map
+            .insert("Ethernet0".to_string(), port_info);
 
         assert!(!mgr.is_port_enabled("Ethernet0"));
     }
@@ -473,7 +512,8 @@ mod tests {
         mgr.intf_all_conf = true;
 
         let port_info = SflowPortInfo::new();
-        mgr.port_config_map.insert("Ethernet0".to_string(), port_info);
+        mgr.port_config_map
+            .insert("Ethernet0".to_string(), port_info);
 
         assert!(mgr.is_port_enabled("Ethernet0"));
     }
@@ -487,7 +527,8 @@ mod tests {
         let mut port_info = SflowPortInfo::new();
         port_info.local_admin_cfg = true;
         port_info.admin = "up".to_string();
-        mgr.port_config_map.insert("Ethernet0".to_string(), port_info);
+        mgr.port_config_map
+            .insert("Ethernet0".to_string(), port_info);
 
         assert!(mgr.is_port_enabled("Ethernet0"));
     }
@@ -499,7 +540,8 @@ mod tests {
         let mut port_info = SflowPortInfo::new();
         port_info.speed = "100000".to_string();
         port_info.oper_speed = "40000".to_string();
-        mgr.port_config_map.insert("Ethernet0".to_string(), port_info);
+        mgr.port_config_map
+            .insert("Ethernet0".to_string(), port_info);
 
         assert_eq!(mgr.find_sampling_rate("Ethernet0"), "40000");
     }
@@ -511,7 +553,8 @@ mod tests {
         let mut port_info = SflowPortInfo::new();
         port_info.speed = "100000".to_string();
         port_info.oper_speed = "N/A".to_string();
-        mgr.port_config_map.insert("Ethernet0".to_string(), port_info);
+        mgr.port_config_map
+            .insert("Ethernet0".to_string(), port_info);
 
         assert_eq!(mgr.find_sampling_rate("Ethernet0"), "100000");
     }
@@ -548,7 +591,8 @@ mod tests {
 
         let mut port_info = SflowPortInfo::new();
         port_info.speed = "100000".to_string();
-        mgr.port_config_map.insert("Ethernet0".to_string(), port_info);
+        mgr.port_config_map
+            .insert("Ethernet0".to_string(), port_info);
 
         let fvs = mgr.build_global_session_fvs("Ethernet0", "rx");
 

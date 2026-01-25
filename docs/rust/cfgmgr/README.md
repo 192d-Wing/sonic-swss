@@ -1,7 +1,7 @@
 # cfgmgr Rust Rewrite Documentation
 
-**Project Status**: Phase 1 Complete (Week 1-2)
-**Current State**: portmgrd foundation ready for Phase 2
+**Project Status**: Phase 2 Week 3 Complete
+**Current State**: portmgrd + sflowmgrd complete, ready for Week 4
 **Timeline**: 20 weeks (Weeks 1-20, Q1 2026)
 
 ---
@@ -65,8 +65,8 @@ Orchestration Agent (hardware programming)
 | Phase | Manager | Complexity | Status | Est. LOC |
 |-------|---------|-----------|--------|----------|
 | 1 | portmgrd | Low | ✅ Complete | ~700 |
-| 1 | sflowmgrd | Low | 📋 Planned | ~150 |
-| 1 | fabricmgrd | Low | 📋 Planned | ~150 |
+| 2 | sflowmgrd | Low | ✅ Complete | ~730 |
+| 2 | fabricmgrd | Low | 📋 Planned | ~150 |
 | 2 | vlanmgrd | Medium | 📋 Planned | ~400 |
 | 2 | intfmgrd | High | 📋 Planned | ~500 |
 | 3 | nbrmgrd | High | 📋 Planned | ~400 |
