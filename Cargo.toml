@@ -4,7 +4,7 @@ members = [
     "crates/countersyncd",
     "crates/neighsyncd",
     "crates/portsyncd",
-    "crates/sonic-types",
+    # sonic-types moved to sonic-common workspace
     "crates/sonic-sai",
     "crates/sonic-orch-common",
     "crates/sonic-ffi-bridge",
@@ -13,6 +13,7 @@ members = [
     "crates/sonic-cfgmgr-common",
     "crates/portmgrd",
     "crates/sflowmgrd",
+    "crates/fabricmgrd",
 ]
 exclude = []
 
@@ -99,6 +100,14 @@ reqwest-tracing = { version = "0.5", features = ["opentelemetry_0_26"] }
 
 # SONiC specific dependencies
 swss-common = { git = "https://github.com/sonic-net/sonic-swss-common.git", branch = "master" }
+
+# SONiC common libraries (from sonic-common workspace)
+sonic-types = { path = "../sonic-common/sonic-types" }
+sonic-redis = { path = "../sonic-common/sonic-redis" }
+sonic-netlink = { path = "../sonic-common/sonic-netlink" }
+sonic-config = { path = "../sonic-common/sonic-config" }
+sonic-audit = { path = "../sonic-common/sonic-audit" }
+sonic-sai-common = { path = "../sonic-common/sonic-sai" }
 
 # Development dependencies
 tempfile = "3.12"
