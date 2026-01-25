@@ -10,7 +10,7 @@
 use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
 use crate::audit_log;
 use log::{debug, error, info};
-use sonic_orch_common::{Orch, OrchContext};
+use sonic_orch_common::{Orch, OrchContext, RedisConfig};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -24,6 +24,10 @@ pub struct OrchDaemonConfig {
     pub batch_size: usize,
     /// Enable warm boot mode
     pub warm_boot: bool,
+    /// Redis host for databases
+    pub redis_host: String,
+    /// Redis port for databases
+    pub redis_port: u16,
 }
 
 impl Default for OrchDaemonConfig {
@@ -32,6 +36,8 @@ impl Default for OrchDaemonConfig {
             heartbeat_interval_ms: 1000,
             batch_size: 128,
             warm_boot: false,
+            redis_host: "127.0.0.1".to_string(),
+            redis_port: 6379,
         }
     }
 }
@@ -224,12 +230,60 @@ impl OrchDaemon {
     /// - SC-7: Boundary Protection
     /// - SC-8: Transmission Confidentiality
     async fn init_databases(&self) -> Result<(), String> {
-        // TODO: Implement database initialization
-        // This will include:
-        // - Connecting to CONFIG_DB
-        // - Connecting to APPL_DB
-        // - Connecting to STATE_DB
-        // - Setting up consumers for all databases
+        use sonic_orch_common::RedisDatabase;
+
+        let config = &self.config;
+        info!(
+            "Connecting to Redis databases at {}:{}",
+            config.redis_host, config.redis_port
+        );
+
+        // Connect to CONFIG_DB (database 4)
+        let config_db_config = RedisConfig::config_db(config.redis_host.clone(), config.redis_port);
+        match RedisDatabase::new(config_db_config).await {
+            Ok(_db) => {
+                info!("Connected to CONFIG_DB");
+            }
+            Err(e) => {
+                return Err(format!("Failed to connect to CONFIG_DB: {}", e));
+            }
+        }
+
+        // Connect to APPL_DB (database 0)
+        let appl_db_config = RedisConfig::appl_db(config.redis_host.clone(), config.redis_port);
+        match RedisDatabase::new(appl_db_config).await {
+            Ok(_db) => {
+                info!("Connected to APPL_DB");
+            }
+            Err(e) => {
+                return Err(format!("Failed to connect to APPL_DB: {}", e));
+            }
+        }
+
+        // Connect to STATE_DB (database 6)
+        let state_db_config = RedisConfig::state_db(config.redis_host.clone(), config.redis_port);
+        match RedisDatabase::new(state_db_config).await {
+            Ok(_db) => {
+                info!("Connected to STATE_DB");
+            }
+            Err(e) => {
+                return Err(format!("Failed to connect to STATE_DB: {}", e));
+            }
+        }
+
+        // Connect to COUNTER_DB (database 2)
+        let counter_db_config =
+            RedisConfig::counter_db(config.redis_host.clone(), config.redis_port);
+        match RedisDatabase::new(counter_db_config).await {
+            Ok(_db) => {
+                info!("Connected to COUNTER_DB");
+            }
+            Err(e) => {
+                return Err(format!("Failed to connect to COUNTER_DB: {}", e));
+            }
+        }
+
+        info!("All database connections initialized successfully");
         Ok(())
     }
 
@@ -440,6 +494,8 @@ mod tests {
             heartbeat_interval_ms: 500,
             batch_size: 256,
             warm_boot: true,
+            redis_host: "localhost".to_string(),
+            redis_port: 6380,
         };
         let daemon = OrchDaemon::new(config.clone());
         assert_eq!(daemon.config.heartbeat_interval_ms, 500);
@@ -615,6 +671,8 @@ mod tests {
             heartbeat_interval_ms: 1000,
             batch_size: 128,
             warm_boot: true,
+            redis_host: "127.0.0.1".to_string(),
+            redis_port: 6379,
         };
         let daemon = OrchDaemon::new(config);
         assert!(daemon.config.warm_boot);
@@ -698,6 +756,8 @@ mod tests {
             heartbeat_interval_ms: u64::MAX,
             batch_size: usize::MAX,
             warm_boot: true,
+            redis_host: "127.0.0.1".to_string(),
+            redis_port: 6379,
         };
         let daemon = OrchDaemon::new(config);
         assert_eq!(daemon.config.heartbeat_interval_ms, u64::MAX);
@@ -710,6 +770,8 @@ mod tests {
             heartbeat_interval_ms: 0,
             batch_size: 0,
             warm_boot: false,
+            redis_host: "127.0.0.1".to_string(),
+            redis_port: 6379,
         };
         let daemon = OrchDaemon::new(config);
         assert_eq!(daemon.config.heartbeat_interval_ms, 0);

@@ -92,6 +92,8 @@ async fn main() -> ExitCode {
         heartbeat_interval_ms: args.heartbeat_interval,
         batch_size: args.batch_size,
         warm_boot: args.warm_boot,
+        redis_host: args.redis_host.clone(),
+        redis_port: args.redis_port,
     };
 
     let mut daemon = OrchDaemon::new(daemon_config);
