@@ -1,9 +1,9 @@
 # Linux Performance Tuning Guide for portsyncd
 
-**Version**: 1.0
-**Date**: January 25, 2026
-**Status**: Production Ready
-**Target**: Optimize portsyncd for high-frequency netlink event processing
+**Version**: 1.0.  
+**Date**: January 25, 2026.  
+**Status**: Production Ready.  
+**Target**: Optimize portsyncd for high-frequency netlink event processing.  
 
 ---
 
@@ -11,8 +11,16 @@
 
 portsyncd is I/O bound with high-frequency kernel netlink events (up to 15K events/second). This guide covers Linux kernel tuning, network stack optimization, and application-level configurations to achieve sub-100μs event processing latency.
 
-**Current Performance**: P50=50-75μs, P95=200-300μs, P99=400-600μs
-**Target Performance**: P50<50μs, P99<500μs (with tuning)
+**Current Performance**:
+
+- P50=50-75μs
+- P95=200-300μs
+- P99=400-600μs
+
+**Target Performance**:
+
+- P50<50μs
+- P99<500μs (with tuning)
 
 ---
 
@@ -878,6 +886,6 @@ increase(portsyncd_context_switches[5m])
 
 ---
 
-**Status**: Production Ready
-**Last Updated**: January 25, 2026
-**Compliance**: NIST 800-53 SI-4 (System Monitoring)
+**Status**: Production Ready.  
+**Last Updated**: January 25, 2026.  
+**Compliance**: NIST 800-53 SI-4 (System Monitoring).  
