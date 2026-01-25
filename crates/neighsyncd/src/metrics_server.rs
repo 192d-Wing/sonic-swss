@@ -8,7 +8,7 @@
 //! - IA-5(2): PKI-Based Authentication - Client certificate validation
 
 use crate::metrics::MetricsCollector;
-use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Router};
+use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 use axum_server::tls_rustls::RustlsConfig;
 use prometheus::{Encoder, TextEncoder};
 use rustls::pki_types::CertificateDer;
@@ -97,8 +97,8 @@ fn load_cnsa_mtls_config(
     // Load server certificate chain
     let cert_file = File::open(&config.server_cert_path)?;
     let mut cert_reader = BufReader::new(cert_file);
-    let certs: Vec<CertificateDer> = rustls_pemfile::certs(&mut cert_reader)
-        .collect::<Result<Vec<_>, _>>()?;
+    let certs: Vec<CertificateDer> =
+        rustls_pemfile::certs(&mut cert_reader).collect::<Result<Vec<_>, _>>()?;
 
     if certs.is_empty() {
         return Err("No certificates found in server certificate file".into());
@@ -121,8 +121,8 @@ fn load_cnsa_mtls_config(
     // Load CA certificates for client verification
     let ca_file = File::open(&config.ca_cert_path)?;
     let mut ca_reader = BufReader::new(ca_file);
-    let ca_certs: Vec<CertificateDer> = rustls_pemfile::certs(&mut ca_reader)
-        .collect::<Result<Vec<_>, _>>()?;
+    let ca_certs: Vec<CertificateDer> =
+        rustls_pemfile::certs(&mut ca_reader).collect::<Result<Vec<_>, _>>()?;
 
     if ca_certs.is_empty() {
         return Err("No CA certificates found in CA certificate file".into());
@@ -171,9 +171,7 @@ fn load_cnsa_mtls_config(
         key_provider: crypto_provider.key_provider,
     };
 
-    info!(
-        "Configured CNSA 2.0 crypto provider: TLS_AES_256_GCM_SHA384 only, AWS-LC-RS"
-    );
+    info!("Configured CNSA 2.0 crypto provider: TLS_AES_256_GCM_SHA384 only, AWS-LC-RS");
 
     // Build ServerConfig with CNSA 2.0 restrictions
     let mut tls_config = ServerConfig::builder_with_provider(Arc::new(cnsa_provider))
@@ -379,9 +377,6 @@ mod tests {
     #[test]
     fn test_cnsa_cipher_suite() {
         // Verify CNSA 2.0 cipher suite constant
-        assert_eq!(
-            CNSA_CIPHER_SUITE,
-            CipherSuite::TLS13_AES_256_GCM_SHA384
-        );
+        assert_eq!(CNSA_CIPHER_SUITE, CipherSuite::TLS13_AES_256_GCM_SHA384);
     }
 }

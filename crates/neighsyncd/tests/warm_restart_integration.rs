@@ -47,9 +47,7 @@ async fn populate_initial_neighbors(
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_warm_restart_flag_detection() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -76,9 +74,7 @@ async fn test_warm_restart_flag_detection() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_warm_restart_initial_state_cache() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -106,9 +102,7 @@ async fn test_warm_restart_initial_state_cache() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_warm_restart_reconciliation_add_only() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -143,9 +137,7 @@ async fn test_warm_restart_reconciliation_add_only() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_warm_restart_reconciliation_delete_stale() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -164,32 +156,22 @@ async fn test_warm_restart_reconciliation_delete_stale() {
         .expect("Failed to add stale neighbor");
 
     // Verify it exists before reconciliation
-    let exists = env
-        .exists(stale_key)
-        .await
-        .expect("Failed to check exists");
+    let exists = env.exists(stale_key).await.expect("Failed to check exists");
     assert!(exists);
 
     // After reconciliation, stale entries should be removed
     // (In real scenario, reconciliation would delete this)
     // For testing, we manually delete to simulate reconciliation
-    env.del(stale_key)
-        .await
-        .expect("Failed to delete stale");
+    env.del(stale_key).await.expect("Failed to delete stale");
 
-    let exists = env
-        .exists(stale_key)
-        .await
-        .expect("Failed to check exists");
+    let exists = env.exists(stale_key).await.expect("Failed to check exists");
     assert!(!exists);
 }
 
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_warm_restart_reconciliation_update() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -221,9 +203,7 @@ async fn test_warm_restart_reconciliation_update() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_warm_restart_large_state() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -242,10 +222,7 @@ async fn test_warm_restart_large_state() {
 
     // Sample verification
     for i in (0..neighbor_count).step_by(100) {
-        let exists = env
-            .exists(&keys[i])
-            .await
-            .expect("Failed to check exists");
+        let exists = env.exists(&keys[i]).await.expect("Failed to check exists");
         assert!(exists);
     }
 }
@@ -253,9 +230,7 @@ async fn test_warm_restart_large_state() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_warm_restart_multiple_interfaces() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -290,9 +265,7 @@ async fn test_warm_restart_multiple_interfaces() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_warm_restart_restore_count() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -322,9 +295,7 @@ async fn test_warm_restart_restore_count() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_warm_restart_timer_expiry() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -360,9 +331,7 @@ async fn test_warm_restart_timer_expiry() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_warm_restart_concurrent_updates() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -397,9 +366,7 @@ async fn test_warm_restart_concurrent_updates() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_warm_restart_state_consistency() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -409,7 +376,11 @@ async fn test_warm_restart_state_consistency() {
 
     // Create a set of neighbors with complete state
     let neighbors = vec![
-        ("NEIGH_TABLE:eth0:2001:db8::1", "00:11:22:33:44:55", "Reachable"),
+        (
+            "NEIGH_TABLE:eth0:2001:db8::1",
+            "00:11:22:33:44:55",
+            "Reachable",
+        ),
         ("NEIGH_TABLE:eth0:2001:db8::2", "00:11:22:33:44:56", "Stale"),
         ("NEIGH_TABLE:eth0:2001:db8::3", "00:11:22:33:44:57", "Delay"),
     ];
@@ -428,22 +399,13 @@ async fn test_warm_restart_state_consistency() {
 
     // Verify consistency of all attributes
     for (key, expected_mac, expected_state) in &neighbors {
-        let mac = env
-            .hget(key, "neigh")
-            .await
-            .expect("Failed to get MAC");
+        let mac = env.hget(key, "neigh").await.expect("Failed to get MAC");
         assert_eq!(mac, Some(expected_mac.to_string()));
 
-        let state = env
-            .hget(key, "state")
-            .await
-            .expect("Failed to get state");
+        let state = env.hget(key, "state").await.expect("Failed to get state");
         assert_eq!(state, Some(expected_state.to_string()));
 
-        let family = env
-            .hget(key, "family")
-            .await
-            .expect("Failed to get family");
+        let family = env.hget(key, "family").await.expect("Failed to get family");
         assert_eq!(family, Some("IPv6".to_string()));
     }
 }
@@ -451,9 +413,7 @@ async fn test_warm_restart_state_consistency() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_warm_restart_incomplete_neighbors() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -481,9 +441,7 @@ async fn test_warm_restart_incomplete_neighbors() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_warm_restart_reconciliation_performance() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -513,9 +471,7 @@ async fn test_warm_restart_reconciliation_performance() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_warm_restart_cache_vs_kernel_diff() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 

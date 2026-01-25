@@ -59,7 +59,9 @@ pub mod types;
 pub use error::{NeighsyncError, Result};
 pub use health_monitor::HealthMonitor;
 pub use metrics::{HealthStatus, MetricsCollector};
-pub use metrics_server::{start_metrics_server, start_metrics_server_insecure, MetricsServerConfig};
+pub use metrics_server::{
+    MetricsServerConfig, start_metrics_server, start_metrics_server_insecure,
+};
 pub use neigh_sync::{AsyncNeighSync, NeighSync};
 pub use netlink::{AsyncNetlinkSocket, NetlinkSocket};
 pub use redis_adapter::RedisAdapter;

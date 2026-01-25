@@ -13,9 +13,7 @@ use std::time::Duration;
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_redis_connection() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     // Verify we can get a connection
     let mut conn = env
@@ -34,9 +32,7 @@ async fn test_redis_connection() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_redis_connection_retry() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     // Multiple connections should work
     for _ in 0..5 {
@@ -50,9 +46,7 @@ async fn test_redis_connection_retry() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_neighbor_crud_operations() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     // Clean slate
     env.flush_all().await.expect("Failed to flush");
@@ -97,9 +91,7 @@ async fn test_neighbor_crud_operations() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_neighbor_batch_operations() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -139,9 +131,7 @@ async fn test_neighbor_batch_operations() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_concurrent_operations() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -182,9 +172,7 @@ async fn test_concurrent_operations() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_neighbor_deletion_scenarios() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -213,14 +201,12 @@ async fn test_neighbor_deletion_scenarios() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_neighbor_interface_patterns() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
     // Different interface types
-    let interfaces = vec![
+    let interfaces = [
         "Ethernet0",
         "Ethernet1",
         "Vlan100",
@@ -260,9 +246,7 @@ async fn test_neighbor_interface_patterns() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_neighbor_attributes() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -281,25 +265,17 @@ async fn test_neighbor_attributes() {
     assert_eq!(all.len(), 2);
 
     // Verify specific attributes
-    let mac = env
-        .hget(key, "neigh")
-        .await
-        .expect("Failed to get MAC");
+    let mac = env.hget(key, "neigh").await.expect("Failed to get MAC");
     assert_eq!(mac, Some("00:11:22:33:44:55".to_string()));
 
-    let family = env
-        .hget(key, "family")
-        .await
-        .expect("Failed to get family");
+    let family = env.hget(key, "family").await.expect("Failed to get family");
     assert_eq!(family, Some("IPv6".to_string()));
 }
 
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_error_handling_invalid_operations() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -318,9 +294,7 @@ async fn test_error_handling_invalid_operations() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_neighbor_update_scenarios() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -343,25 +317,17 @@ async fn test_neighbor_update_scenarios() {
         .expect("Failed to update state");
 
     // Verify final state
-    let mac = env
-        .hget(key, "neigh")
-        .await
-        .expect("Failed to get MAC");
+    let mac = env.hget(key, "neigh").await.expect("Failed to get MAC");
     assert_eq!(mac, Some("00:11:22:33:44:55".to_string()));
 
-    let state = env
-        .hget(key, "state")
-        .await
-        .expect("Failed to get state");
+    let state = env.hget(key, "state").await.expect("Failed to get state");
     assert_eq!(state, Some("Reachable".to_string()));
 }
 
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_large_batch_operations() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -380,19 +346,14 @@ async fn test_large_batch_operations() {
     assert_eq!(dbsize, count);
 
     // Pattern match should work with large sets
-    let all_keys = env
-        .keys("NEIGH_TABLE:*")
-        .await
-        .expect("Failed to get keys");
+    let all_keys = env.keys("NEIGH_TABLE:*").await.expect("Failed to get keys");
     assert_eq!(all_keys.len(), count);
 }
 
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_connection_timeout_handling() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     // Get connection
     let mut conn = env
@@ -416,20 +377,18 @@ async fn test_connection_timeout_handling() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_ipv6_address_formats() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
     // Various IPv6 address formats
     let addresses = vec![
-        "2001:db8::1",                          // Standard
-        "fe80::1",                              // Link-local
-        "::1",                                  // Loopback
-        "2001:db8:0:0:0:0:0:1",                // Expanded
-        "2001:db8::192.168.1.1",               // IPv4-mapped
-        "ff02::1",                              // Multicast
+        "2001:db8::1",           // Standard
+        "fe80::1",               // Link-local
+        "::1",                   // Loopback
+        "2001:db8:0:0:0:0:0:1",  // Expanded
+        "2001:db8::192.168.1.1", // IPv4-mapped
+        "ff02::1",               // Multicast
     ];
 
     for addr in addresses {
@@ -450,9 +409,7 @@ async fn test_ipv6_address_formats() {
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_dual_tor_scenarios() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 
@@ -466,19 +423,14 @@ async fn test_dual_tor_scenarios() {
         .expect("Failed to set state");
 
     // Verify zero MAC is stored
-    let mac = env
-        .hget(key, "neigh")
-        .await
-        .expect("Failed to get MAC");
+    let mac = env.hget(key, "neigh").await.expect("Failed to get MAC");
     assert_eq!(mac, Some("00:00:00:00:00:00".to_string()));
 }
 
 #[tokio::test]
 #[ignore = "Requires Docker"]
 async fn test_redis_persistence() {
-    let env = RedisTestEnv::start()
-        .await
-        .expect("Failed to start Redis");
+    let env = RedisTestEnv::start().await.expect("Failed to start Redis");
 
     env.flush_all().await.expect("Failed to flush");
 

@@ -5,9 +5,9 @@
 use redis::{AsyncCommands, Client};
 use std::time::Duration;
 use testcontainers::{
+    GenericImage,
     core::{ContainerPort, WaitFor},
     runners::AsyncRunner,
-    GenericImage,
 };
 
 /// Redis test environment with containerized Redis instance
@@ -36,13 +36,8 @@ impl RedisTestEnv {
             .await?;
 
         // Get host and port
-        let host = container
-            .get_host()
-            .await?
-            .to_string();
-        let port = container
-            .get_host_port_ipv4(6379)
-            .await?;
+        let host = container.get_host().await?.to_string();
+        let port = container.get_host_port_ipv4(6379).await?;
 
         // Create Redis client
         let redis_url = format!("redis://{}:{}", host, port);
@@ -83,9 +78,7 @@ impl RedisTestEnv {
     /// Returns error if FLUSHALL command fails
     pub async fn flush_all(&self) -> Result<(), redis::RedisError> {
         let mut conn = self.get_async_connection().await?;
-        redis::cmd("FLUSHALL")
-            .query_async::<()>(&mut conn)
-            .await?;
+        redis::cmd("FLUSHALL").query_async::<()>(&mut conn).await?;
         Ok(())
     }
 
@@ -140,21 +133,14 @@ impl RedisTestEnv {
     /// Returns error if DBSIZE command fails
     pub async fn dbsize(&self) -> Result<usize, redis::RedisError> {
         let mut conn = self.get_async_connection().await?;
-        redis::cmd("DBSIZE")
-            .query_async::<usize>(&mut conn)
-            .await
+        redis::cmd("DBSIZE").query_async::<usize>(&mut conn).await
     }
 
     /// Set a hash field
     ///
     /// # Errors
     /// Returns error if HSET command fails
-    pub async fn hset(
-        &self,
-        key: &str,
-        field: &str,
-        value: &str,
-    ) -> Result<(), redis::RedisError> {
+    pub async fn hset(&self, key: &str, field: &str, value: &str) -> Result<(), redis::RedisError> {
         let mut conn = self.get_async_connection().await?;
         conn.hset(key, field, value).await
     }
@@ -214,12 +200,18 @@ mod tests {
         assert_eq!(value, Some("test_value".to_string()));
 
         // Test EXISTS
-        let exists = env.exists("test_key").await.expect("Failed to check exists");
+        let exists = env
+            .exists("test_key")
+            .await
+            .expect("Failed to check exists");
         assert!(exists);
 
         // Test DEL
         env.del("test_key").await.expect("Failed to delete key");
-        let exists = env.exists("test_key").await.expect("Failed to check exists");
+        let exists = env
+            .exists("test_key")
+            .await
+            .expect("Failed to check exists");
         assert!(!exists);
     }
 
@@ -290,10 +282,7 @@ mod tests {
             .expect("Failed to set");
 
         // Get keys matching pattern
-        let keys = env
-            .keys("NEIGH_TABLE:*")
-            .await
-            .expect("Failed to get keys");
+        let keys = env.keys("NEIGH_TABLE:*").await.expect("Failed to get keys");
         assert_eq!(keys.len(), 2);
     }
 }

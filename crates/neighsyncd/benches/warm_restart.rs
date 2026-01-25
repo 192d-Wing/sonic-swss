@@ -2,9 +2,9 @@
 //!
 //! Measures the performance of warm restart state caching and reconciliation.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::collections::HashMap;
-use std::time::Duration;
+use std::hint::black_box;
 
 /// Neighbor entry for caching
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -49,7 +49,11 @@ fn load_kernel_neighbors(count: usize) -> HashMap<NeighborKey, NeighborValue> {
                 ip: format!("2001:db8::{:x}", offset),
             };
             let value = NeighborValue {
-                mac: format!("aa:bb:cc:dd:{:02x}:{:02x}", (offset >> 8) & 0xff, offset & 0xff),
+                mac: format!(
+                    "aa:bb:cc:dd:{:02x}:{:02x}",
+                    (offset >> 8) & 0xff,
+                    offset & 0xff
+                ),
                 state: "Reachable".to_string(),
             };
             (key, value)
@@ -95,16 +99,12 @@ fn bench_cache_loading(c: &mut Criterion) {
 
     for count in [100, 500, 1000, 5000] {
         group.throughput(Throughput::Elements(count as u64));
-        group.bench_with_input(
-            BenchmarkId::from_parameter(count),
-            &count,
-            |b, &count| {
-                b.iter(|| {
-                    let cached = load_cached_neighbors(count);
-                    black_box(cached);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, &count| {
+            b.iter(|| {
+                let cached = load_cached_neighbors(count);
+                black_box(cached);
+            });
+        });
     }
 
     group.finish();
@@ -142,29 +142,25 @@ fn bench_lookup_performance(c: &mut Criterion) {
     for count in [100, 1000, 10000] {
         let cached = load_cached_neighbors(count);
 
-        group.bench_with_input(
-            BenchmarkId::from_parameter(count),
-            &cached,
-            |b, cached| {
-                // Lookup 1000 keys (some exist, some don't)
-                let lookup_keys: Vec<NeighborKey> = (0..1000)
-                    .map(|i| NeighborKey {
-                        interface: format!("Ethernet{}", i % 64),
-                        ip: format!("2001:db8::{:x}", i),
-                    })
-                    .collect();
+        group.bench_with_input(BenchmarkId::from_parameter(count), &cached, |b, cached| {
+            // Lookup 1000 keys (some exist, some don't)
+            let lookup_keys: Vec<NeighborKey> = (0..1000)
+                .map(|i| NeighborKey {
+                    interface: format!("Ethernet{}", i % 64),
+                    ip: format!("2001:db8::{:x}", i),
+                })
+                .collect();
 
-                b.iter(|| {
-                    let mut found = 0;
-                    for key in &lookup_keys {
-                        if cached.contains_key(key) {
-                            found += 1;
-                        }
+            b.iter(|| {
+                let mut found = 0;
+                for key in &lookup_keys {
+                    if cached.contains_key(key) {
+                        found += 1;
                     }
-                    black_box(found);
-                });
-            },
-        );
+                }
+                black_box(found);
+            });
+        });
     }
 
     group.finish();
@@ -175,23 +171,19 @@ fn bench_memory_footprint(c: &mut Criterion) {
     let mut group = c.benchmark_group("memory_footprint");
 
     for count in [100, 1000, 10000] {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(count),
-            &count,
-            |b, &count| {
-                b.iter(|| {
-                    let cached = load_cached_neighbors(count);
+        group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, &count| {
+            b.iter(|| {
+                let cached = load_cached_neighbors(count);
 
-                    // Estimate memory usage
-                    let key_size = std::mem::size_of::<NeighborKey>();
-                    let value_size = std::mem::size_of::<NeighborValue>();
-                    let entry_size = key_size + value_size;
-                    let estimated_bytes = count * entry_size;
+                // Estimate memory usage
+                let key_size = std::mem::size_of::<NeighborKey>();
+                let value_size = std::mem::size_of::<NeighborValue>();
+                let entry_size = key_size + value_size;
+                let estimated_bytes = count * entry_size;
 
-                    black_box((cached.len(), estimated_bytes));
-                });
-            },
-        );
+                black_box((cached.len(), estimated_bytes));
+            });
+        });
     }
 
     group.finish();

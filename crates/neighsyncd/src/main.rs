@@ -106,7 +106,10 @@ async fn run_daemon() -> Result<()> {
     // NIST: AU-6 - Metrics endpoint for analysis
     let metrics_clone = metrics.clone();
     tokio::spawn(async move {
-        info!(port = METRICS_PORT, "neighsyncd: Starting metrics server (HTTP mode)");
+        info!(
+            port = METRICS_PORT,
+            "neighsyncd: Starting metrics server (HTTP mode)"
+        );
         if let Err(e) = start_metrics_server_insecure(metrics_clone, Some(METRICS_PORT)).await {
             error!(error = %e, "neighsyncd: Metrics server failed");
         }

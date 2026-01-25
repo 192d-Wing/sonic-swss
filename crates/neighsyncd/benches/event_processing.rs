@@ -2,16 +2,20 @@
 //!
 //! Measures end-to-end performance of the neighbor event processing pipeline.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use std::hint::black_box;
 use std::time::Duration;
 
 /// Simulate a complete neighbor event from netlink to Redis
 #[derive(Clone)]
 struct NeighborEvent {
+    #[allow(dead_code)]
     ifindex: u32,
+    #[allow(dead_code)]
     interface: String,
     ip: String,
     mac: String,
+    #[allow(dead_code)]
     state: String,
 }
 
@@ -21,7 +25,11 @@ impl NeighborEvent {
             ifindex: (index % 256) as u32,
             interface: format!("Ethernet{}", index % 64),
             ip: format!("2001:db8::{:x}", index),
-            mac: format!("00:11:22:33:{:02x}:{:02x}", (index >> 8) & 0xff, index & 0xff),
+            mac: format!(
+                "00:11:22:33:{:02x}:{:02x}",
+                (index >> 8) & 0xff,
+                index & 0xff
+            ),
             state: "Reachable".to_string(),
         }
     }

@@ -149,7 +149,9 @@ impl MetricsCollector {
                 "neighsyncd_batch_size",
                 "Distribution of batch sizes for Redis operations",
             )
-            .buckets(vec![1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0]),
+            .buckets(vec![
+                1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0,
+            ]),
         )?;
         registry.register(Box::new(batch_size.clone()))?;
 

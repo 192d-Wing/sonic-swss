@@ -2,7 +2,8 @@
 //!
 //! Measures the performance of Redis batch operations and pipelining.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use std::hint::black_box;
 use std::time::Duration;
 
 /// Simulate Redis round-trip latency
@@ -31,41 +32,33 @@ fn bench_redis_single_vs_batch(c: &mut Criterion) {
         group.throughput(Throughput::Elements(count as u64));
 
         // Single operations
-        group.bench_with_input(
-            BenchmarkId::new("single", count),
-            &count,
-            |b, &count| {
-                b.iter(|| {
-                    let mut total_latency = Duration::ZERO;
-                    for i in 0..count {
-                        let key = format!("NEIGH_TABLE:eth0:2001:db8::{}", i);
-                        let value = format!("00:11:22:33:44:{:02x}", i % 256);
-                        total_latency += redis_set_single(&key, &value);
-                    }
-                    black_box(total_latency);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("single", count), &count, |b, &count| {
+            b.iter(|| {
+                let mut total_latency = Duration::ZERO;
+                for i in 0..count {
+                    let key = format!("NEIGH_TABLE:eth0:2001:db8::{}", i);
+                    let value = format!("00:11:22:33:44:{:02x}", i % 256);
+                    total_latency += redis_set_single(&key, &value);
+                }
+                black_box(total_latency);
+            });
+        });
 
         // Batched operations with pipelining
-        group.bench_with_input(
-            BenchmarkId::new("batched", count),
-            &count,
-            |b, &count| {
-                b.iter(|| {
-                    let entries: Vec<(String, String)> = (0..count)
-                        .map(|i| {
-                            (
-                                format!("NEIGH_TABLE:eth0:2001:db8::{}", i),
-                                format!("00:11:22:33:44:{:02x}", i % 256),
-                            )
-                        })
-                        .collect();
-                    let latency = redis_set_batch_pipelined(&entries);
-                    black_box(latency);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("batched", count), &count, |b, &count| {
+            b.iter(|| {
+                let entries: Vec<(String, String)> = (0..count)
+                    .map(|i| {
+                        (
+                            format!("NEIGH_TABLE:eth0:2001:db8::{}", i),
+                            format!("00:11:22:33:44:{:02x}", i % 256),
+                        )
+                    })
+                    .collect();
+                let latency = redis_set_batch_pipelined(&entries);
+                black_box(latency);
+            });
+        });
     }
 
     group.finish();

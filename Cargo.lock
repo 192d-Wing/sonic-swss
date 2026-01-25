@@ -3645,6 +3645,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "sonic-sflowmgrd"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "sonic-cfgmgr-common",
+ "sonic-orch-common",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "sonic-types"
 version = "0.1.0"
 dependencies = [

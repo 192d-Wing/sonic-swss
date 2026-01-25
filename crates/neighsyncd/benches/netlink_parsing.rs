@@ -2,15 +2,15 @@
 //!
 //! Measures the performance of parsing netlink neighbor messages.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use std::hint::black_box;
 
 /// Simulate parsing a single netlink neighbor message
 fn parse_single_neighbor() -> usize {
     // Simulate parsing overhead:
     // - Message header (16 bytes)
     // - Neighbor message (12 bytes)
-    // - Attributes (variable, ~64-128 bytes typical)
-    const MSG_SIZE: usize = 192;
+    // - Attributes (variable, ~64-128 bytes typical, total ~192 bytes)
 
     // Simulate zero-copy parsing by reading message fields
     let mut parsed_bytes = 0;

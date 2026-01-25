@@ -12,6 +12,7 @@ members = [
     # cfgmgr crates (Rust rewrite)
     "crates/sonic-cfgmgr-common",
     "crates/portmgrd",
+    "crates/sflowmgrd",
 ]
 exclude = []
 
