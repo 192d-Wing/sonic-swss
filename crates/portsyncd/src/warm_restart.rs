@@ -686,6 +686,87 @@ impl WarmRestartManager {
     pub fn reset_state(&mut self) {
         self.persisted_state = PersistedPortState::new();
     }
+
+    // ===== Persistent Metrics Storage (Week 4) =====
+
+    /// Save metrics to a JSON file for persistence across restarts
+    pub fn save_metrics(&self, metrics_path: &Path) -> Result<()> {
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = metrics_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        // Serialize metrics to JSON
+        let json = serde_json::to_string_pretty(&self.metrics)
+            .map_err(|e| PortsyncError::Other(format!("Failed to serialize metrics: {}", e)))?;
+
+        // Write to temp file first for atomicity
+        let temp_path = metrics_path.with_extension("tmp");
+        fs::write(&temp_path, &json)?;
+
+        // Atomically rename temp file to final location
+        fs::rename(&temp_path, metrics_path)?;
+
+        Ok(())
+    }
+
+    /// Load metrics from a JSON file
+    pub fn load_metrics(&mut self, metrics_path: &Path) -> Result<()> {
+        if !metrics_path.exists() {
+            // File doesn't exist yet, nothing to load
+            return Ok(());
+        }
+
+        let json = fs::read_to_string(metrics_path)?;
+
+        let loaded_metrics: WarmRestartMetrics = serde_json::from_str(&json)
+            .map_err(|e| PortsyncError::Other(format!("Failed to deserialize metrics: {}", e)))?;
+
+        self.metrics = loaded_metrics;
+        Ok(())
+    }
+
+    /// Merge metrics from another instance (e.g., after recovery)
+    /// This accumulates counters but preserves most recent timestamps
+    pub fn merge_metrics(&mut self, other: &WarmRestartMetrics) {
+        self.metrics.warm_restart_count += other.warm_restart_count;
+        self.metrics.cold_start_count += other.cold_start_count;
+        self.metrics.eoiu_detected_count += other.eoiu_detected_count;
+        self.metrics.eoiu_timeout_count += other.eoiu_timeout_count;
+        self.metrics.state_recovery_count += other.state_recovery_count;
+        self.metrics.corruption_detected_count += other.corruption_detected_count;
+        self.metrics.backup_created_count += other.backup_created_count;
+        self.metrics.backup_cleanup_count += other.backup_cleanup_count;
+
+        // Keep most recent timestamps
+        if other.last_warm_restart_secs > self.metrics.last_warm_restart_secs {
+            self.metrics.last_warm_restart_secs = other.last_warm_restart_secs;
+        }
+        if other.last_eoiu_detection_secs > self.metrics.last_eoiu_detection_secs {
+            self.metrics.last_eoiu_detection_secs = other.last_eoiu_detection_secs;
+        }
+        if other.last_state_recovery_secs > self.metrics.last_state_recovery_secs {
+            self.metrics.last_state_recovery_secs = other.last_state_recovery_secs;
+        }
+        if other.last_corruption_detected_secs > self.metrics.last_corruption_detected_secs {
+            self.metrics.last_corruption_detected_secs = other.last_corruption_detected_secs;
+        }
+
+        // Recalculate average sync duration if needed
+        if other.max_initial_sync_duration_secs > self.metrics.max_initial_sync_duration_secs {
+            self.metrics.max_initial_sync_duration_secs = other.max_initial_sync_duration_secs;
+        }
+    }
+
+    /// Get the metrics file path (default location)
+    pub fn default_metrics_path() -> PathBuf {
+        PathBuf::from("/var/lib/sonic/portsyncd/metrics.json")
+    }
+
+    /// Check if metrics file exists
+    pub fn metrics_file_exists(metrics_path: &Path) -> bool {
+        metrics_path.exists()
+    }
 }
 
 impl Default for WarmRestartManager {
@@ -2042,5 +2123,165 @@ mod tests {
         // Verify averages are calculated correctly (50 + 75) / 2 = 62.5
         assert_eq!(metrics.avg_initial_sync_duration_secs, 62.5);
         assert_eq!(metrics.max_initial_sync_duration_secs, 75);
+    }
+
+    // ===== Week 4: Persistent Metrics Tests =====
+
+    #[test]
+    fn test_metrics_save_and_load_roundtrip() {
+        let temp_dir = TempDir::new().unwrap();
+        let metrics_file = temp_dir.path().join("metrics.json");
+
+        // Create metrics with various events
+        let mut manager = WarmRestartManager::new();
+        manager.metrics.record_warm_restart();
+        manager.metrics.record_eoiu_detected();
+        manager.metrics.record_state_recovery();
+        manager.metrics.record_corruption_detected();
+
+        let original_warm_restarts = manager.metrics.warm_restart_count;
+        let original_eoiu_detected = manager.metrics.eoiu_detected_count;
+
+        // Save metrics
+        manager.save_metrics(&metrics_file).unwrap();
+        assert!(metrics_file.exists());
+
+        // Create new manager and load metrics
+        let mut manager2 = WarmRestartManager::new();
+        manager2.load_metrics(&metrics_file).unwrap();
+
+        // Verify metrics were preserved
+        assert_eq!(manager2.metrics.warm_restart_count, original_warm_restarts);
+        assert_eq!(manager2.metrics.eoiu_detected_count, original_eoiu_detected);
+        assert_eq!(manager2.metrics.state_recovery_count, 1);
+        assert_eq!(manager2.metrics.corruption_detected_count, 1);
+    }
+
+    #[test]
+    fn test_metrics_load_nonexistent_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let metrics_file = temp_dir.path().join("nonexistent_metrics.json");
+
+        let mut manager = WarmRestartManager::new();
+
+        // Should not error, just skip loading
+        assert!(manager.load_metrics(&metrics_file).is_ok());
+        assert_eq!(manager.metrics.warm_restart_count, 0);
+    }
+
+    #[test]
+    fn test_metrics_save_creates_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let metrics_file = temp_dir.path().join("subdir/nested/metrics.json");
+
+        let manager = WarmRestartManager::new();
+
+        // Save should create parent directories
+        assert!(manager.save_metrics(&metrics_file).is_ok());
+        assert!(metrics_file.exists());
+    }
+
+    #[test]
+    fn test_metrics_save_with_corrupted_load() {
+        let temp_dir = TempDir::new().unwrap();
+        let metrics_file = temp_dir.path().join("metrics.json");
+
+        // Write corrupted JSON
+        fs::write(&metrics_file, "{ invalid json }").unwrap();
+
+        let mut manager = WarmRestartManager::new();
+
+        // Loading corrupted metrics should error gracefully
+        assert!(manager.load_metrics(&metrics_file).is_err());
+    }
+
+    #[test]
+    fn test_metrics_merge_from_another_instance() {
+        let mut metrics1 = WarmRestartMetrics::new();
+        metrics1.record_warm_restart();
+        metrics1.record_warm_restart();
+        metrics1.record_eoiu_detected();
+
+        let mut metrics2 = WarmRestartMetrics::new();
+        metrics2.record_cold_start();
+        metrics2.record_eoiu_timeout();
+        metrics2.record_state_recovery();
+
+        let mut manager = WarmRestartManager::new();
+        manager.metrics = metrics1;
+
+        // Merge metrics from another instance
+        manager.merge_metrics(&metrics2);
+
+        // Verify accumulation
+        assert_eq!(manager.metrics.warm_restart_count, 2);
+        assert_eq!(manager.metrics.cold_start_count, 1);
+        assert_eq!(manager.metrics.eoiu_detected_count, 1);
+        assert_eq!(manager.metrics.eoiu_timeout_count, 1);
+        assert_eq!(manager.metrics.state_recovery_count, 1);
+    }
+
+    #[test]
+    fn test_metrics_atomic_write_safety() {
+        let temp_dir = TempDir::new().unwrap();
+        let metrics_file = temp_dir.path().join("metrics.json");
+
+        // Save metrics multiple times
+        let mut manager = WarmRestartManager::new();
+        for _ in 0..10 {
+            manager.metrics.record_warm_restart();
+            manager.save_metrics(&metrics_file).unwrap();
+        }
+
+        // Verify final state is consistent
+        let mut manager2 = WarmRestartManager::new();
+        manager2.load_metrics(&metrics_file).unwrap();
+        assert_eq!(manager2.metrics.warm_restart_count, 10);
+
+        // File should not have partial/corrupted data
+        let json_str = fs::read_to_string(&metrics_file).unwrap();
+        assert!(serde_json::from_str::<serde_json::Value>(&json_str).is_ok());
+    }
+
+    #[test]
+    fn test_metrics_default_path() {
+        let path = WarmRestartManager::default_metrics_path();
+        assert!(path.ends_with("metrics.json"));
+        assert!(path.is_absolute());
+    }
+
+    #[test]
+    fn test_metrics_file_exists_check() {
+        let temp_dir = TempDir::new().unwrap();
+        let metrics_file = temp_dir.path().join("metrics.json");
+
+        // File doesn't exist yet
+        assert!(!WarmRestartManager::metrics_file_exists(&metrics_file));
+
+        // Create it
+        fs::write(&metrics_file, "{}").unwrap();
+        assert!(WarmRestartManager::metrics_file_exists(&metrics_file));
+    }
+
+    #[test]
+    fn test_metrics_large_numbers_persistence() {
+        let temp_dir = TempDir::new().unwrap();
+        let metrics_file = temp_dir.path().join("metrics.json");
+
+        let mut manager = WarmRestartManager::new();
+
+        // Set large numbers
+        manager.metrics.warm_restart_count = u64::MAX / 2;
+        manager.metrics.cold_start_count = 1_000_000;
+        manager.metrics.avg_initial_sync_duration_secs = 999.999;
+
+        manager.save_metrics(&metrics_file).unwrap();
+
+        let mut manager2 = WarmRestartManager::new();
+        manager2.load_metrics(&metrics_file).unwrap();
+
+        assert_eq!(manager2.metrics.warm_restart_count, u64::MAX / 2);
+        assert_eq!(manager2.metrics.cold_start_count, 1_000_000);
+        assert_eq!(manager2.metrics.avg_initial_sync_duration_secs, 999.999);
     }
 }

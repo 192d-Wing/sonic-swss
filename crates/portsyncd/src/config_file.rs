@@ -83,6 +83,57 @@ pub struct HealthConfig {
     pub watchdog_interval_secs: u64,
 }
 
+/// Export format for metrics
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MetricsExportFormat {
+    /// Prometheus text format
+    #[default]
+    Prometheus,
+    /// JSON format
+    Json,
+    /// Both formats
+    Both,
+}
+
+impl std::fmt::Display for MetricsExportFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MetricsExportFormat::Prometheus => write!(f, "prometheus"),
+            MetricsExportFormat::Json => write!(f, "json"),
+            MetricsExportFormat::Both => write!(f, "both"),
+        }
+    }
+}
+
+/// Metrics configuration (Phase 6 Week 4)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricsConfig {
+    /// Enable metrics persistence and export
+    #[serde(default = "default_metrics_enabled")]
+    pub enabled: bool,
+
+    /// Auto-save metrics interval in seconds
+    #[serde(default = "default_metrics_save_interval")]
+    pub save_interval_secs: u64,
+
+    /// Retention period in days (keep metrics for N days)
+    #[serde(default = "default_metrics_retention_days")]
+    pub retention_days: u64,
+
+    /// Maximum metrics file size in megabytes (rotate when exceeded)
+    #[serde(default = "default_metrics_max_file_size")]
+    pub max_file_size_mb: u64,
+
+    /// Export format (prometheus, json, both)
+    #[serde(default)]
+    pub export_format: MetricsExportFormat,
+
+    /// Storage path for metrics files
+    #[serde(default = "default_metrics_storage_path")]
+    pub storage_path: String,
+}
+
 /// Complete portsyncd configuration
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PortsyncConfig {
@@ -97,6 +148,10 @@ pub struct PortsyncConfig {
     /// Health check configuration
     #[serde(default)]
     pub health: HealthConfig,
+
+    /// Metrics configuration (Week 4)
+    #[serde(default)]
+    pub metrics: MetricsConfig,
 }
 
 // Default functions
@@ -160,6 +215,26 @@ fn default_watchdog_interval() -> u64 {
     15
 }
 
+fn default_metrics_enabled() -> bool {
+    true
+}
+
+fn default_metrics_save_interval() -> u64 {
+    300 // 5 minutes
+}
+
+fn default_metrics_retention_days() -> u64 {
+    30 // Keep metrics for 30 days
+}
+
+fn default_metrics_max_file_size() -> u64 {
+    100 // 100 MB before rotation
+}
+
+fn default_metrics_storage_path() -> String {
+    "/var/lib/sonic/portsyncd/metrics".to_string()
+}
+
 // Default implementations
 impl Default for DatabaseConfig {
     fn default() -> Self {
@@ -194,6 +269,44 @@ impl Default for HealthConfig {
             enable_watchdog: default_enable_watchdog(),
             watchdog_interval_secs: default_watchdog_interval(),
         }
+    }
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_metrics_enabled(),
+            save_interval_secs: default_metrics_save_interval(),
+            retention_days: default_metrics_retention_days(),
+            max_file_size_mb: default_metrics_max_file_size(),
+            export_format: MetricsExportFormat::default(),
+            storage_path: default_metrics_storage_path(),
+        }
+    }
+}
+
+impl MetricsConfig {
+    /// Validate metrics configuration
+    pub fn validate(&self) -> Result<()> {
+        if self.save_interval_secs == 0 {
+            return Err(PortsyncError::Configuration(
+                "metrics save_interval_secs must be > 0".to_string(),
+            ));
+        }
+
+        if self.retention_days == 0 {
+            return Err(PortsyncError::Configuration(
+                "metrics retention_days must be > 0".to_string(),
+            ));
+        }
+
+        if self.max_file_size_mb == 0 {
+            return Err(PortsyncError::Configuration(
+                "metrics max_file_size_mb must be > 0".to_string(),
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -283,6 +396,9 @@ impl PortsyncConfig {
                 "min_port_sync_rate must be 0-100".to_string(),
             ));
         }
+
+        // Validate metrics config
+        self.metrics.validate()?;
 
         Ok(())
     }
@@ -395,5 +511,83 @@ max_event_queue = 2000
     fn test_load_nonexistent_file_defaults() {
         let config = PortsyncConfig::load_or_default("/nonexistent/path.conf").unwrap();
         assert_eq!(config.database.redis_host, "127.0.0.1");
+    }
+
+    #[test]
+    fn test_metrics_config_defaults() {
+        let config = MetricsConfig::default();
+        assert!(config.enabled);
+        assert_eq!(config.save_interval_secs, 300);
+        assert_eq!(config.retention_days, 30);
+        assert_eq!(config.max_file_size_mb, 100);
+        assert_eq!(config.export_format, MetricsExportFormat::Prometheus);
+        assert_eq!(config.storage_path, "/var/lib/sonic/portsyncd/metrics");
+    }
+
+    #[test]
+    fn test_metrics_config_validate_valid() {
+        let config = MetricsConfig::default();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_metrics_config_validate_zero_save_interval() {
+        let config = MetricsConfig {
+            save_interval_secs: 0,
+            ..MetricsConfig::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_metrics_config_validate_zero_retention() {
+        let config = MetricsConfig {
+            retention_days: 0,
+            ..MetricsConfig::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_metrics_config_validate_zero_file_size() {
+        let config = MetricsConfig {
+            max_file_size_mb: 0,
+            ..MetricsConfig::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_portsyncd_config_validate_includes_metrics() {
+        let mut config = PortsyncConfig::default();
+        config.metrics.save_interval_secs = 0;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_metrics_export_format_display() {
+        assert_eq!(MetricsExportFormat::Prometheus.to_string(), "prometheus");
+        assert_eq!(MetricsExportFormat::Json.to_string(), "json");
+        assert_eq!(MetricsExportFormat::Both.to_string(), "both");
+    }
+
+    #[test]
+    fn test_metrics_config_toml_parsing() {
+        let toml_str = r#"
+[metrics]
+enabled = true
+save_interval_secs = 600
+retention_days = 60
+max_file_size_mb = 200
+export_format = "json"
+storage_path = "/custom/path/metrics"
+"#;
+        let config: PortsyncConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.metrics.enabled);
+        assert_eq!(config.metrics.save_interval_secs, 600);
+        assert_eq!(config.metrics.retention_days, 60);
+        assert_eq!(config.metrics.max_file_size_mb, 200);
+        assert_eq!(config.metrics.export_format, MetricsExportFormat::Json);
+        assert_eq!(config.metrics.storage_path, "/custom/path/metrics");
     }
 }
