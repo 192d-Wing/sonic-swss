@@ -289,10 +289,10 @@ impl AlertingEngine {
         let now = current_timestamp_secs();
         let metric_name = &rule.metric_name;
 
-        // Initialize history if needed
-        self.metric_history.entry(metric_name.clone()).or_default();
-
-        let history = self.metric_history.get_mut(metric_name).unwrap();
+        // Initialize history if needed and get mutable reference
+        let history = self.metric_history
+            .entry(metric_name.clone())
+            .or_default();
         history.push(MetricSample {
             value: metric_value,
             timestamp_secs: now,

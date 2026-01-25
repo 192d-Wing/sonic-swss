@@ -175,11 +175,6 @@ impl MetricsCollector {
     }
 }
 
-impl Default for MetricsCollector {
-    fn default() -> Self {
-        Self::new().expect("Failed to create metrics collector")
-    }
-}
 
 #[cfg(test)]
 mod tests {
