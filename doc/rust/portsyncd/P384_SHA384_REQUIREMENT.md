@@ -24,12 +24,14 @@ The portsyncd metrics endpoint enforces **P-384 (secp384r1) or stronger elliptic
 ### Decision Rationale
 
 **P-384 (384-bit) provides**:
+
 - ✅ 192-bit security strength (exceeds P-256's 128-bit)
 - ✅ Protection against quantum computing threats longer
 - ✅ Government recommended for unclassified information
 - ✅ Strong cryptographic margin for portsyncd operational lifetime
 
 **P-256 (256-bit) is rejected because**:
+
 - ❌ Only 128-bit security strength (weak by 2026 standards)
 - ❌ Less resistant to quantum computing attacks
 - ❌ Insufficient security margin for long-term portsyncd deployments
@@ -52,12 +54,14 @@ The portsyncd metrics endpoint enforces **P-384 (secp384r1) or stronger elliptic
 ### Decision Rationale
 
 **SHA-384 (384-bit) provides**:
+
 - ✅ Collision resistance: 2^192 complexity (exceeds SHA-256's 2^128)
 - ✅ First pre-image resistance: 2^384 complexity
 - ✅ Matches P-384 curve strength (consistent key/hash security)
 - ✅ Aligns with NIST recommendations
 
 **SHA-256 (256-bit) is rejected because**:
+
 - ❌ Collision resistance: 2^128 (significantly weaker)
 - ❌ Mismatched with P-384 curve strength
 - ❌ Less quantum-resistant than SHA-384
@@ -450,6 +454,7 @@ EOF
 ### Long-Term Security
 
 By enforcing P-384+ and SHA-384+, portsyncd metrics are protected against:
+
 - Brute force attacks (2^192 complexity)
 - Rainbow tables (huge increase in storage)
 - Quantum computing threats (longer than P-256)

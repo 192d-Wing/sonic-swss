@@ -5,11 +5,13 @@
 **Status**: ✅ COMPLETE AND TESTED
 
 Phase 6 Week 1 has been enhanced with security-first design:
+
 - **mTLS is now MANDATORY** (not optional) - all metrics access requires mutual TLS authentication
 - **IPv6-only design** - modern dual-stack support, eliminates IPv4 attack surface
 - **NIST 800-53 compliance** - SC-7 (Boundary Protection) and IA-2 (Authentication)
 
 **Test Results**:
+
 - **154/154 tests passing** (100%) - includes 3 new security tests
 - Zero compiler warnings
 - Zero unsafe code
@@ -35,6 +37,7 @@ Phase 6 Week 1 has been enhanced with security-first design:
 ### 1. Mandatory mTLS Configuration
 
 **Before** (Optional):
+
 ```rust
 pub struct MetricsServerConfig {
     pub listen_addr: SocketAddr,
@@ -49,6 +52,7 @@ let config = MetricsServerConfig::new(listen_addr);
 ```
 
 **After** (Mandatory):
+
 ```rust
 pub struct MetricsServerConfig {
     pub listen_addr: SocketAddr,
@@ -62,6 +66,7 @@ let config = MetricsServerConfig::new(cert_path, key_path, ca_cert_path);
 ```
 
 **Key Changes**:
+
 - Certificate paths are now `String` (required) instead of `Option<String>`
 - `require_mtls` flag removed - always true by design
 - Configuration validation enforces all three certificate files exist
@@ -72,11 +77,13 @@ let config = MetricsServerConfig::new(cert_path, key_path, ca_cert_path);
 ### 2. IPv6-Only Support
 
 **Before** (IPv4/IPv6 mixed):
+
 ```rust
 let listen_addr = "0.0.0.0:9090".parse()?;  // IPv4
 ```
 
 **After** (IPv6-only):
+
 ```rust
 let config = MetricsServerConfig::new(cert, key, ca);
 // Defaults to [::1]:9090 (IPv6 localhost)
@@ -92,11 +99,13 @@ let config = MetricsServerConfig::with_ipv6(addr, ...);
 ```
 
 **Default Address**:
+
 ```
 [::1]:9090  (IPv6 loopback - localhost only)
 ```
 
 **For Multi-Host Access**:
+
 ```
 [::]:9090   (IPv6 all interfaces - dual-stack)
 ```
@@ -108,6 +117,7 @@ let config = MetricsServerConfig::with_ipv6(addr, ...);
 ### MetricsServerConfig::new()
 
 **Signature**:
+
 ```rust
 pub fn new(
     cert_path: String,
@@ -119,6 +129,7 @@ pub fn new(
 **Returns**: Config with IPv6 localhost `[::1]:9090`
 
 **Example**:
+
 ```rust
 let config = MetricsServerConfig::new(
     "/etc/portsyncd/metrics/server.crt".to_string(),
@@ -133,6 +144,7 @@ let config = MetricsServerConfig::new(
 ### MetricsServerConfig::with_ipv6()
 
 **Signature**:
+
 ```rust
 pub fn with_ipv6(
     addr: SocketAddr,
@@ -145,6 +157,7 @@ pub fn with_ipv6(
 **Panics**: If address is IPv4 format
 
 **Example**:
+
 ```rust
 let addr = "[::]:9090".parse()?;
 let config = MetricsServerConfig::with_ipv6(
@@ -160,6 +173,7 @@ let config = MetricsServerConfig::with_ipv6(
 ### spawn_metrics_server()
 
 **Old Signature**:
+
 ```rust
 pub fn spawn_metrics_server(
     metrics: Arc<MetricsCollector>,
@@ -168,6 +182,7 @@ pub fn spawn_metrics_server(
 ```
 
 **New Signature**:
+
 ```rust
 pub fn spawn_metrics_server(
     metrics: Arc<MetricsCollector>,
@@ -178,11 +193,13 @@ pub fn spawn_metrics_server(
 ```
 
 **Changes**:
+
 - Removed `listen_addr` parameter - uses default IPv6 localhost
 - Added required certificate paths
 - Configurable via environment variables in main.rs
 
 **Example**:
+
 ```rust
 let cert_path = std::env::var("PORTSYNCD_METRICS_CERT")
     .unwrap_or_else(|_| "/etc/portsyncd/metrics/server.crt".to_string());
@@ -208,6 +225,7 @@ let server_handle = tokio::spawn({
 ### Environment Variables
 
 Three environment variables control certificate paths:
+
 ```bash
 export PORTSYNCD_METRICS_CERT="/etc/portsyncd/metrics/server.crt"
 export PORTSYNCD_METRICS_KEY="/etc/portsyncd/metrics/server.key"
@@ -215,6 +233,7 @@ export PORTSYNCD_METRICS_CA="/etc/portsyncd/metrics/ca.crt"
 ```
 
 **Defaults** (if not set):
+
 ```
 PORTSYNCD_METRICS_CERT → /etc/portsyncd/metrics/server.crt
 PORTSYNCD_METRICS_KEY  → /etc/portsyncd/metrics/server.key
@@ -226,6 +245,7 @@ PORTSYNCD_METRICS_CA   → /etc/portsyncd/metrics/ca.crt
 ### Certificate Generation
 
 **For Testing** (self-signed):
+
 ```bash
 # Generate CA private key
 openssl genrsa -out ca.key 4096
@@ -316,21 +336,25 @@ portsyncd: NOTE: For full mTLS enforcement, deploy with reverse proxy (nginx/env
 ## Security Benefits
 
 ### 1. Attack Surface Reduction
+
 - IPv6-only eliminates entire IPv4 attack surface
 - Forces explicit IPv6 configuration
 - Removes legacy protocol baggage
 
 ### 2. Authentication Enforcement
+
 - No way to access metrics without valid client certificate
 - Server certificate authenticates daemon to clients
 - CA certificate validates both client and server
 
 ### 3. Encryption Guarantee
+
 - All metrics traffic encrypted (HTTPS/TLS 1.3)
 - No plaintext metrics over network
 - Forward secrecy (PFS) supported
 
 ### 4. Configuration Safety
+
 - Missing certificates → startup failure (fail-secure)
 - Type-safe API prevents misconfiguration
 - IPv4 addresses cause panic (explicit rejection)
@@ -486,18 +510,21 @@ Implementation security assessment:
 ## Files Modified
 
 ### src/metrics_server.rs
+
 - **Old Lines**: 235
 - **New Lines**: 298
 - **Change**: Complete rewrite for mandatory mTLS + IPv6-only
 - **Tests**: 7 → 8 (added IPv4 rejection test)
 
 ### src/main.rs
+
 - **Changes**:
   - Added environment variable support for cert paths
   - Updated `spawn_metrics_server()` call signature
   - Removed direct `SocketAddr` import (unused)
 
 ### tests/metrics_integration.rs
+
 - **New Tests**: 2 (IPv6-specific + IPv4 rejection)
 - **Updated Tests**: 1 (config API changes)
 - **Removed Tests**: 1 (IPv4 address test)

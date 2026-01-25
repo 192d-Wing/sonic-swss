@@ -188,23 +188,29 @@ Cache misses/sec             1000    2000    Rust: Better locality
 #### High Event Latency
 
 1. **Check system load**:
+
    ```bash
    top
    ```
+
    - If CPU >80%, event loop is starved
    - Check for competing processes
 
 2. **Monitor Redis latency**:
+
    ```bash
    redis-cli --latency
    ```
+
    - Target: <1ms round-trip
    - If >5ms, network/Redis issue
 
 3. **Check netlink socket**:
+
    ```bash
    dmesg | tail
    ```
+
    - Look for kernel buffer overruns
    - May indicate event flood
 
@@ -215,12 +221,15 @@ Cache misses/sec             1000    2000    Rust: Better locality
    - `cargo build --release` optimizes memory
 
 2. **Monitor port count**:
+
    ```bash
    redis-cli -n 4 HLEN PORT_TABLE
    ```
+
    - Each port ~200 bytes in Rust
 
 3. **Check for leaks**:
+
    ```bash
    # Run for 24+ hours, monitor RSS
    top -p $(pgrep portsyncd) -d 1
@@ -231,6 +240,7 @@ Cache misses/sec             1000    2000    Rust: Better locality
 #### 1. Reduce Latency
 
 **Priority 1: Reduce Event Flood**
+
 ```bash
 # Limit maximum ports
 # In config_file.rs, adjust:
@@ -239,6 +249,7 @@ batch_timeout_ms = 50   # Process events faster
 ```
 
 **Priority 2: Optimize Redis**
+
 ```bash
 # On Redis host:
 redis-cli CONFIG SET maxmemory 2gb
@@ -246,6 +257,7 @@ redis-cli CONFIG SET maxmemory-policy allkeys-lru
 ```
 
 **Priority 3: Tune Systemd**
+
 ```ini
 # In portsyncd.service:
 [Service]
@@ -257,18 +269,21 @@ MemoryAccounting=true
 #### 2. Reduce Memory
 
 **Strategy 1: Disable Metrics in Production**
+
 ```rust
 // In main.rs, comment out metrics initialization
 // Performance tracking still works, just not in-memory storage
 ```
 
 **Strategy 2: Increase Batch Timeout**
+
 ```toml
 [performance]
 batch_timeout_ms = 200  # Process less frequently
 ```
 
 **Strategy 3: Reduce State Cache**
+
 ```bash
 # In port_sync.rs, reduce port state cache size
 ```
@@ -276,6 +291,7 @@ batch_timeout_ms = 200  # Process less frequently
 #### 3. Increase Throughput
 
 **Strategy 1: Batch Database Operations**
+
 ```rust
 // Group multiple HSET operations into pipeline
 // Current implementation processes one event at a time
@@ -283,6 +299,7 @@ batch_timeout_ms = 200  # Process less frequently
 ```
 
 **Strategy 2: Connection Pooling**
+
 ```rust
 // RedisAdapter already uses ConnectionManager
 // Verify pool size:
@@ -291,6 +308,7 @@ redis::aio::ConnectionManager::new(client).await
 ```
 
 **Strategy 3: Async Task Prioritization**
+
 ```ini
 # In systemd service:
 CPUSchedulingPolicy=fifo
@@ -318,6 +336,7 @@ done
 ```
 
 **Expected Results**:
+
 - Events processed: >60,000
 - Average latency: <10ms
 - Memory: Stable, no growth
@@ -336,6 +355,7 @@ journalctl -u portsyncd | grep latency
 ```
 
 **Expected Results**:
+
 - Peak throughput: >7000 eps
 - Sustained latency: <10ms
 - No dropped events
@@ -356,6 +376,7 @@ journalctl -u portsyncd -f
 ```
 
 **Expected Results**:
+
 - Detects connection loss
 - Retries with backoff
 - Recovers without data loss
@@ -492,11 +513,13 @@ alerts:
 ### Problem: Event latency >100ms
 
 **Investigation**:
+
 1. Check system load: `top`
 2. Check Redis latency: `redis-cli --latency`
 3. Check kernel logs: `dmesg | tail`
 
 **Solutions**:
+
 1. Reduce competing workloads
 2. Increase Redis memory
 3. Check network congestion
@@ -504,11 +527,13 @@ alerts:
 ### Problem: Memory growing over time
 
 **Investigation**:
+
 1. Monitor for 24+ hours: `top -p $(pgrep portsyncd)`
 2. Check for port leaks: `redis-cli -n 6 HLEN PORT_TABLE`
 3. Enable valgrind: `valgrind --leak-check=full portsyncd`
 
 **Solutions**:
+
 1. Restart daemon (if leak detected)
 2. Update to latest version (bug fixes)
 3. Increase swap space (temporary)
@@ -516,11 +541,13 @@ alerts:
 ### Problem: Dropped events
 
 **Investigation**:
+
 1. Check event queue: `journalctl -u portsyncd | grep queue`
 2. Monitor netlink buffer: `dmesg | grep "netlink"`
 3. Check Redis connection: `redis-cli PING`
 
 **Solutions**:
+
 1. Increase `max_event_queue` in config
 2. Reduce other network traffic
 3. Add more Redis memory

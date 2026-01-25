@@ -1,6 +1,7 @@
 # Phase 6 Week 1: Deliverables
 
 ## Overview
+
 Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with secure HTTP server and mTLS authentication support. The implementation provides production-grade operational visibility for the portsyncd daemon.
 
 ## Deliverables
@@ -8,6 +9,7 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 ### 1. Core Implementation
 
 #### src/metrics.rs (159 lines)
+
 - **MetricsCollector struct** with thread-safe metric collection
 - **14 Prometheus metrics**:
   - 3 Counters (events_processed, events_failed, port_flaps)
@@ -28,6 +30,7 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
   - `gather_metrics()` → Export Prometheus text format
 
 #### src/metrics_server.rs (180 lines)
+
 - **MetricsServerConfig struct** for HTTP server configuration
   - `listen_addr: SocketAddr` - Server listening address
   - `cert_path: Option<String>` - Server certificate (mTLS)
@@ -56,16 +59,20 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 ### 2. Integration
 
 #### src/lib.rs (Modified)
+
 - Added `pub mod metrics_server;`
 - Added re-exports:
   - `pub use metrics_server::{MetricsServer, MetricsServerConfig, spawn_metrics_server};`
 - Existing `pub use metrics::MetricsCollector;` unchanged
 
 #### src/main.rs (Modified)
+
 - Metrics initialization in `run_daemon()`:
+
   ```rust
   let metrics = Arc::new(MetricsCollector::new()?);
   ```
+
 - Metrics server spawning on port 0.0.0.0:9090
 - Event recording in main loop:
   - `metrics.record_event_success()` on completion
@@ -74,12 +81,14 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 - Graceful shutdown of metrics server
 
 #### Cargo.toml (No new dependencies needed)
+
 - prometheus = "0.13" (already present)
 - axum = "0.7" (already present)
 
 ### 3. Testing
 
 #### src/metrics.rs - Unit Tests (14 tests)
+
 1. `test_metrics_collector_creation` - Instantiation
 2. `test_record_event_success` - Success counter
 3. `test_record_event_failure` - Failure counter
@@ -96,12 +105,14 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 14. (Plus histogram count verification)
 
 #### src/metrics_server.rs - Unit Tests (4 tests)
+
 1. `test_metrics_server_config_creation` - Config without TLS
 2. `test_metrics_server_config_validation_without_mtls` - Validation succeeds
 3. `test_metrics_server_config_validation_with_mtls_missing_cert` - Validation fails
 4. `test_metrics_server_creation` - Server instantiation
 
 #### tests/metrics_integration.rs - Integration Tests (7 tests)
+
 1. `test_metrics_server_startup` - HTTP server startup
 2. `test_metrics_collection_integration` - End-to-end workflow
 3. `test_metrics_collection_with_connections_down` - Disconnected state
@@ -111,6 +122,7 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 7. `test_metrics_event_latency_timer` - Histogram observations
 
 #### Test Summary
+
 - **Total: 150/150 tests passing (100%)**
   - 122 unit tests (all modules)
   - 2 main tests
@@ -121,6 +133,7 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 ### 4. Documentation
 
 #### PHASE6_WEEK1_COMPLETION.md (600+ lines)
+
 - Executive summary with test results
 - Implementation details for each module
 - Prometheus text format example
@@ -132,6 +145,7 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 - Test coverage details
 
 #### PHASE6_DELIVERABLES.md (This document)
+
 - Complete deliverables list
 - File-by-file breakdown
 - Quick reference guide
@@ -139,6 +153,7 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 ## Metrics Specification
 
 ### Counters (Cumulative - Never Decrease)
+
 | Metric | Description | Labels |
 |--------|-------------|--------|
 | `portsyncd_events_processed_total` | Successful event completions | None |
@@ -146,6 +161,7 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 | `portsyncd_port_flaps_total` | Per-port flap count | `port` |
 
 ### Gauges (Current State - Can Increase/Decrease)
+
 | Metric | Description | Range | Labels |
 |--------|-------------|-------|--------|
 | `portsyncd_queue_depth` | Current event queue depth | 0+ | None |
@@ -155,6 +171,7 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 | `portsyncd_netlink_connected` | Netlink socket status | 0 or 1 | None |
 
 ### Histograms (Distribution - Bucketed)
+
 | Metric | Description | Buckets | Labels |
 |--------|-------------|---------|--------|
 | `portsyncd_event_latency_seconds` | Event processing latency | 1ms, 5ms, 10ms, 50ms, 100ms, 500ms, 1s, +Inf | None |
@@ -163,14 +180,17 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 ## HTTP API
 
 ### GET /metrics
+
 Returns all metrics in Prometheus text format.
 
 **Request:**
+
 ```bash
 curl http://localhost:9090/metrics
 ```
 
 **Response Headers:**
+
 ```
 HTTP/1.1 200 OK
 Content-Type: text/plain; version=0.0.4
@@ -178,6 +198,7 @@ Content-Length: 2345
 ```
 
 **Response Body:**
+
 ```
 # HELP portsyncd_events_processed_total Total events processed successfully
 # TYPE portsyncd_events_processed_total counter
@@ -197,6 +218,7 @@ portsyncd_event_latency_seconds_bucket{le="0.005"} 50
 ## Configuration
 
 ### Without mTLS (Default)
+
 ```rust
 let config = MetricsServerConfig::new("0.0.0.0:9090".parse()?);
 let server = MetricsServer::new(config, metrics)?;
@@ -204,6 +226,7 @@ server.start().await?;
 ```
 
 ### With mTLS
+
 ```rust
 let config = MetricsServerConfig::with_mtls(
     "0.0.0.0:9090".parse()?,
@@ -244,16 +267,19 @@ server.start().await?;
 ## What's Next
 
 ### Phase 6 Week 2: Warm Restart (EOIU Detection)
+
 - Implement EOIU signal handling
 - Skip APP_DB updates on warm restart
 - Preserve port state during restart
 
 ### Phase 6 Week 3: Self-Healing Capabilities
+
 - Health check system
 - Automatic recovery on connection loss
 - Alerting on degraded state
 
 ### Phase 6 Week 4: Multi-Instance Support
+
 - Multiple portsyncd instances
 - Load balancing of port assignments
 - Shared health coordination
@@ -261,24 +287,28 @@ server.start().await?;
 ## Quality Assurance
 
 ✅ **Code Quality**
+
 - Zero compiler warnings
 - Zero unsafe code
 - Full inline documentation
 - Clean error handling
 
 ✅ **Testing**
+
 - 150/150 tests passing (100%)
 - Unit test coverage
 - Integration test coverage
 - Performance benchmarks
 
 ✅ **Security**
+
 - mTLS authentication support
 - Certificate validation on startup
 - No hardcoded secrets
 - Thread-safe operations
 
 ✅ **Performance**
+
 - <1% CPU overhead
 - <5MB memory
 - <1ms metric operations

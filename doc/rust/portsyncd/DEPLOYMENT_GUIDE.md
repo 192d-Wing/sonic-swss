@@ -880,7 +880,7 @@ kill $PID
 
 - **Team**: SONiC Daemon Development
 - **Slack**: #portsyncd-support
-- **Email**: portsyncd-team@sonic.dev
+- **Email**: <portsyncd-team@sonic.dev>
 
 ### Escalation Path
 

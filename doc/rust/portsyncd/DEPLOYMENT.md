@@ -27,6 +27,7 @@ ls -lh target/release/portsyncd
 ```
 
 **Build Flags**:
+
 ```bash
 # With all features
 cargo build --release --all-features
@@ -204,6 +205,7 @@ watchdog_interval_secs = 10   # Send watchdog every 10s
 ### Configuration Tuning Guide
 
 **High-Latency Network** (>5ms RTT to Redis):
+
 ```toml
 [performance]
 batch_timeout_ms = 200
@@ -211,6 +213,7 @@ max_latency_us = 20000
 ```
 
 **High-Throughput Scenario** (>5000 ports):
+
 ```toml
 [performance]
 max_event_queue = 10000
@@ -218,6 +221,7 @@ batch_timeout_ms = 50
 ```
 
 **Memory-Constrained** (<2GB available):
+
 ```toml
 [performance]
 max_event_queue = 500
@@ -225,6 +229,7 @@ batch_timeout_ms = 100
 ```
 
 **Reliability Priority** (never lose events):
+
 ```toml
 [health]
 max_failure_rate_percent = 1.0
@@ -240,12 +245,14 @@ enable_watchdog = true
 [Service]
 Type=notify
 ```
+
 - Daemon signals readiness to systemd via sd_notify()
 - systemd waits for READY signal before marking service ready
 
 ```ini
 WatchdogSec=30s
 ```
+
 - systemd restarts daemon if no WATCHDOG signal for 30 seconds
 - Prevents daemon hangs from leaving system stuck
 
@@ -255,6 +262,7 @@ RestartSec=5
 StartLimitInterval=300s
 StartLimitBurst=3
 ```
+
 - Restart on crash (max 3 times in 5 minutes)
 - Prevents restart loops
 
@@ -262,6 +270,7 @@ StartLimitBurst=3
 MemoryLimit=512M
 MemoryAccounting=true
 ```
+
 - Limit memory to 512MB
 - Track memory usage for monitoring
 
@@ -287,6 +296,7 @@ CPUSchedulingPriority=50
 ```
 
 Reload and restart:
+
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl restart portsyncd
@@ -359,6 +369,7 @@ journalctl -u portsyncd | grep -i health
 ### Daemon Won't Start
 
 **Check logs**:
+
 ```bash
 journalctl -u portsyncd -n 100
 systemctl status portsyncd
@@ -367,35 +378,43 @@ systemctl status portsyncd
 **Common issues**:
 
 1. **Redis not running**
+
    ```bash
    redis-cli PING
    # PONG = OK
    # Connection refused = Redis not running
    ```
+
    Fix: `systemctl start redis`
 
 2. **Port already in use** (unlikely, but possible)
+
    ```bash
    sudo netstat -tlnp | grep 6379
    ```
 
 3. **Config file syntax error**
+
    ```bash
    cat /etc/sonic/portsyncd.conf
    # Check TOML syntax
    ```
+
    Fix: Use online TOML validator
 
 4. **Permission denied**
+
    ```bash
    ls -l /usr/local/bin/portsyncd
    # Should be: -rwxr-xr-x
    ```
+
    Fix: `sudo chmod 755 /usr/local/bin/portsyncd`
 
 ### High Event Latency
 
 **Diagnose**:
+
 ```bash
 # Check system load
 top
@@ -418,6 +437,7 @@ ps aux | grep portsyncd
    - Check for slow commands: `redis-cli SLOWLOG GET 10`
 
 3. **Tune portsyncd**
+
    ```toml
    [performance]
    batch_timeout_ms = 50  # Process faster
@@ -427,6 +447,7 @@ ps aux | grep portsyncd
 ### Memory Leak Suspected
 
 **Check for leak**:
+
 ```bash
 # Monitor memory for 24 hours
 watch -n 3600 'ps aux | grep portsyncd | grep -v grep'
@@ -447,6 +468,7 @@ systemctl status portsyncd | watch grep Memory
 **Symptoms**: Port status not updating in STATE_DB
 
 **Check**:
+
 ```bash
 # Are events being received?
 journalctl -u portsyncd | grep "Received event"
@@ -461,12 +483,14 @@ redis-cli -n 6 LLEN portsyncd:queue
 **Solutions**:
 
 1. Increase queue size:
+
    ```toml
    [performance]
    max_event_queue = 5000
    ```
 
 2. Check Redis memory:
+
    ```bash
    redis-cli INFO memory | grep used_memory_human
    ```
@@ -476,6 +500,7 @@ redis-cli -n 6 LLEN portsyncd:queue
 ### Daemon Stuck/Unresponsive
 
 **Check with watchdog**:
+
 ```bash
 # systemd watchdog will restart it automatically after 30s
 # Monitor restart
@@ -486,6 +511,7 @@ sudo systemctl restart portsyncd
 ```
 
 **Force restart**:
+
 ```bash
 # Kill daemon
 sudo killall portsyncd
@@ -500,31 +526,37 @@ systemctl status portsyncd
 ### Upgrade Steps
 
 1. **Build new version**:
+
    ```bash
    cargo build --release
    ```
 
 2. **Stop daemon**:
+
    ```bash
    sudo systemctl stop portsyncd
    ```
 
 3. **Backup current binary**:
+
    ```bash
    sudo cp /usr/local/bin/portsyncd /usr/local/bin/portsyncd.bak
    ```
 
 4. **Install new binary**:
+
    ```bash
    sudo cp target/release/portsyncd /usr/local/bin/
    ```
 
 5. **Start daemon**:
+
    ```bash
    sudo systemctl start portsyncd
    ```
 
 6. **Verify**:
+
    ```bash
    systemctl status portsyncd
    journalctl -u portsyncd -n 20
@@ -660,6 +692,7 @@ systemctl show portsyncd | grep -E "(Active|Status|Memory)"
 ```
 
 Run daily:
+
 ```bash
 chmod +x monitor_portsyncd.sh
 ./monitor_portsyncd.sh | mail -s "portsyncd Health" admin@example.com
@@ -668,8 +701,8 @@ chmod +x monitor_portsyncd.sh
 ## References
 
 - **systemd Service**: `man systemd.service`
-- **Redis Protocol**: https://redis.io/docs/
-- **SONiC Documentation**: https://github.com/sonic-net/SONiC
+- **Redis Protocol**: <https://redis.io/docs/>
+- **SONiC Documentation**: <https://github.com/sonic-net/SONiC>
 - **Netlink Sockets**: `man 7 netlink`
 
 ---

@@ -7,6 +7,7 @@
 Phase 6 Week 1 has been successfully completed with comprehensive Prometheus metrics collection and HTTP server implementation. The portsyncd daemon now exports operational metrics in Prometheus text format with secure mTLS authentication support.
 
 **Test Results**:
+
 - Unit Tests: 122/122 passing ✅
 - Integration Tests: 12/12 passing ✅
 - Metrics Tests: 7/7 passing ✅
@@ -15,6 +16,7 @@ Phase 6 Week 1 has been successfully completed with comprehensive Prometheus met
 - **Total: 150/150 tests passing (100%)**
 
 **Code Quality**:
+
 - Zero compiler warnings (after cleanup)
 - Zero unsafe code
 - Full documentation with examples
@@ -31,11 +33,13 @@ Phase 6 Week 1 has been successfully completed with comprehensive Prometheus met
 **Metrics Implemented** (14 metrics across 3 types):
 
 #### Counters (Cumulative Events)
+
 - `portsyncd_events_processed_total` - Successful event completions
 - `portsyncd_events_failed_total` - Failed event processing attempts
 - `portsyncd_port_flaps_total{port=...}` - Per-port flap counts (labeled by port name)
 
 #### Gauges (Current State)
+
 - `portsyncd_queue_depth` - Current event queue depth
 - `portsyncd_memory_bytes` - Process memory usage
 - `portsyncd_health_status` - Health status (1.0=healthy, 0.5=degraded, 0.0=unhealthy)
@@ -43,10 +47,12 @@ Phase 6 Week 1 has been successfully completed with comprehensive Prometheus met
 - `portsyncd_netlink_connected` - Netlink socket status (1=open, 0=closed)
 
 #### Histograms (Distribution)
+
 - `portsyncd_event_latency_seconds` - Event processing latency (buckets: 1ms, 5ms, 10ms, 50ms, 100ms, 500ms, 1s)
 - `portsyncd_redis_latency_seconds` - Redis operation latency (buckets: 1ms, 5ms, 10ms, 50ms, 100ms)
 
 **Key Features**:
+
 ```rust
 pub struct MetricsCollector { ... }
 
@@ -67,6 +73,7 @@ impl MetricsCollector {
 ```
 
 **Tests**: 14 unit tests covering:
+
 - Metric creation and registration
 - Event recording (success/failure)
 - Port flap tracking with labels
@@ -81,6 +88,7 @@ impl MetricsCollector {
 **Purpose**: Secure HTTP server for metrics endpoint with mTLS authentication support
 
 **Configuration** (MetricsServerConfig):
+
 ```rust
 pub struct MetricsServerConfig {
     pub listen_addr: SocketAddr,                    // e.g., 0.0.0.0:9090
@@ -98,6 +106,7 @@ impl MetricsServerConfig {
 ```
 
 **Server** (MetricsServer):
+
 ```rust
 pub struct MetricsServer {
     pub config: MetricsServerConfig,
@@ -116,12 +125,14 @@ pub fn spawn_metrics_server(                         // Background task helper
 ```
 
 **HTTP Endpoint**:
+
 - **Route**: GET `/metrics`
 - **Response Format**: Prometheus text format (RFC compliant)
 - **Response Headers**: `Content-Type: text/plain; version=0.0.4`
 - **Authentication**: mTLS (when configured)
 
 **mTLS Configuration**:
+
 - Certificate path validation on startup
 - Both server and client certificates verified
 - Configuration supports certificate rotation
@@ -130,6 +141,7 @@ pub fn spawn_metrics_server(                         // Background task helper
 **Note**: Current implementation provides plain HTTP with mTLS configuration structure. For full native mTLS termination, deploy behind reverse proxy (nginx/envoy) or add `rustls`/`tokio-rustls` dependencies for in-process TLS termination.
 
 **Tests**: 4 unit tests covering:
+
 - Configuration creation (with/without TLS)
 - Configuration validation
 - Certificate path validation
@@ -140,6 +152,7 @@ pub fn spawn_metrics_server(                         // Background task helper
 ### 3. Integration with Main Daemon (src/main.rs)
 
 **Initialization**:
+
 ```rust
 // Create metrics collector
 let metrics = Arc::new(MetricsCollector::new()?);
@@ -157,6 +170,7 @@ let metrics_server_handle = tokio::spawn({
 ```
 
 **Event Recording**:
+
 ```rust
 // In main event loop
 let timer = metrics.start_event_latency();
@@ -168,6 +182,7 @@ drop(timer); // Auto-observe histogram
 ```
 
 **Graceful Shutdown**:
+
 ```rust
 // On SIGTERM
 drop(metrics_server_handle);
@@ -257,6 +272,7 @@ axum = "0.7"         # HTTP server framework (already present for metrics server
 ### Unit Tests (122 tests)
 
 **metrics.rs** (14 tests):
+
 - `test_metrics_collector_creation` - Collector initialization
 - `test_record_event_success` - Success counter increment
 - `test_record_event_failure` - Failure counter increment
@@ -273,6 +289,7 @@ axum = "0.7"         # HTTP server framework (already present for metrics server
 - All 118 existing tests (unchanged)
 
 **metrics_server.rs** (4 tests):
+
 - `test_metrics_server_config_creation` - Config creation without TLS
 - `test_metrics_server_config_validation_without_mtls` - Validation passes without TLS
 - `test_metrics_server_config_validation_with_mtls_missing_cert` - Validation catches missing certs
@@ -289,6 +306,7 @@ axum = "0.7"         # HTTP server framework (already present for metrics server
 - `test_metrics_event_latency_timer` - Latency histogram with multiple observations
 
 ### All Test Categories
+
 - **Unit Tests**: 122/122 passing
 - **Integration Tests**: 12/12 passing (existing)
 - **Metrics Integration**: 7/7 passing (new)
@@ -351,11 +369,13 @@ axum = "0.7"         # HTTP server framework (already present for metrics server
 ## Files Modified/Created
 
 ### Created
+
 - ✅ `src/metrics.rs` - Metrics collection (159 lines + 100 tests)
 - ✅ `src/metrics_server.rs` - HTTP server with mTLS (180 lines + 4 tests)
 - ✅ `tests/metrics_integration.rs` - Integration tests (170 lines)
 
 ### Modified
+
 - ✅ `src/lib.rs` - Added module declarations and re-exports
 - ✅ `src/main.rs` - Integrated metrics collection and server spawning
 - ✅ `Cargo.toml` - Added prometheus and axum dependencies (already present)
@@ -367,11 +387,13 @@ axum = "0.7"         # HTTP server framework (already present for metrics server
 ### Production Deployment Steps
 
 1. **Binary** deployed with metrics built-in:
+
    ```bash
    /usr/bin/portsyncd  # Starts with metrics on 0.0.0.0:9090
    ```
 
 2. **Prometheus Configuration** (prometheus.yml):
+
    ```yaml
    global:
      scrape_interval: 15s
@@ -383,6 +405,7 @@ axum = "0.7"         # HTTP server framework (already present for metrics server
    ```
 
 3. **Systemd Unit File** (portsyncd.service):
+
    ```ini
    [Unit]
    Description=SONiC Port Synchronization Daemon
@@ -398,6 +421,7 @@ axum = "0.7"         # HTTP server framework (already present for metrics server
    ```
 
 4. **mTLS Configuration** (Optional):
+
    ```bash
    portsyncd --metrics-cert /etc/portsyncd/server.crt \
              --metrics-key /etc/portsyncd/server.key \
@@ -405,6 +429,7 @@ axum = "0.7"         # HTTP server framework (already present for metrics server
    ```
 
 5. **Verification**:
+
    ```bash
    curl http://localhost:9090/metrics
 
@@ -418,12 +443,14 @@ axum = "0.7"         # HTTP server framework (already present for metrics server
 ## Performance Impact
 
 **Metrics Overhead**:
+
 - Memory: ~5MB per collector (negligible)
 - CPU: <1% during normal operation
 - Latency: <1ms for typical metric operations (thread-safe atomic updates)
 - HTTP Server: Minimal footprint, only active when scraped
 
 **Histogram Bucketing**:
+
 - Event latency: 7 buckets (1ms - 1s) covers typical processing windows
 - Redis latency: 5 buckets (1ms - 100ms) for database operations
 
@@ -432,6 +459,7 @@ axum = "0.7"         # HTTP server framework (already present for metrics server
 ## Prometheus Queries (Examples)
 
 ### Operational Health
+
 ```promql
 # Event processing rate
 rate(portsyncd_events_processed_total[5m])
@@ -448,6 +476,7 @@ rate(portsyncd_port_flaps_total[1m])
 ```
 
 ### Alert Rules
+
 ```yaml
 groups:
   - name: portsyncd
@@ -474,16 +503,19 @@ groups:
 ## Next Steps (Phase 6 Week 2+)
 
 ### Week 2: Warm Restart (EOIU Detection)
+
 - Implement EOIU signal handling
 - Skip APP_DB updates on warm restart
 - Preserve port state during restart
 
 ### Week 3: Self-Healing Capabilities
+
 - Health check system
 - Automatic recovery on connection loss
 - Alerting on degraded state
 
 ### Week 4: Multi-Instance Support
+
 - Multiple portsyncd instances
 - Load balancing of port assignments
 - Shared health coordination

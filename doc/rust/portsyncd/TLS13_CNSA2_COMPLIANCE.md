@@ -69,6 +69,7 @@ Extended Key Usage: TLS Web Server Authentication
 ```
 
 **Example Certificate Attributes**:
+
 ```
 X509v3 Extended Key Usage:
     TLS Web Server Authentication
@@ -245,6 +246,7 @@ Only **5 AEAD cipher suites** are defined for TLS 1.3:
 | TLS_AES_128_CCM_8_SHA256 | ECDHE | AES-128-CCM-8 | SHA-256 | ⚠️ Not CNSA |
 
 **CNSA 2.0 Compliant**:
+
 - ✅ TLS_AES_256_GCM_SHA384 (PRIMARY)
 - ✅ TLS_CHACHA20_POLY1305_SHA256 (SECONDARY)
 

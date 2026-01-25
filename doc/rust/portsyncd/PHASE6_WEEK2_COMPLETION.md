@@ -299,6 +299,7 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 ### Unit Tests by Module
 
 **warm_restart.rs** (10 tests):
+
 - ✅ Port state creation and validation
 - ✅ Port state with down status
 - ✅ Persisted state default initialization
@@ -311,6 +312,7 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 - ✅ Warm start detection from saved file
 
 **eoiu_detector.rs** (8 tests):
+
 - ✅ Detector creation and initialization
 - ✅ Waiting state with normal interface
 - ✅ EOIU signal detection (ifi_change == 0)
@@ -321,6 +323,7 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 - ✅ Default initialization
 
 **port_sync.rs enhancements** (5 new):
+
 - ✅ LinkSync without warm restart (baseline)
 - ✅ LinkSync with warm restart initialization
 - ✅ Warm restart state transitions
@@ -328,6 +331,7 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 - ✅ Port state persistence
 
 **netlink_socket.rs enhancements** (4 new):
+
 - ✅ EOIU detector creation
 - ✅ Mutable detector access
 - ✅ Immutable detector access
@@ -336,25 +340,30 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 ### Integration Tests (14 tests)
 
 **Warm Restart Workflows**:
+
 - ✅ Cold start detection (no state file)
 - ✅ Warm start detection and state recovery
 - ✅ Complete state machine transitions
 - ✅ APP_DB write gating during initial sync
 
 **EOIU Detection**:
+
 - ✅ Basic EOIU detection sequence
 - ✅ Multi-port EOIU detection
 
 **Port State Persistence**:
+
 - ✅ Serialization with multiple ports
 - ✅ JSON format validation
 
 **Error Handling**:
+
 - ✅ Missing state file graceful fallback
 - ✅ Corrupted state file handling
 - ✅ Version compatibility
 
 **Edge Cases**:
+
 - ✅ is_warm_restart_in_progress flag
 - ✅ Port state flags and MTU
 - ✅ Port list clearing
@@ -425,10 +434,12 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 | APP_DB gating | <1ns | Boolean check |
 
 **Memory Overhead**:
+
 - ~1MB for 1000 ports in memory
 - JSON file: ~500 bytes per port
 
 **CPU Overhead**:
+
 - <0.1% during normal operation
 - Peak: <1ms for state save/load
 
@@ -485,6 +496,7 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 ### Installation
 
 1. Build Rust portsyncd:
+
    ```bash
    cd sonic-swss/crates/portsyncd
    cargo build --release
@@ -492,12 +504,14 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
    ```
 
 2. Ensure state directory exists:
+
    ```bash
    sudo mkdir -p /var/lib/sonic/portsyncd
    sudo chmod 755 /var/lib/sonic/portsyncd
    ```
 
 3. Deploy with systemd:
+
    ```bash
    sudo systemctl enable portsyncd
    sudo systemctl start portsyncd
@@ -506,22 +520,26 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 ### Verification
 
 1. Check daemon started:
+
    ```bash
    systemctl status portsyncd
    ```
 
 2. Verify cold start (first run):
+
    ```bash
    journalctl -u portsyncd | grep "Cold start"
    ```
 
 3. Force warm restart test:
+
    ```bash
    systemctl restart portsyncd
    journalctl -u portsyncd | grep "Warm start"
    ```
 
 4. Check state file created:
+
    ```bash
    cat /var/lib/sonic/portsyncd/port_state.json | jq .ports
    ```
@@ -563,6 +581,7 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 Phase 6 Week 2 successfully delivers a production-ready warm restart system that enables zero-downtime daemon restarts while preserving port state. The implementation is thoroughly tested (166 tests), well-documented, and compliant with enterprise security standards.
 
 The portsyncd daemon can now:
+
 - ✅ Detect warm restarts from saved state
 - ✅ Skip redundant APP_DB updates during initial sync
 - ✅ Detect kernel EOIU signal for state machine coordination
@@ -579,4 +598,3 @@ Ready for Phase 6 Week 3: timeout-based fallback and state cleanup.
 **Test Pass Rate**: 166/166 (100%)
 **Quality Level**: Production-Ready
 **Next Phase**: Week 3 - Timeout Fallback & State Cleanup
-

@@ -44,6 +44,7 @@ AnalyticsAggregator (NEW)
 **Goal**: Save and load metrics from JSON file to survive daemon restarts
 
 **Implementation**:
+
 - File: `src/warm_restart.rs`
 - Add methods to WarmRestartManager:
   - `save_metrics(path: &Path) -> Result<()>` - Serialize metrics to JSON
@@ -53,6 +54,7 @@ AnalyticsAggregator (NEW)
 - Load metrics on WarmRestartManager initialization
 
 **Tests**: 8 tests
+
 - Save and load metrics round-trip
 - Metrics persistence across restarts
 - Corrupt metrics file recovery
@@ -68,8 +70,10 @@ AnalyticsAggregator (NEW)
 **Goal**: Allow operators to configure metrics retention via config file
 
 **Implementation**:
+
 - File: `src/config_file.rs` (or new `src/metrics_config.rs`)
 - Add MetricsConfig struct:
+
   ```rust
   pub struct MetricsConfig {
       pub enabled: bool,
@@ -80,11 +84,13 @@ AnalyticsAggregator (NEW)
       pub storage_path: PathBuf,
   }
   ```
+
 - Parse from config file: `/etc/sonic/portsyncd.conf`
 - Validation: ensure sane values
 - Default values for all fields
 
 **Tests**: 6 tests
+
 - Config file parsing
 - Default values applied
 - Validation of constraints
@@ -99,18 +105,22 @@ AnalyticsAggregator (NEW)
 **Goal**: Export metrics in Prometheus format for scraping
 
 **Implementation**:
+
 - File: `src/metrics_exporter.rs` (new)
 - PrometheusExporter struct:
+
   ```rust
   pub struct PrometheusExporter {
       metrics: &'static WarmRestartMetrics,
   }
   ```
+
 - Methods:
   - `new(metrics: &WarmRestartMetrics) -> Self`
   - `export(&self) -> String` - Return Prometheus format
   - `export_json(&self) -> Result<String>` - JSON format
 - Export format:
+
   ```
   # HELP portsyncd_warm_restarts Total warm restart events
   # TYPE portsyncd_warm_restarts counter
@@ -145,10 +155,12 @@ AnalyticsAggregator (NEW)
   portsyncd_sync_duration_seconds_bucket{le="100"} 2
   portsyncd_sync_duration_seconds_bucket{le="+Inf"} 2
   ```
+
 - Integration with existing metrics_server.rs
 - HTTP endpoint: GET /metrics -> Prometheus format
 
 **Tests**: 10 tests
+
 - Format validation
 - All metric types exported
 - Timestamp handling
@@ -167,8 +179,10 @@ AnalyticsAggregator (NEW)
 **Goal**: Calculate insights from collected metrics
 
 **Implementation**:
+
 - File: `src/warm_restart.rs` (extend WarmRestartMetrics)
 - Add methods to WarmRestartMetrics:
+
   ```rust
   pub fn recovery_success_rate(&self) -> f64
   pub fn corruption_recovery_rate(&self) -> f64
@@ -178,12 +192,14 @@ AnalyticsAggregator (NEW)
   pub fn last_healthy_restart(&self) -> Option<SystemTime>
   pub fn is_system_healthy(&self) -> bool
   ```
+
 - AnalyticsAggregator struct:
   - Percentile calculations (p50, p95, p99)
   - Trend detection (is recovery rate increasing?)
   - Anomaly detection (unusual event patterns)
 
 **Tests**: 8 tests
+
 - Recovery rate calculations
 - Edge cases (zero denominator)
 - Percentile calculations
@@ -200,6 +216,7 @@ AnalyticsAggregator (NEW)
 **Goal**: Production-ready systemd service and config template
 
 **Deliverables**:
+
 - `portsyncd.service` - Systemd unit file
   - Type: notify
   - WatchdogSec: 30s
@@ -208,6 +225,7 @@ AnalyticsAggregator (NEW)
   - SuccessExitStatus: 0 143
 
 - `portsyncd.conf.example` - Configuration template
+
   ```toml
   [daemon]
   enabled = true
@@ -238,6 +256,7 @@ AnalyticsAggregator (NEW)
 - `README_DEPLOYMENT.md` - Deployment guide
 
 **Tests**: 4 tests
+
 - Config file parsing
 - Default values
 - Path validation
@@ -248,6 +267,7 @@ AnalyticsAggregator (NEW)
 **Goal**: End-to-end metrics persistence and export testing
 
 **Tests** (12 total):
+
 - Metrics persist across daemon restarts
 - Prometheus export format valid
 - Metrics accumulate correctly
@@ -268,36 +288,42 @@ AnalyticsAggregator (NEW)
 ### Week 4 Timeline
 
 **Day 1-2**: Persistent Metrics Storage (Task 1)
+
 - Implement save/load methods
 - Add metrics file handling
 - Write 8 unit tests
 - Verify round-trip serialization
 
 **Day 2-3**: Configuration System (Task 2)
+
 - Create MetricsConfig struct
 - Parse config file
 - Write 6 unit tests
 - Validate all paths
 
 **Day 3-4**: Prometheus Export (Task 3)
+
 - Create PrometheusExporter
 - Implement format generation
 - Write 10 unit tests
 - Add HTTP endpoint integration
 
 **Day 4-5**: Analytics (Task 4)
+
 - Add calculation methods
 - Implement percentile logic
 - Write 8 unit tests
 - Test anomaly detection
 
 **Day 5-6**: Deployment Files (Task 5)
+
 - Create systemd unit file
 - Create config template
 - Write deployment guide
 - 4 integration tests
 
 **Day 6-7**: Integration Tests (Task 6)
+
 - Full end-to-end scenarios
 - 12 comprehensive tests
 - Performance validation
@@ -306,32 +332,38 @@ AnalyticsAggregator (NEW)
 ## Success Criteria
 
 ✅ **Persistent Storage**:
+
 - Metrics survive daemon restart
 - No data loss on corruption
 - Automatic recovery from backups
 
 ✅ **Configuration**:
+
 - All metrics config options work
 - Defaults apply correctly
 - Validation prevents invalid states
 
 ✅ **Prometheus Export**:
+
 - Valid Prometheus format
 - All metrics included
 - Performance <100ms export time
 
 ✅ **Analytics**:
+
 - Accurate calculations
 - Trend detection working
 - Health assessment reliable
 
 ✅ **Testing**:
+
 - 50+ new unit tests
 - 12 integration tests
 - 100% test pass rate
 - Stress test (1000 events/sec)
 
 ✅ **Quality**:
+
 - 0 warnings, 0 unsafe code
 - All clippy suggestions addressed
 - Comprehensive documentation
@@ -339,6 +371,7 @@ AnalyticsAggregator (NEW)
 ## Files to Create/Modify
 
 ### New Files
+
 - `src/metrics_exporter.rs` - Prometheus export logic
 - `portsyncd.service` - Systemd unit file
 - `portsyncd.conf.example` - Config template
@@ -346,6 +379,7 @@ AnalyticsAggregator (NEW)
 - `tests/metrics_export_integration.rs` - Integration tests
 
 ### Modified Files
+
 - `src/warm_restart.rs` - Add persistent metrics, analytics
 - `src/config_file.rs` - Add MetricsConfig struct
 - `src/lib.rs` - Export new types
@@ -370,7 +404,7 @@ AnalyticsAggregator (NEW)
 
 ## References
 
-- Prometheus Exposition Format: https://prometheus.io/docs/instrumenting/exposition_formats/
+- Prometheus Exposition Format: <https://prometheus.io/docs/instrumenting/exposition_formats/>
 - Systemd Service Documentation
 - TOML Config Format
 - JSON Serialization in Rust (serde)

@@ -22,6 +22,7 @@ These enhancements ensure the warm restart system is resilient, observable, and 
 ## Phase 6 Week 2 Summary (Foundation)
 
 **Completed Deliverables**:
+
 - ✅ WarmRestartManager - 10 unit tests
 - ✅ EoiuDetector - 8 unit tests
 - ✅ LinkSync integration - 5 new tests
@@ -30,6 +31,7 @@ These enhancements ensure the warm restart system is resilient, observable, and 
 - **Total**: 166 tests passing, 41 new tests
 
 **Current Capabilities**:
+
 - Cold start vs warm start detection
 - Port state persistence (JSON)
 - APP_DB write gating during initial sync
@@ -47,11 +49,13 @@ These enhancements ensure the warm restart system is resilient, observable, and 
 **Goal**: Prevent daemon stall if EOIU signal never arrives
 
 **Problem**:
+
 - Current implementation waits indefinitely for EOIU signal
 - If kernel sends no EOIU, warm restart state remains locked
 - APP_DB updates disabled forever → port state never updates
 
 **Solution**:
+
 - Add timeout timer (default 10 seconds)
 - Auto-complete initial sync if timeout expires
 - Log timeout event for debugging
@@ -95,9 +99,11 @@ impl WarmRestartManager {
 ```
 
 **Files Modified**:
+
 - `src/warm_restart.rs` (+60 lines)
 
 **Tests** (8 tests):
+
 - Timeout not reached (normal EOIU case)
 - Timeout reached → auto-complete
 - Configurable timeout
@@ -112,6 +118,7 @@ impl WarmRestartManager {
 **Goal**: Manage port_state.json lifecycle - cleanup, rotation, recovery
 
 **Problem**:
+
 - Stale state files can cause issues
 - No backup/rotation mechanism
 - Corruption detected but not cleaned up automatically
@@ -197,9 +204,11 @@ pub fn load_state_with_recovery(&mut self) -> Result<()> {
 ```
 
 **Files Modified**:
+
 - `src/warm_restart.rs` (+80 lines)
 
 **Tests** (12 tests):
+
 - Cleanup stale files (7+ days old)
 - Keep recent files
 - Rotation creates backup
@@ -311,10 +320,12 @@ if let Some(metrics) = link_sync.warm_restart_metrics() {
 ```
 
 **Files Modified**:
+
 - `src/warm_restart.rs` (+100 lines)
 - `src/port_sync.rs` (+5 lines)
 
 **Tests** (10 tests):
+
 - Metrics creation
 - Cold/warm start recording
 - EOIU timeout recording
@@ -337,6 +348,7 @@ if let Some(metrics) = link_sync.warm_restart_metrics() {
 **Test Categories**:
 
 **Timeout Fallback** (6 tests):
+
 1. Timeout not reached → EOIU completes normally
 2. Timeout reached → Auto-complete initial sync
 3. Timeout with no EOIU signal → Safe transition
@@ -345,6 +357,7 @@ if let Some(metrics) = link_sync.warm_restart_metrics() {
 6. Very long timeout → Waits correctly
 
 **State File Lifecycle** (8 tests):
+
 1. Cleanup stale files (7+ days old)
 2. Keep recent files (< 7 days)
 3. Rotation creates backup
@@ -355,6 +368,7 @@ if let Some(metrics) = link_sync.warm_restart_metrics() {
 8. Backup cleanup after successful recovery
 
 **Metrics & Observability** (6 tests):
+
 1. Cold start recorded in metrics
 2. Warm start recorded in metrics
 3. EOIU timeout recorded
@@ -369,18 +383,21 @@ if let Some(metrics) = link_sync.warm_restart_metrics() {
 ### Timeline (Week 3)
 
 **Day 1-2: Timeout Fallback**
+
 - Implement timeout detection (Task 1)
 - Add configurable timeout (Task 2)
 - Auto-complete on timeout (Task 3)
 - 8 unit tests + 2 integration tests = 10 tests
 
 **Day 3-4: State File Lifecycle**
+
 - Cleanup stale files (Task 4)
 - Rotation mechanism (Task 5)
 - Corruption recovery (Task 6)
 - 12 unit tests + 3 integration tests = 15 tests
 
 **Day 5: Metrics & Observability**
+
 - Create WarmRestartMetrics (Task 7)
 - Integrate into manager (Task 8)
 - Expose via API (Task 9)
@@ -562,12 +579,14 @@ loop {
 ## Success Criteria
 
 ### Code Quality
+
 - ✅ 50+ new tests (exceeds 40 target)
 - ✅ Zero compiler warnings (new code)
 - ✅ Zero unsafe code (new code)
 - ✅ Full documentation
 
 ### Functionality
+
 - ✅ Timeout fallback working (auto-complete on timeout)
 - ✅ State cleanup functional (stale files removed)
 - ✅ File rotation working (backup created)
@@ -575,12 +594,14 @@ loop {
 - ✅ Metrics accurate (timing, counts recorded)
 
 ### Resilience
+
 - ✅ No daemon stall (timeout prevents infinite wait)
 - ✅ Handles corruption gracefully (backup recovery)
 - ✅ Cleanup prevents issues (old state cleanup)
 - ✅ Observable (metrics for monitoring)
 
 ### Performance
+
 - ✅ Timeout check <1ms (on every event)
 - ✅ Cleanup <5ms (startup only)
 - ✅ Metrics overhead <0.1% (atomic updates)
@@ -604,6 +625,7 @@ loop {
 ## Deliverables Checklist
 
 ### Code
+
 - [ ] Timeout fallback in WarmRestartManager
 - [ ] State cleanup (old files)
 - [ ] State rotation (backup mechanism)
@@ -613,6 +635,7 @@ loop {
 - [ ] Metrics API exposure
 
 ### Tests
+
 - [ ] 8 timeout unit tests
 - [ ] 12 state lifecycle unit tests
 - [ ] 10 metrics unit tests
@@ -620,6 +643,7 @@ loop {
 - [ ] All passing (100%)
 
 ### Documentation
+
 - [ ] API documentation (code comments)
 - [ ] Configuration guide
 - [ ] Deployment guide
@@ -627,6 +651,7 @@ loop {
 - [ ] Migration guide (Week 2 → Week 3)
 
 ### Quality
+
 - [ ] Zero warnings (new code)
 - [ ] Zero unsafe code (new code)
 - [ ] Type-safe APIs
@@ -637,6 +662,7 @@ loop {
 ## Post-Week 3: Phase 6 Week 4+
 
 **Potential Enhancements**:
+
 - Distributed state coordination (HA scenarios)
 - Multi-daemon warm restart synchronization
 - Persistent metrics (write to file/database)
@@ -664,4 +690,3 @@ The warm restart system moves from "functional" to "production-hardened" with th
 **Target Tests**: 50+ new tests (214+ total)
 **Timeline**: 5 days
 **Next Phase**: Phase 6 Week 4 (distributed coordination)
-

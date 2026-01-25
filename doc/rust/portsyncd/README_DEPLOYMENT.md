@@ -70,30 +70,35 @@ The Rust portsyncd daemon provides:
 Before installing portsyncd, verify:
 
 - [ ] Redis server is running and accessible
+
   ```bash
   redis-cli ping
   # Expected: PONG
   ```
 
 - [ ] Kernel supports netlink routes (NETLINK_ROUTE)
+
   ```bash
   grep NETLINK_ROUTE /boot/config-$(uname -r)
   # Expected: CONFIG_NETLINK_ROUTE=y
   ```
 
 - [ ] Required directories are writable:
+
   ```bash
   ls -la /var/lib/sonic/portsyncd/
   # Expected: drwxr-xr-x portsyncd portsyncd
   ```
 
 - [ ] No other portsyncd is running:
+
   ```bash
   systemctl status portsyncd
   # Expected: inactive (dead)
   ```
 
 - [ ] Network connectivity to target ports is available:
+
   ```bash
   ip link show | grep -E "Ethernet|etp"
   # Expected: List of ports
@@ -348,6 +353,7 @@ Metrics are stored in JSON format at:
 ### Metrics Exported
 
 **Counters**:
+
 - `portsyncd_warm_restarts` - Warm restart events
 - `portsyncd_cold_starts` - Cold start events
 - `portsyncd_eoiu_detected` - EOIU signals received
@@ -358,12 +364,14 @@ Metrics are stored in JSON format at:
 - `portsyncd_backups_cleaned` - Backup files cleaned
 
 **Gauges** (timestamps):
+
 - `portsyncd_last_warm_restart_timestamp`
 - `portsyncd_last_eoiu_detection_timestamp`
 - `portsyncd_last_state_recovery_timestamp`
 - `portsyncd_last_corruption_timestamp`
 
 **Histograms**:
+
 - `portsyncd_initial_sync_duration_seconds` - Initial sync latency distribution
 
 ### Accessing Metrics
@@ -375,6 +383,7 @@ cat /var/lib/sonic/portsyncd/metrics/metrics.json
 ```
 
 **Output**:
+
 ```json
 {
   "warm_restarts": 5,
@@ -397,6 +406,7 @@ curl -s http://127.0.0.1:9090/metrics
 ```
 
 **Output**:
+
 ```
 # HELP portsyncd_warm_restarts Total warm restart events
 # TYPE portsyncd_warm_restarts counter
@@ -506,6 +516,7 @@ journalctl -u portsyncd -o json
 **Symptom**: `systemctl start portsyncd` fails
 
 **Diagnosis**:
+
 ```bash
 journalctl -u portsyncd -n 50  # Check logs
 systemctl status portsyncd     # Check status
@@ -514,6 +525,7 @@ systemctl status portsyncd     # Check status
 **Common Issues**:
 
 1. **Configuration error**:
+
    ```bash
    # Validate configuration
    /usr/local/bin/portsyncd --validate-config
@@ -523,6 +535,7 @@ systemctl status portsyncd     # Check status
    ```
 
 2. **Redis connection failure**:
+
    ```bash
    # Verify Redis is running
    redis-cli ping
@@ -532,6 +545,7 @@ systemctl status portsyncd     # Check status
    ```
 
 3. **Permission denied**:
+
    ```bash
    # Check metrics directory permissions
    ls -la /var/lib/sonic/portsyncd/metrics/
@@ -545,6 +559,7 @@ systemctl status portsyncd     # Check status
 **Symptom**: portsyncd process using > 50% CPU
 
 **Diagnosis**:
+
 ```bash
 # Profile CPU usage
 top -p $(pgrep portsyncd)
@@ -556,12 +571,14 @@ grep portsyncd_queue_depth /var/lib/sonic/portsyncd/metrics/metrics.json
 **Solutions**:
 
 1. Increase batch timeout (processes fewer events per second):
+
    ```toml
    [performance]
    batch_timeout_ms = 200  # Default: 100
    ```
 
 2. Reduce metrics save frequency (less disk I/O):
+
    ```toml
    [metrics]
    save_interval_secs = 600  # Default: 300
@@ -572,6 +589,7 @@ grep portsyncd_queue_depth /var/lib/sonic/portsyncd/metrics/metrics.json
 **Symptom**: portsyncd process using > 200 MB RAM
 
 **Diagnosis**:
+
 ```bash
 # Check actual memory usage
 ps aux | grep portsyncd
@@ -583,12 +601,14 @@ du -sh /var/lib/sonic/portsyncd/metrics/
 **Solutions**:
 
 1. Reduce metrics retention:
+
    ```toml
    [metrics]
    retention_days = 7  # Default: 30
    ```
 
 2. Reduce metrics file size limit:
+
    ```toml
    [metrics]
    max_file_size_mb = 50  # Default: 100
@@ -599,6 +619,7 @@ du -sh /var/lib/sonic/portsyncd/metrics/
 **Symptom**: `/var/lib/sonic/portsyncd/metrics/metrics.json` not being created/updated
 
 **Diagnosis**:
+
 ```bash
 # Check if metrics are being recorded
 journalctl -u portsyncd | grep -i metrics
@@ -613,18 +634,21 @@ df -h /var/lib/sonic/portsyncd/
 **Solutions**:
 
 1. Verify metrics are enabled:
+
    ```toml
    [metrics]
    enabled = true  # Default
    ```
 
 2. Fix directory permissions:
+
    ```bash
    sudo chmod 750 /var/lib/sonic/portsyncd/metrics
    sudo chown portsyncd:portsyncd /var/lib/sonic/portsyncd/metrics
    ```
 
 3. Ensure adequate disk space:
+
    ```bash
    df -h /  # Should have > 1 GB free
    ```
@@ -722,11 +746,13 @@ cat /var/lib/sonic/portsyncd/backups/port_state_*.json
 ### From C++ portsyncd to Rust portsyncd
 
 1. **Backup existing configuration**:
+
    ```bash
    sudo cp /etc/sonic/portsyncd.conf /etc/sonic/portsyncd.conf.backup
    ```
 
 2. **Stop old daemon**:
+
    ```bash
    sudo systemctl stop portsyncd
    ```
@@ -734,17 +760,20 @@ cat /var/lib/sonic/portsyncd/backups/port_state_*.json
 3. **Install new binary** (follow Installation Steps above)
 
 4. **Migrate configuration**:
+
    ```bash
    # Rust version uses same format, verify compatibility
    /usr/local/bin/portsyncd --validate-config
    ```
 
 5. **Start new daemon**:
+
    ```bash
    sudo systemctl start portsyncd
    ```
 
 6. **Verify functionality**:
+
    ```bash
    # Check daemon is running
    systemctl status portsyncd
@@ -789,16 +818,19 @@ sudo systemctl restart portsyncd
 Regular maintenance tasks:
 
 1. **Weekly**: Review metrics for anomalies
+
    ```bash
    cat /var/lib/sonic/portsyncd/metrics/metrics.json | jq '.health_score'
    ```
 
 2. **Monthly**: Verify disk usage
+
    ```bash
    du -sh /var/lib/sonic/portsyncd/metrics/
    ```
 
 3. **Quarterly**: Review logs for errors
+
    ```bash
    journalctl -u portsyncd --since "3 months ago" | grep -i error
    ```
@@ -864,4 +896,3 @@ redis-cli -n 6 DBSIZE
 **Last Updated**: Phase 6 Week 4
 **Author**: Claude Haiku 4.5
 **License**: Same as SONiC project
-

@@ -13,12 +13,14 @@ Phase 6 extends portsyncd with advanced capabilities that add significant operat
 **Scenario**: A SONiC switch needs to restart the orchestration agent (orchagent) or perform a controlled reboot without losing port connectivity or disrupting traffic.
 
 **Problem Without This Feature**:
+
 - Port state synchronized by old portsyncd becomes stale
 - New portsyncd after restart doesn't know which ports were already initialized
 - Risk of duplicate port initialization events
 - Potential brief traffic disruption during transition
 
 **Problem With Current Implementation**:
+
 - portsyncd sees all ports as "down" after restart
 - Sends port down events that interrupt traffic
 - Causes brief outage during warm restart window
@@ -26,6 +28,7 @@ Phase 6 extends portsyncd with advanced capabilities that add significant operat
 ### What EOIU Is
 
 **EOIU** = "End Of Initial Update"
+
 - A flag in netlink RTM_NEWLINK messages
 - Indicates the kernel has finished sending all initial port state
 - Allows distinction between:
@@ -56,18 +59,21 @@ pub fn handle_eoiu(&mut self) {
 ### Value Delivered
 
 **Operational**:
+
 - ✅ Zero-downtime restarts of orchestration layer
 - ✅ Faster recovery from daemon crashes
 - ✅ Eliminates brief traffic loss during warm restart
 - ✅ Enables controlled maintenance windows
 
 **Technical**:
+
 - ✅ Accurate port state tracking across restarts
 - ✅ Prevents duplicate initialization
 - ✅ Distinguishes initial sync from runtime events
 - ✅ Better logging and monitoring of restart events
 
 **Business**:
+
 - ✅ Improved uptime for customer traffic
 - ✅ Reduces MTTR (Mean Time To Recovery)
 - ✅ Enables scheduled maintenance without service impact
@@ -105,6 +111,7 @@ With EOIU:
 **Scenario**: Network operators need real-time visibility into portsyncd performance across hundreds of switches in a data center.
 
 **Problem Without This Feature**:
+
 - No programmatic access to daemon metrics
 - Operators manually check `journalctl` or `systemctl status`
 - No dashboards or historical trending
@@ -112,6 +119,7 @@ With EOIU:
 - SLA compliance verification is manual and time-consuming
 
 **Problem With Current Implementation**:
+
 - Metrics only exist in-memory (lost on restart)
 - No aggregation across multiple switches
 - No alerting on performance degradation
@@ -149,12 +157,14 @@ portsyncd_memory_bytes 52428800
 ### Metrics Collected
 
 **Performance Metrics**:
+
 - Event processing latency (histogram with percentiles)
 - Throughput (events per second)
 - Success rate per port
 - Queue depth and saturation
 
 **Operational Metrics**:
+
 - Health status (1=Healthy, 0=Degraded, 0=Unhealthy)
 - Memory usage (bytes)
 - CPU usage (percentage)
@@ -163,6 +173,7 @@ portsyncd_memory_bytes 52428800
 - Uptime (seconds)
 
 **Business Metrics**:
+
 - Port flap count per interface
 - Cumulative port up/down events
 - Restart count
@@ -194,18 +205,21 @@ async fn metrics_server(metrics: Arc<PrometheusMetrics>) {
 ### Value Delivered
 
 **Operational**:
+
 - ✅ Real-time visibility across all switches
 - ✅ Proactive alerting on performance degradation
 - ✅ Historical trending to identify patterns
 - ✅ Root cause analysis for network issues
 
 **Technical**:
+
 - ✅ Integration with Prometheus/Grafana ecosystem
 - ✅ Per-switch performance dashboards
 - ✅ Alerting rules for SLA violations
 - ✅ Capacity planning data
 
 **Business**:
+
 - ✅ Measurable SLA compliance (99.9%, 99.99%, etc.)
 - ✅ Reduced troubleshooting time
 - ✅ Data-driven optimization decisions
@@ -249,6 +263,7 @@ async fn metrics_server(metrics: Arc<PrometheusMetrics>) {
 **Scenario**: A SONiC switch experiences transient network issues (brief Redis disconnect, temporary netlink glitch) but the operator is unaware and manual intervention is delayed.
 
 **Problem Without This Feature**:
+
 - Daemon enters degraded state and waits for manual intervention
 - Operator may not notice for hours/days
 - Traffic impact accumulates
@@ -256,6 +271,7 @@ async fn metrics_server(metrics: Arc<PrometheusMetrics>) {
 - No distinction between transient and persistent failures
 
 **Problem With Current Implementation**:
+
 - Connection failures are retried with fixed backoff
 - Degraded state not automatically recovered
 - No preventive action taken
@@ -265,6 +281,7 @@ async fn metrics_server(metrics: Arc<PrometheusMetrics>) {
 **Automatic Recovery Strategies**:
 
 1. **Connection Recovery**
+
    ```rust
    // Detect Redis connection loss
    // → Attempt reconnection with exponential backoff
@@ -278,6 +295,7 @@ async fn metrics_server(metrics: Arc<PrometheusMetrics>) {
    ```
 
 2. **State Reconciliation**
+
    ```rust
    // Periodically (every 5 min) verify:
    // - All ports in CONFIG_DB exist in STATE_DB
@@ -291,6 +309,7 @@ async fn metrics_server(metrics: Arc<PrometheusMetrics>) {
    ```
 
 3. **Memory Leak Detection**
+
    ```rust
    // Monitor memory growth trend
    // If memory growth > expected:
@@ -300,6 +319,7 @@ async fn metrics_server(metrics: Arc<PrometheusMetrics>) {
    ```
 
 4. **Deadlock Prevention**
+
    ```rust
    // Watchdog thread monitors event loop health
    // If no events processed for 10 seconds:
@@ -366,18 +386,21 @@ impl SelfHealer {
 ### Value Delivered
 
 **Operational**:
+
 - ✅ Automatic recovery from transient failures
 - ✅ Reduced manual intervention requirements
 - ✅ Faster recovery (seconds vs minutes)
 - ✅ Better availability (99.9% → 99.99%)
 
 **Technical**:
+
 - ✅ Deadlock prevention
 - ✅ Memory leak mitigation
 - ✅ State consistency verification
 - ✅ Graceful degradation
 
 **Business**:
+
 - ✅ Reduced MTTR (from hours to minutes)
 - ✅ Fewer escalations to engineering
 - ✅ Better customer experience
@@ -420,12 +443,14 @@ Total Recovery Time: 3 seconds (vs 15+ min manual)
 **Scenario**: A large data center has switches with 512+ ports, and a single portsyncd instance can't keep up with the event rate due to CPU constraints.
 
 **Problem Without This Feature**:
+
 - Single-threaded daemon becomes CPU bottleneck
 - All 512 ports' events serialized through one thread
 - Latency increases under load
 - Can't scale to future hardware with more ports
 
 **Problem With Current Implementation**:
+
 - Entire daemon must run on single core
 - No way to distribute work across multiple cores
 - Performance ceiling is inherent to design
@@ -516,18 +541,21 @@ async fn main() {
 ### Value Delivered
 
 **Operational**:
+
 - ✅ Handles 512+ port switches efficiently
 - ✅ Scales CPU usage across multiple cores
 - ✅ Lower latency under high event rate
 - ✅ Better resource utilization
 
 **Technical**:
+
 - ✅ Load distribution across cores
 - ✅ Reduced per-instance CPU usage
 - ✅ Parallel processing of port events
 - ✅ Better throughput (parallelism)
 
 **Business**:
+
 - ✅ Supports future hardware expansion
 - ✅ Enables cost optimization (use commodity hardware)
 - ✅ Improves performance on large switches
@@ -579,6 +607,7 @@ port_partition = { type = "range", start_port = 0, end_port = 127 }
 ### Recommended Priority
 
 **Priority 1: Prometheus Metrics Export** ⭐⭐⭐
+
 - **Why First**: Enables visibility and monitoring for all other features
 - **Value**: Operationally critical for production visibility
 - **Effort**: Medium (14-19 hours)
@@ -586,6 +615,7 @@ port_partition = { type = "range", start_port = 0, end_port = 127 }
 - **No Dependencies**: Can implement independently
 
 **Priority 2: Warm Restart (EOIU Detection)** ⭐⭐⭐
+
 - **Why Second**: Addresses maintenance window disruption
 - **Value**: Eliminates traffic loss during controlled restarts
 - **Effort**: Low to Medium (10-13 hours)
@@ -593,6 +623,7 @@ port_partition = { type = "range", start_port = 0, end_port = 127 }
 - **Dependencies**: None (independent implementation)
 
 **Priority 3: Self-Healing** ⭐⭐⭐
+
 - **Why Third**: Requires monitoring infrastructure first (Prometheus)
 - **Value**: Reduces manual intervention, improves MTTR
 - **Effort**: High (17-22 hours)
@@ -600,6 +631,7 @@ port_partition = { type = "range", start_port = 0, end_port = 127 }
 - **Dependencies**: Benefits from Prometheus metrics
 
 **Priority 4: Multi-Instance Support** ⭐⭐
+
 - **Why Last**: Needed only for very large switches
 - **Value**: Scales to future hardware
 - **Effort**: Medium (9-13 hours)
@@ -637,24 +669,28 @@ Week 4: Multi-Instance Support
 ## Success Criteria for Phase 6
 
 ### Prometheus Metrics
+
 - ✅ `/metrics` endpoint responds with valid Prometheus format
 - ✅ All metrics update in real-time
 - ✅ Grafana dashboard shows correct values
 - ✅ Metrics persist across reconnections
 
 ### Warm Restart (EOIU)
+
 - ✅ EOIU flag correctly detected in netlink messages
 - ✅ No port events sent during initial sync
 - ✅ Zero-downtime restart verified in testing
 - ✅ Logging shows EOIU detection
 
 ### Self-Healing
+
 - ✅ Connection failures detected within 5 seconds
 - ✅ Automatic reconnection succeeds without manual intervention
 - ✅ State reconciliation detects discrepancies
 - ✅ Memory pressure handled gracefully
 
 ### Multi-Instance
+
 - ✅ Port partitioning works correctly (each port handled by one instance)
 - ✅ No port events lost or duplicated
 - ✅ Configuration parsing handles all partition types
@@ -678,12 +714,14 @@ All Phase 6 features are **optional and backward compatible**:
 ## Next Steps After Phase 6
 
 ### Phase 7: Production Hardening
+
 - Chaos testing (network failures, Redis disconnections)
 - Scale testing (100K+ ports)
 - Security audit
 - 24-hour stability verification
 
 ### Beyond
+
 - ML-based anomaly detection
 - Automatic performance tuning
 - Integration with SONiC orchestration API

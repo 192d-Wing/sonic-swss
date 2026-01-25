@@ -5,6 +5,7 @@
 **Recommendation**: Use **Prometheus-Direct** approach for Phase 6 (now), with OpenTelemetry readiness for Phase 7+
 
 **Rationale**:
+
 - Prometheus-direct: Simpler, faster, immediate operational value
 - OpenTelemetry: Better for future complex observability, but adds unnecessary complexity now
 
@@ -98,26 +99,31 @@ async fn metrics_server(metrics: Arc<MetricsCollector>) {
 ### Pros
 
 ✅ **Simple & Fast**
+
 - Single HTTP endpoint (99 lines of code)
 - No external services required for metrics collection
 - Negligible performance overhead
 
 ✅ **Standard Prometheus Format**
+
 - Direct integration with Prometheus/Grafana ecosystem
 - All existing alerting rules work
 - Can reuse hundreds of community dashboards
 
 ✅ **Low Operational Complexity**
+
 - No additional infrastructure (no Jaeger, no Collector)
 - Prometheus scrapes on schedule (every 15-60s)
 - Easy to operate and debug
 
 ✅ **Perfect for Daemon Monitoring**
+
 - Designed for systems like portsyncd (long-running services)
 - Metrics are aggregatable across fleet
 - Handles metric cardinality well
 
 ✅ **Immediate Operational Value**
+
 - Deploy and see results within hours
 - Dashboards in Grafana the same day
 - Alerting working immediately
@@ -125,14 +131,17 @@ async fn metrics_server(metrics: Arc<MetricsCollector>) {
 ### Cons
 
 ❌ **No Distributed Tracing**
+
 - Can't trace request across multiple services
 - (Not needed for portsyncd - single daemon)
 
 ❌ **Push Model Requires Workaround**
+
 - If needed later, would require Prometheus Pushgateway
 - (Unlikely for portsyncd daemon)
 
 ❌ **Limited Correlation**
+
 - Can't correlate metrics with structured logs
 - (Can be added later with sidecar logging)
 
@@ -208,53 +217,63 @@ event_counter.add(1, &[]);
 ### Pros
 
 ✅ **Future-Proof Architecture**
+
 - Single telemetry SDK handles metrics, traces, logs
 - Can add distributed tracing later
 - Supports multiple export backends
 - Industry standard (Cloud Native Computing Foundation)
 
 ✅ **Distributed Tracing Capable**
+
 - Can trace events across multiple services
 - Correlate logs with metrics with traces
 - RCA (Root Cause Analysis) becomes easier
 
 ✅ **Multi-Backend Support**
+
 - Export to Prometheus, Jaeger, DataDog, Honeycomb, etc.
 - Switch backends without code changes
 - Vendor-agnostic
 
 ✅ **Structured Logging Integration**
+
 - Same instrumentation API for metrics, logs, traces
 - Unified observability
 
 ### Cons
 
 ❌ **Higher Complexity**
+
 - 200+ lines of code for full setup
 - More dependencies to maintain
 - Harder to debug if something goes wrong
 
 ❌ **Unnecessary for Current Needs**
+
 - portsyncd is single daemon (no distributed context)
 - Tracing overhead without clear benefit now
 - Adds operational complexity (Collector, Jaeger)
 
 ❌ **Dependency Bloat**
+
 - ~10 additional crates for full OpenTelemetry setup
 - Increases binary size
 - More potential security issues to track
 
 ❌ **Learning Curve**
+
 - OpenTelemetry API is more complex
 - Team needs training
 - Debugging is harder
 
 ❌ **Performance Overhead**
+
 - Additional CPU and memory for SDK
 - Serialization to OTLP format
 - Network calls to Collector
 
 ❌ **Operational Burden**
+
 - Must run OpenTelemetry Collector
 - Must run Jaeger backend (if using traces)
 - More services to monitor and maintain
@@ -264,11 +283,13 @@ event_counter.add(1, &[]);
 ## Option 3: Hybrid Approach (Best of Both Worlds)
 
 ### Phase 6: Prometheus-Direct
+
 - Simple, fast, immediate value
 - ~100 lines of code
 - Deploy and get results in days
 
 ### Phase 7: Add OpenTelemetry Readiness
+
 - Keep existing Prometheus metrics
 - Add OpenTelemetry SDK alongside
 - Enable tracing without breaking metrics
@@ -329,25 +350,33 @@ let tracer = if config.enable_tracing {
 ## Recommendation by Deployment Scenario
 
 ### Small Deployment (< 50 switches)
+
 **Choose**: Prometheus-Direct
+
 - Simplicity is paramount
 - Distributed tracing not needed
 - Quick time-to-value
 
 ### Medium Deployment (50-200 switches)
+
 **Choose**: Prometheus-Direct now, plan Hybrid for Phase 7
+
 - Need fast deployment
 - May want tracing for complex issues later
 - Leave path open for evolution
 
 ### Large Deployment (200+ switches)
+
 **Choose**: Hybrid Approach
+
 - Invest in Prometheus-Direct now
 - Plan OpenTelemetry for Phase 7
 - Prepare team for distributed tracing later
 
 ### Carrier-Grade (SLA-critical, multiple services)
+
 **Choose**: OpenTelemetry + Prometheus (Jump to Phase 7 level)
+
 - Full observability from day one
 - Already have distributed services
 - Justify operational overhead
@@ -399,11 +428,13 @@ Friday:
 ### Phase 7: Add OpenTelemetry (If Needed)
 
 When requirements emerge for:
+
 - Distributed tracing across SONiC services
 - Correlation with orchagent, swsscommon, etc.
 - Advanced debugging across daemon boundaries
 
 Then:
+
 1. Keep existing Prometheus metrics (no changes)
 2. Add OpenTelemetry SDK alongside
 3. Implement tracing for request paths
@@ -505,12 +536,14 @@ timer.observe_duration();
 - ✅ Proven approach for daemon monitoring
 
 **Reserve OpenTelemetry for Phase 7+ when you need:**
+
 - Distributed tracing across multiple services
 - Correlation with other SONiC daemons
 - Multi-backend telemetry export
 - Advanced observability features
 
 This approach:
+
 1. Gets you operational dashboards and alerting **this week**
 2. Keeps complexity **manageable**
 3. Leaves door **open for OpenTelemetry when truly needed**
@@ -521,8 +554,8 @@ This approach:
 
 ## References
 
-- Prometheus Best Practices: https://prometheus.io/docs/practices/
-- Prometheus Rust Client: https://docs.rs/prometheus/
-- OpenTelemetry Documentation: https://opentelemetry.io/docs/
-- CNCF Observability Guide: https://www.cncf.io/blog/2022/04/12/what-does-observability-mean/
-- SONiC Monitoring: https://github.com/sonic-net/SONiC/wiki/Monitoring
+- Prometheus Best Practices: <https://prometheus.io/docs/practices/>
+- Prometheus Rust Client: <https://docs.rs/prometheus/>
+- OpenTelemetry Documentation: <https://opentelemetry.io/docs/>
+- CNCF Observability Guide: <https://www.cncf.io/blog/2022/04/12/what-does-observability-mean/>
+- SONiC Monitoring: <https://github.com/sonic-net/SONiC/wiki/Monitoring>

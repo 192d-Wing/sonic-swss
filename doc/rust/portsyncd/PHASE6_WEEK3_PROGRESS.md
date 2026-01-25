@@ -5,7 +5,9 @@
 ### Completed Tasks (9/14)
 
 #### Task 1: Timeout-Based EOIU Fallback ✅
+
 **Implementation**: `src/warm_restart.rs:143-269`
+
 - Added `initial_sync_start: Option<Instant>` field to track sync start time
 - Added `initial_sync_timeout_secs: u64` field with environment variable support
 - Implemented `check_initial_sync_timeout()` to auto-complete on timeout
@@ -14,14 +16,18 @@
 - **Tests**: 2/2 methods + 8 timeout tests (16 tests total)
 
 #### Task 2: Configurable Timeout Support ✅
+
 **Implementation**: `src/warm_restart.rs:252-265`
+
 - Method: `set_initial_sync_timeout(secs: u64)` - Configure timeout duration
 - Method: `initial_sync_timeout() -> u64` - Get current timeout
 - Method: `initial_sync_elapsed_secs() -> Option<u64>` - Check elapsed time
 - Fully tested and integrated with state machine
 
 #### Task 3: Timeout Unit Tests ✅
+
 **Tests** (8 tests): `src/warm_restart.rs:1185-1340`
+
 1. `test_timeout_not_reached_normal_eoiu` - Normal EOIU completion
 2. `test_timeout_reached_auto_complete` - Auto-completion on timeout
 3. `test_configurable_timeout_via_setter` - Dynamic timeout configuration
@@ -32,7 +38,9 @@
 8. `test_zero_timeout_immediate_completion` - Boundary condition
 
 #### Task 4: Stale State File Cleanup ✅
+
 **Implementation**: `src/warm_restart.rs:362-436`
+
 - Method: `cleanup_stale_state_files()` - Remove files older than 7 days
 - Method: `state_file_age_secs()` -> Option<u64> - Get file age
 - Traverses state directory, identifies 7+ day old files, removes safely
@@ -40,7 +48,9 @@
 - **Tests**: 4 tests covering empty dirs, fresh files, and age calculation
 
 #### Task 5: State File Rotation with Backup ✅
+
 **Implementation**: `src/warm_restart.rs:439-558`
+
 - Method: `rotate_state_file()` - Create timestamped backup + metrics
 - Method: `cleanup_old_backups(max: usize)` - Keep N most recent backups
 - Method: `get_backup_files() -> Vec<PathBuf>` - List backups (newest first)
@@ -49,7 +59,9 @@
 - **Tests**: 4 tests covering rotation, cleanup, and sorting
 
 #### Task 6: Corruption Recovery with Backup Chain ✅
+
 **Implementation**: `src/warm_restart.rs:597-673`
+
 - Method: `load_state_with_recovery() -> Result<bool>` - Fallback chain loading
 - Method: `is_state_valid() -> bool` - Validation check
 - Method: `reset_state()` - Clear state after recovery
@@ -58,7 +70,9 @@
 - **Tests**: 5 tests covering valid files, corruption detection, recovery
 
 #### Task 7: WarmRestartMetrics Struct ✅
+
 **Implementation**: `src/warm_restart.rs:689-843`
+
 ```rust
 pub struct WarmRestartMetrics {
     pub warm_restart_count: u64,           // Warm restart attempts
@@ -78,12 +92,15 @@ pub struct WarmRestartMetrics {
     pub min_initial_sync_duration_secs: u64,
 }
 ```
+
 - **Recording Methods**: record_warm_restart(), record_cold_start(), record_eoiu_detected(), etc.
 - **Aggregation Methods**: total_events(), warm_restart_percentage()
 - **Tests**: 11 tests covering all metrics operations
 
 #### Task 8: Metrics Integration into WarmRestartManager ✅
+
 **Implementation**: `src/warm_restart.rs:148-253`
+
 - Field: `pub metrics: WarmRestartMetrics` in WarmRestartManager struct
 - **Recording Points**:
   - `initialize()`: Records warm_restart/cold_start/corruption
@@ -96,11 +113,14 @@ pub struct WarmRestartMetrics {
 - **Tests**: All existing tests + 184 total passing
 
 #### Task 9: Public Metrics API ✅
+
 **Implementation**: `src/port_sync.rs:307-314`
+
 ```rust
 pub fn metrics(&self) -> Option<&WarmRestartMetrics>
 pub fn metrics_mut(&mut self) -> Option<&mut WarmRestartMetrics>
 ```
+
 - Exposed via LinkSync for external monitoring/introspection
 - Returns None if warm restart not enabled (safe pattern)
 - **Exports**: Added to `lib.rs` public re-exports
@@ -109,10 +129,12 @@ pub fn metrics_mut(&mut self) -> Option<&mut WarmRestartMetrics>
 ### Test Summary
 
 **Total Tests**: 184 passing (100%)
+
 - Unit tests: 170
 - Integration tests: 14 (warm_restart_integration.rs)
 
 **Test Breakdown by Task**:
+
 - Timeout tests: 8
 - Cleanup tests: 4
 - Rotation tests: 4
@@ -130,11 +152,13 @@ pub fn metrics_mut(&mut self) -> Option<&mut WarmRestartMetrics>
 ### Code Statistics
 
 **New Lines of Code**: ~1,200 LOC
+
 - warm_restart.rs: +550 lines (timeout, cleanup, rotation, recovery, metrics)
 - port_sync.rs: +7 lines (metrics accessors)
 - lib.rs: +1 line (WarmRestartMetrics export)
 
 **Modules Enhanced**:
+
 - `src/warm_restart.rs` - Core warm restart module
 - `src/port_sync.rs` - Port synchronization with metrics access
 - `src/lib.rs` - Public API exports
@@ -166,24 +190,28 @@ LinkSync
 ### Key Features Implemented
 
 #### 1. Timeout-Based EOIU Fallback
+
 - Prevents daemon stall if EOIU signal never arrives
 - Configurable via `PORTSYNCD_EOIU_TIMEOUT_SECS` environment variable
 - Auto-completes initial sync after N seconds
 - Gracefully transitions to normal operation
 
 #### 2. State File Lifecycle Management
+
 - **Persistence**: JSON serialization with version tracking
 - **Cleanup**: Automatic removal of files older than 7 days
 - **Rotation**: Timestamped backups with configurable retention
 - **Recovery**: Multi-level fallback chain (current → backups) on corruption
 
 #### 3. Corruption Detection & Recovery
+
 - Automatic detection of invalid JSON or schema mismatches
 - Graceful fallback to most recent valid backup
 - Fail-secure design: corrupted state → cold start
 - Non-destructive recovery attempts
 
 #### 4. Comprehensive Metrics Tracking
+
 - Event-level tracking: warm restarts, cold starts, EOIU, timeouts, recoveries
 - Timing analytics: min/max/average initial sync duration
 - Backup lifecycle tracking: creation and cleanup counts
@@ -192,26 +220,31 @@ LinkSync
 ### Integration Points
 
 **Port Synchronization (port_sync.rs)**:
+
 - LinkSync has optional WarmRestartManager
 - Metrics accessible via `link_sync.metrics()`
 - Warm restart state affects APP_DB update gating
 
 **Netlink Processing (netlink_socket.rs)**:
+
 - EOIU detection via ifi_change == 0
 - Triggers `complete_initial_sync()` in warm restart flow
 
 **Error Handling (error.rs)**:
+
 - PortsyncError variants used for file I/O failures
 - Graceful degradation on all operations
 
 ### Compliance & Safety
 
 **NIST 800-53 Compliance**:
+
 - SC-24 (Fail-Secure): Invalid/corrupted state → cold start (safe default)
 - SI-4 (System Monitoring): Comprehensive metrics for observability
 - CP-4 (Continuity): Automatic backup chain for continuity
 
 **Fail-Secure Design Principles**:
+
 1. Any corruption detected → Cold start (safe operation)
 2. Backup chain ensures recovery possibility
 3. Metrics enable detection of patterns
@@ -221,12 +254,14 @@ LinkSync
 ### Performance Characteristics
 
 **Expected Performance**:
+
 - State file operations: < 1ms (local filesystem I/O)
 - Cleanup operations: < 100ms (directory traversal)
 - Recovery chain check: < 50ms (sequential file reads)
 - Metric recording: < 1µs (in-memory counter updates)
 
 **Memory Usage**:
+
 - WarmRestartManager: ~1KB base + port state storage
 - PersistedPortState: ~200 bytes per port (JSON serialized)
 - WarmRestartMetrics: ~256 bytes fixed overhead
@@ -234,6 +269,7 @@ LinkSync
 ### Testing Coverage
 
 **Unit Tests** (170 tests):
+
 - Port state creation and validation
 - Persisted state operations (insert, delete, clear)
 - Timeout detection and auto-completion
@@ -243,6 +279,7 @@ LinkSync
 - Metrics aggregation and queries
 
 **Integration Tests** (14 tests):
+
 - Cold start vs warm start detection
 - State file save and load with round-trip validation
 - Corruption recovery with backup chain
@@ -252,12 +289,14 @@ LinkSync
 ### Known Limitations & Future Work
 
 **Current Limitations**:
+
 1. Metrics stored in-memory (not persisted across restarts)
 2. Backup retention fixed at 10 (configurable in code only)
 3. 7-day cleanup threshold hardcoded (configurable in code only)
 4. Metrics timestamps at second granularity (sufficient for this use case)
 
 **Future Enhancements** (Phase 6 Week 4+):
+
 1. Persistent metrics storage (InfluxDB or Prometheus format)
 2. Configurable retention policies (via config file)
 3. Metrics export via Prometheus /metrics endpoint
@@ -268,6 +307,7 @@ LinkSync
 ### Validation & Verification
 
 **All 184 Tests Pass**:
+
 ```
 test result: ok. 184 passed; 0 failed; 0 ignored
 Compilation: 0 warnings, 0 errors
@@ -282,18 +322,21 @@ Test Coverage: ~95% of warm_restart.rs code paths
 ## Remaining Tasks (5/14)
 
 ### Task 10: Write 12 State Lifecycle Unit Tests (Pending)
+
 - Test stale cleanup edge cases
 - Test rotation with many backups
 - Test recovery from multiple corruption scenarios
 - Target: 196 total tests
 
 ### Task 11: Write 10 Metrics Unit Tests (Pending)
+
 - Additional metrics aggregation tests
 - Edge cases for percentage calculations
 - Metrics serialization/deserialization
 - Target: 206 total tests
 
 ### Task 12: Write 20 Integration Tests (Pending)
+
 - End-to-end warm restart scenarios
 - Multi-port state consistency
 - Concurrent state updates
@@ -301,12 +344,14 @@ Test Coverage: ~95% of warm_restart.rs code paths
 - Target: 226 total tests
 
 ### Task 13: Document API Changes (Pending)
+
 - Update README with timeout configuration
 - Configuration file documentation
 - Deployment guide for warm restart
 - Metrics API documentation
 
 ### Task 14: Final Validation (Pending)
+
 - Run full test suite: Target 214+ tests
 - Performance profiling
 - Memory leak detection
@@ -332,6 +377,7 @@ Test Coverage: ~95% of warm_restart.rs code paths
 Phase 6 Week 3 has successfully implemented the complete state lifecycle management and metrics tracking infrastructure for warm restart support:
 
 ✅ **Completed**: 9/14 tasks, 184/214 tests passing (86%)
+
 - Timeout detection with configurable fallback
 - Comprehensive state file lifecycle (cleanup, rotation, recovery)
 - Corruption detection and automatic recovery
@@ -339,6 +385,7 @@ Phase 6 Week 3 has successfully implemented the complete state lifecycle managem
 - Public API exposure for monitoring
 
 🎯 **Next Steps**:
+
 1. Write additional unit tests for edge cases (Task 10-11)
 2. Comprehensive integration tests (Task 12)
 3. Documentation and configuration guides (Task 13)
