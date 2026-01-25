@@ -514,7 +514,7 @@ mod tests {
 
     #[test]
     fn test_trend_detection_decreasing() {
-        let observations = vec![
+        let observations = [
             MetricObservation {
                 timestamp_secs: 1000,
                 metric_name: "test_metric".to_string(),
@@ -551,7 +551,7 @@ mod tests {
 
     #[test]
     fn test_trend_detection_stable() {
-        let observations = vec![
+        let observations = [
             MetricObservation {
                 timestamp_secs: 1000,
                 metric_name: "test_metric".to_string(),
@@ -608,7 +608,7 @@ mod tests {
 
         let anomalies = TrendAnalyzer::detect_anomalies(&refs);
 
-        assert!(anomalies.len() > 0, "Should detect anomalies");
+        assert!(!anomalies.is_empty(), "Should detect anomalies");
     }
 
     #[test]
@@ -638,13 +638,13 @@ mod tests {
 
         let confidence = TrendAnalyzer::calculate_trend_confidence(&refs);
 
-        assert!(confidence >= 0.0 && confidence <= 1.0);
+        assert!((0.0..=1.0).contains(&confidence));
         assert!(confidence > 0.8); // High confidence for monotonic data
     }
 
     #[test]
     fn test_mean_calculation() {
-        let observations = vec![
+        let observations = [
             MetricObservation {
                 timestamp_secs: 1000,
                 metric_name: "test".to_string(),
@@ -665,7 +665,7 @@ mod tests {
 
     #[test]
     fn test_stddev_calculation() {
-        let observations = vec![
+        let observations = [
             MetricObservation {
                 timestamp_secs: 1000,
                 metric_name: "test".to_string(),
@@ -759,7 +759,7 @@ mod tests {
 
     #[test]
     fn test_recovery_rate_prediction() {
-        let observations = vec![
+        let observations = [
             MetricObservation {
                 timestamp_secs: 1000,
                 metric_name: "recovery".to_string(),
@@ -780,7 +780,7 @@ mod tests {
 
         let rate = PredictiveScorer::predict_recovery_rate(&refs);
 
-        assert!(rate >= 0.0 && rate <= 100.0);
+        assert!((0.0..=100.0).contains(&rate));
         assert_eq!(rate, 66.66666666666666);
     }
 }
