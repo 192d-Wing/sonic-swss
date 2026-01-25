@@ -1,0 +1,30 @@
+[package]
+name = "sonic-cfgmgr-common"
+version.workspace = true
+edition = "2021"
+authors.workspace = true
+description = "Common infrastructure for SONiC configuration manager daemons (Rust)"
+license.workspace = true
+keywords = ["sonic", "cfgmgr", "network", "configuration"]
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Utilities
+regex = { workspace = true }
+once_cell = { workspace = true }
+
+# Internal crates
+sonic-orch-common = { path = "../sonic-orch-common" }
+
+[dev-dependencies]
+tokio-test = "0.4"
