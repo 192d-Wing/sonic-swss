@@ -51,7 +51,7 @@ async-trait = "0.1"
 redis = { version = "0.28", features = ["tokio-comp", "connection-manager"] }
 
 # SONiC shared types (MacAddress, IpAddress, etc.)
-sonic-types = { path = "../sonic-types" }
+sonic-types = { workspace = true }
 
 # Performance: FxHashMap for faster small-key lookups
 rustc-hash = { version = "2.1", optional = true }

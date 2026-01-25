@@ -1,0 +1,243 @@
+---
+# Prometheus Alert Rules for neighsyncd
+# Configure in Prometheus by adding to rule_files section of prometheus.yml
+# Then enable alert manager routing to handle alerts
+
+groups:
+  - name: neighsyncd_alerts
+    interval: 30s
+    rules:
+      # High error rate alert
+      - alert: NeighsyncHighErrorRate
+        expr: |
+          (rate(neighsyncd_events_failed_total[5m]) / (rate(neighsyncd_neighbors_processed_total[5m]) + 0.001)) > 0.01
+        for: 2m
+        labels:
+          severity: critical
+          service: neighsyncd
+        annotations:
+          summary: "neighsyncd error rate is high ({{ $value | humanizePercentage }})"
+          description: |
+            Event failure rate exceeds 1% on {{ $labels.instance }}.
+            Current failure rate: {{ $value | humanizePercentage }}
+            Action: Check logs for error patterns, verify Redis connectivity
+
+      # Redis unavailable alert
+      - alert: NeighsyncRedisUnavailable
+        expr: neighsyncd_redis_connected == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: neighsyncd
+        annotations:
+          summary: "neighsyncd Redis connection lost"
+          description: |
+            neighsyncd on {{ $labels.instance }} has lost Redis connection.
+            Neighbors cannot be synced to database.
+            Action: Check Redis service status, network connectivity, firewall rules
+
+      # Netlink socket errors alert
+      - alert: NeighsyncNetlinkErrors
+        expr: rate(neighsyncd_netlink_errors_total[5m]) > 1
+        for: 2m
+        labels:
+          severity: critical
+          service: neighsyncd
+        annotations:
+          summary: "neighsyncd experiencing netlink socket errors"
+          description: |
+            Netlink error rate on {{ $labels.instance }} exceeds 1/sec.
+            Error rate: {{ $value | humanize }}/sec
+            Action: Check kernel version, CAP_NET_ADMIN capability, netlink buffer size
+
+      # High memory usage alert
+      - alert: NeighsyncHighMemoryUsage
+        expr: (neighsyncd_memory_bytes / 1024 / 1024) > 200
+        for: 5m
+        labels:
+          severity: warning
+          service: neighsyncd
+        annotations:
+          summary: "neighsyncd memory usage is high"
+          description: |
+            neighsyncd on {{ $labels.instance }} is using {{ $value | humanize }}MB of memory.
+            Threshold: 200MB, High: 256MB (systemd limit)
+            Action: Analyze for memory leaks, check neighbor count, restart if necessary
+
+      # High event processing latency alert
+      - alert: NeighsyncHighLatency
+        expr: histogram_quantile(0.99, rate(neighsyncd_event_latency_seconds_bucket[5m])) * 1000 > 100
+        for: 3m
+        labels:
+          severity: warning
+          service: neighsyncd
+        annotations:
+          summary: "neighsyncd p99 event latency is high"
+          description: |
+            P99 event processing latency on {{ $labels.instance }} exceeds 100ms.
+            Current p99 latency: {{ $value | humanize }}ms
+            Action: Check CPU utilization, batch size configuration, Redis latency
+
+      # Service unhealthy alert
+      - alert: NeighsyncUnhealthy
+        expr: neighsyncd_health_status < 0.5
+        for: 2m
+        labels:
+          severity: critical
+          service: neighsyncd
+        annotations:
+          summary: "neighsyncd health status is degraded or unhealthy"
+          description: |
+            Health status on {{ $labels.instance }} is {{ $value }}.
+            Unhealthy (0): Critical issues detected
+            Degraded (0.5): Partial functionality
+            Action: Check metrics, logs, and restart if necessary
+
+      # Event processing stall alert
+      - alert: NeighsyncProcessingStall
+        expr: (time() - neighsyncd_last_event_timestamp) > 30
+        for: 1m
+        labels:
+          severity: warning
+          service: neighsyncd
+        annotations:
+          summary: "neighsyncd has not processed events for 30+ seconds"
+          description: |
+            neighsyncd on {{ $labels.instance }} has stalled.
+            Last event: {{ $value | humanize }}s ago
+            Action: Check netlink socket, inspect daemon logs, check system resources
+
+      # Redis operation latency alert
+      - alert: NeighsyncHighRedisLatency
+        expr: histogram_quantile(0.99, rate(neighsyncd_redis_latency_seconds_bucket[5m])) * 1000 > 50
+        for: 3m
+        labels:
+          severity: warning
+          service: neighsyncd
+        annotations:
+          summary: "neighsyncd Redis operation latency is high"
+          description: |
+            Redis operation p99 latency on {{ $labels.instance }} exceeds 50ms.
+            Current p99 latency: {{ $value | humanize }}ms
+            Action: Check Redis performance, network latency, Redis configuration
+
+      # High queue depth alert
+      - alert: NeighsyncHighQueueDepth
+        expr: neighsyncd_queue_depth > 1000
+        for: 2m
+        labels:
+          severity: warning
+          service: neighsyncd
+        annotations:
+          summary: "neighsyncd event queue depth is high"
+          description: |
+            Event queue depth on {{ $labels.instance }} exceeds 1000.
+            Current queue depth: {{ $value | humanize }}
+            Action: Check processing rate, batch size, and Redis latency
+
+      # Large batch processing alert
+      - alert: NeighsyncLargeBatchSize
+        expr: histogram_quantile(0.95, rate(neighsyncd_batch_size_bucket[5m])) > 500
+        for: 3m
+        labels:
+          severity: info
+          service: neighsyncd
+        annotations:
+          summary: "neighsyncd is processing large batches"
+          description: |
+            P95 batch size on {{ $labels.instance }} exceeds 500 neighbors.
+            Current p95: {{ $value | humanize }}
+            Info: Normal under high neighbor churn; monitor memory and latency
+
+      # Certificate expiration warning
+      - alert: NeighsyncCertificateExpiration
+        expr: (neighsyncd_mtls_certificate_expiry - time()) / 86400 < 30
+        for: 5m
+        labels:
+          severity: warning
+          service: neighsyncd
+        annotations:
+          summary: "neighsyncd TLS certificate expires in less than 30 days"
+          description: |
+            mTLS certificate on {{ $labels.instance }} expires in {{ $value | humanize }}d.
+            Action: Renew certificate, restart service with new certificate path
+
+      # Netlink socket disconnection alert
+      - alert: NeighsyncNetlinkDisconnected
+        expr: neighsyncd_netlink_connected == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: neighsyncd
+        annotations:
+          summary: "neighsyncd netlink socket is disconnected"
+          description: |
+            Netlink socket on {{ $labels.instance }} is not connected.
+            Cannot receive kernel neighbor updates.
+            Action: Check system logs, kernel version compatibility, CAP_NET_ADMIN
+
+      # Failed event counter not increasing
+      - alert: NeighsyncNoProgress
+        expr: rate(neighsyncd_neighbors_processed_total[1m]) == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: neighsyncd
+        annotations:
+          summary: "neighsyncd is not making progress processing neighbors"
+          description: |
+            neighsyncd on {{ $labels.instance }} has not processed any neighbors in 5+ minutes.
+            Action: Check daemon status, logs, Redis connectivity, and restart if needed
+
+  # Recording rules for derived metrics
+  - name: neighsyncd_recording_rules
+    interval: 15s
+    rules:
+      # Error rate as percentage
+      - record: neighsyncd:error_rate:ratio
+        expr: |
+          (rate(neighsyncd_events_failed_total[5m]) / (rate(neighsyncd_neighbors_processed_total[5m]) + 0.001)) * 100
+
+      # Neighbor processing rate
+      - record: neighsyncd:processing_rate:ops
+        expr: rate(neighsyncd_neighbors_processed_total[1m])
+
+      # Redis connection status
+      - record: neighsyncd:redis:connected:bool
+        expr: neighsyncd_redis_connected
+
+      # Netlink connection status
+      - record: neighsyncd:netlink:connected:bool
+        expr: neighsyncd_netlink_connected
+
+      # Health status
+      - record: neighsyncd:health:status
+        expr: neighsyncd_health_status
+
+      # Memory usage in MB
+      - record: neighsyncd:memory:mb
+        expr: neighsyncd_memory_bytes / 1024 / 1024
+
+      # Event latency p99 in milliseconds
+      - record: neighsyncd:event_latency:p99:ms
+        expr: histogram_quantile(0.99, rate(neighsyncd_event_latency_seconds_bucket[5m])) * 1000
+
+      # Event latency p95 in milliseconds
+      - record: neighsyncd:event_latency:p95:ms
+        expr: histogram_quantile(0.95, rate(neighsyncd_event_latency_seconds_bucket[5m])) * 1000
+
+      # Redis latency p99 in milliseconds
+      - record: neighsyncd:redis_latency:p99:ms
+        expr: histogram_quantile(0.99, rate(neighsyncd_redis_latency_seconds_bucket[5m])) * 1000
+
+      # Redis latency p95 in milliseconds
+      - record: neighsyncd:redis_latency:p95:ms
+        expr: histogram_quantile(0.95, rate(neighsyncd_redis_latency_seconds_bucket[5m])) * 1000
+
+      # Queue efficiency (items processed per second)
+      - record: neighsyncd:queue:efficiency
+        expr: rate(neighsyncd_neighbors_processed_total[1m]) / (neighsyncd_queue_depth + 1)
+
+      # Neighbor add/delete ratio
+      - record: neighsyncd:churn:ratio
+        expr: rate(neighsyncd_neighbors_added_total[5m]) / (rate(neighsyncd_neighbors_deleted_total[5m]) + 0.001)
