@@ -916,6 +916,149 @@ impl WarmRestartMetrics {
             (self.warm_restart_count as f64 / total as f64) * 100.0
         }
     }
+
+    /// Get recovery success rate (state recoveries / corruption detections)
+    pub fn recovery_success_rate(&self) -> f64 {
+        if self.corruption_detected_count == 0 {
+            100.0 // No corruptions = perfect recovery rate
+        } else {
+            (self.state_recovery_count as f64 / self.corruption_detected_count as f64) * 100.0
+        }
+    }
+
+    /// Get corruption recovery rate (recovered / total with corruption)
+    pub fn corruption_recovery_rate(&self) -> f64 {
+        if self.corruption_detected_count == 0 {
+            0.0 // No corruptions to recover from
+        } else {
+            (self.state_recovery_count as f64 / self.corruption_detected_count as f64) * 100.0
+        }
+    }
+
+    /// Get EOIU timeout rate (timeouts / total EOIU signals)
+    pub fn eoiu_timeout_rate(&self) -> f64 {
+        if self.eoiu_detected_count == 0 {
+            0.0 // No EOIU signals
+        } else {
+            (self.eoiu_timeout_count as f64 / self.eoiu_detected_count as f64) * 100.0
+        }
+    }
+
+    /// Get average events per restart cycle
+    pub fn avg_events_per_restart(&self) -> f64 {
+        let total_restarts = self.warm_restart_count + self.cold_start_count;
+        if total_restarts == 0 {
+            0.0
+        } else {
+            let total_events = self.eoiu_detected_count
+                + self.state_recovery_count
+                + self.corruption_detected_count;
+            total_events as f64 / total_restarts as f64
+        }
+    }
+
+    /// Check if system is healthy based on metrics
+    pub fn is_system_healthy(&self) -> bool {
+        // System is unhealthy if:
+        // 1. Corruption detected and not recovered
+        // 2. EOIU timeouts exceed 50% of EOIU signals
+        // 3. Warm restart percentage < 50% (too many cold starts)
+
+        // Check corruption recovery
+        if self.corruption_detected_count > self.state_recovery_count {
+            return false; // Unrecovered corruption
+        }
+
+        // Check EOIU timeout rate
+        if self.eoiu_timeout_rate() > 50.0 {
+            return false; // Too many timeouts
+        }
+
+        // Check warm restart success rate (should be > 50%)
+        if self.warm_restart_percentage() < 50.0 && self.total_events() > 0 {
+            return false; // Too many cold starts
+        }
+
+        true
+    }
+
+    /// Get health score (0-100, higher is better)
+    pub fn health_score(&self) -> f64 {
+        let mut score = 100.0;
+
+        // Deduct for unrecovered corruptions
+        if self.corruption_detected_count > self.state_recovery_count {
+            let unrecovered = self.corruption_detected_count - self.state_recovery_count;
+            score -= (unrecovered as f64 * 10.0).min(30.0); // Max 30 point deduction
+        }
+
+        // Deduct for EOIU timeouts
+        let eoiu_timeout_rate = self.eoiu_timeout_rate();
+        if eoiu_timeout_rate > 0.0 {
+            score -= (eoiu_timeout_rate / 2.0).min(20.0); // Max 20 point deduction
+        }
+
+        // Deduct for low warm restart percentage
+        let wr_percentage = self.warm_restart_percentage();
+        if wr_percentage < 80.0 && self.total_events() > 0 {
+            let deficit = 80.0 - wr_percentage;
+            score -= (deficit / 4.0).min(20.0); // Max 20 point deduction
+        }
+
+        score.clamp(0.0, 100.0)
+    }
+
+    /// Get percentile value for sync durations (p50, p95, p99)
+    /// Returns estimated percentile based on min/max/avg
+    pub fn sync_duration_percentile(&self, percentile: f64) -> u64 {
+        if percentile <= 0.0 {
+            return self.min_initial_sync_duration_secs;
+        }
+        if percentile >= 100.0 {
+            return self.max_initial_sync_duration_secs;
+        }
+
+        // Linear interpolation between min and max based on percentile
+        let min = self.min_initial_sync_duration_secs as f64;
+        let max = self.max_initial_sync_duration_secs as f64;
+        let avg = self.avg_initial_sync_duration_secs;
+
+        // Use average as 50th percentile anchor point
+        if percentile <= 50.0 {
+            // Interpolate between min and avg
+            let factor = percentile / 50.0;
+            min + (avg - min) * factor
+        } else {
+            // Interpolate between avg and max
+            let factor = (percentile - 50.0) / 50.0;
+            avg + (max - avg) * factor
+        }
+        .round() as u64
+    }
+
+    /// Calculate if there's an anomaly in event patterns
+    /// Returns true if event distribution seems unusual
+    pub fn has_anomaly(&self) -> bool {
+        // Anomaly: More timeouts than actual sync completions
+        if self.eoiu_timeout_count > 0 && self.eoiu_timeout_count > self.eoiu_detected_count / 2 {
+            return true;
+        }
+
+        // Anomaly: Every sync gets corruption (unrealistic)
+        if self.total_events() > 0
+            && self.corruption_detected_count >= self.total_events() / 2
+            && self.corruption_detected_count > 5
+        {
+            return true;
+        }
+
+        // Anomaly: Average sync duration extremely high (> 300 seconds)
+        if self.avg_initial_sync_duration_secs > 300.0 {
+            return true;
+        }
+
+        false
+    }
 }
 
 /// Get current Unix timestamp in seconds
@@ -1447,6 +1590,180 @@ mod tests {
         assert_eq!(metrics.warm_restart_count, 0);
         assert_eq!(metrics.eoiu_detected_count, 0);
         assert_eq!(metrics.total_events(), 0);
+    }
+
+    // ========== METRICS ANALYTICS TESTS (Phase 6 Week 4) ==========
+
+    #[test]
+    fn test_recovery_success_rate_no_corruption() {
+        let metrics = WarmRestartMetrics::new();
+        assert_eq!(metrics.recovery_success_rate(), 100.0); // Perfect rate when no corruption
+    }
+
+    #[test]
+    fn test_recovery_success_rate_with_recovery() {
+        let mut metrics = WarmRestartMetrics::new();
+        metrics.corruption_detected_count = 4;
+        metrics.state_recovery_count = 4;
+        assert_eq!(metrics.recovery_success_rate(), 100.0);
+    }
+
+    #[test]
+    fn test_recovery_success_rate_partial() {
+        let mut metrics = WarmRestartMetrics::new();
+        metrics.corruption_detected_count = 4;
+        metrics.state_recovery_count = 3;
+        assert_eq!(metrics.recovery_success_rate(), 75.0);
+    }
+
+    #[test]
+    fn test_eoiu_timeout_rate() {
+        let mut metrics = WarmRestartMetrics::new();
+
+        // No EOIU signals
+        assert_eq!(metrics.eoiu_timeout_rate(), 0.0);
+
+        // Some EOIU signals with timeouts
+        metrics.eoiu_detected_count = 10;
+        metrics.eoiu_timeout_count = 2;
+        assert_eq!(metrics.eoiu_timeout_rate(), 20.0);
+
+        // High timeout rate
+        metrics.eoiu_timeout_count = 7;
+        assert_eq!(metrics.eoiu_timeout_rate(), 70.0);
+    }
+
+    #[test]
+    fn test_avg_events_per_restart() {
+        let mut metrics = WarmRestartMetrics::new();
+
+        // No restarts
+        assert_eq!(metrics.avg_events_per_restart(), 0.0);
+
+        // With restarts and events
+        metrics.warm_restart_count = 5;
+        metrics.cold_start_count = 1;
+        metrics.eoiu_detected_count = 4;
+        metrics.state_recovery_count = 1;
+        metrics.corruption_detected_count = 1;
+
+        let total_events = 4 + 1 + 1;
+        let total_restarts = 5 + 1;
+        assert_eq!(
+            metrics.avg_events_per_restart(),
+            total_events as f64 / total_restarts as f64
+        );
+    }
+
+    #[test]
+    fn test_is_system_healthy_good_state() {
+        let mut metrics = WarmRestartMetrics::new();
+        metrics.warm_restart_count = 10;
+        metrics.cold_start_count = 2;
+        metrics.eoiu_detected_count = 10;
+        metrics.eoiu_timeout_count = 1;
+        assert!(metrics.is_system_healthy());
+    }
+
+    #[test]
+    fn test_is_system_healthy_unrecovered_corruption() {
+        let mut metrics = WarmRestartMetrics::new();
+        metrics.corruption_detected_count = 3;
+        metrics.state_recovery_count = 1;
+        assert!(!metrics.is_system_healthy());
+    }
+
+    #[test]
+    fn test_is_system_healthy_high_timeout_rate() {
+        let mut metrics = WarmRestartMetrics::new();
+        metrics.eoiu_detected_count = 10;
+        metrics.eoiu_timeout_count = 6; // 60% timeout rate
+        assert!(!metrics.is_system_healthy());
+    }
+
+    #[test]
+    fn test_health_score_perfect() {
+        let mut metrics = WarmRestartMetrics::new();
+        metrics.warm_restart_count = 100;
+        metrics.cold_start_count = 1;
+        let score = metrics.health_score();
+        assert!(
+            score >= 95.0,
+            "Perfect state should have high score: {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_health_score_degradation() {
+        let mut metrics = WarmRestartMetrics::new();
+
+        // Add corruption but recover
+        metrics.corruption_detected_count = 3;
+        metrics.state_recovery_count = 2; // 1 unrecovered
+
+        let score = metrics.health_score();
+        assert!(
+            score < 100.0 && score > 0.0,
+            "Score should be degraded but positive: {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_sync_duration_percentile_boundaries() {
+        let mut metrics = WarmRestartMetrics::new();
+        metrics.min_initial_sync_duration_secs = 5;
+        metrics.avg_initial_sync_duration_secs = 10.0;
+        metrics.max_initial_sync_duration_secs = 20;
+
+        // Boundary conditions
+        assert_eq!(metrics.sync_duration_percentile(0.0), 5);
+        assert_eq!(metrics.sync_duration_percentile(100.0), 20);
+
+        // Percentiles
+        let p50 = metrics.sync_duration_percentile(50.0);
+        assert!((5..=20).contains(&p50), "P50 should be between min and max");
+
+        let p99 = metrics.sync_duration_percentile(99.0);
+        assert!(p99 > 10, "P99 should be closer to max than P50");
+    }
+
+    #[test]
+    fn test_has_anomaly_high_timeout_rate() {
+        let mut metrics = WarmRestartMetrics::new();
+        metrics.eoiu_detected_count = 10;
+        metrics.eoiu_timeout_count = 6; // > 50%
+        assert!(metrics.has_anomaly());
+    }
+
+    #[test]
+    fn test_has_anomaly_high_corruption_rate() {
+        let mut metrics = WarmRestartMetrics::new();
+        metrics.warm_restart_count = 10;
+        metrics.cold_start_count = 0;
+        metrics.corruption_detected_count = 10; // Every restart has corruption
+        assert!(metrics.has_anomaly());
+    }
+
+    #[test]
+    fn test_has_anomaly_extreme_sync_duration() {
+        let mut metrics = WarmRestartMetrics::new();
+        metrics.avg_initial_sync_duration_secs = 500.0; // > 300s
+        assert!(metrics.has_anomaly());
+    }
+
+    #[test]
+    fn test_has_anomaly_normal_state() {
+        let mut metrics = WarmRestartMetrics::new();
+        metrics.warm_restart_count = 100;
+        metrics.cold_start_count = 10;
+        metrics.eoiu_detected_count = 100;
+        metrics.eoiu_timeout_count = 5;
+        metrics.corruption_detected_count = 2;
+        metrics.state_recovery_count = 2;
+        metrics.avg_initial_sync_duration_secs = 12.5;
+        assert!(!metrics.has_anomaly());
     }
 
     // ========== TIMEOUT FUNCTIONALITY TESTS (Phase 6 Week 3) ==========
