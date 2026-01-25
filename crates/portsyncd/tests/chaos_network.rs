@@ -95,10 +95,13 @@ fn test_redis_timeout_handling() {
     chaos.simulate_failure(FailureMode::SlowResponses { latency_ms: 5000 });
 
     let failure_mode = chaos.get_failure_mode();
-    assert!(matches!(
-        failure_mode,
-        Some(FailureMode::SlowResponses { latency_ms: 5000 })
-    ), "Should detect slow responses");
+    assert!(
+        matches!(
+            failure_mode,
+            Some(FailureMode::SlowResponses { latency_ms: 5000 })
+        ),
+        "Should detect slow responses"
+    );
 }
 
 #[test]
@@ -111,10 +114,10 @@ fn test_partial_network_partition() {
     });
 
     let failure_mode = chaos.get_failure_mode();
-    assert!(matches!(
-        failure_mode,
-        Some(FailureMode::PartialFailure { .. })
-    ), "Should detect partial failure");
+    assert!(
+        matches!(failure_mode, Some(FailureMode::PartialFailure { .. })),
+        "Should detect partial failure"
+    );
 }
 
 // ============================================================================
@@ -148,7 +151,7 @@ fn test_alert_consistency_during_network_failure() {
         warm_restart_count: 10,
         cold_start_count: 5,
         eoiu_detected_count: 100,
-        eoiu_timeout_count: 60,  // Above threshold
+        eoiu_timeout_count: 60, // Above threshold
         state_recovery_count: 5,
         corruption_detected_count: 1,
         backup_created_count: 10,
@@ -170,8 +173,10 @@ fn test_alert_consistency_during_network_failure() {
     // Evaluate again - alert should remain in same state
     engine.evaluate(&metrics);
     let still_firing = engine.alerts_by_state(AlertState::Firing).len();
-    assert_eq!(still_firing, firing_count,
-               "Alert state should be consistent");
+    assert_eq!(
+        still_firing, firing_count,
+        "Alert state should be consistent"
+    );
 }
 
 #[test]
@@ -239,7 +244,10 @@ fn test_alert_state_after_forced_recovery() {
 
     engine.evaluate(&healthy_metrics);
     let alerts_after = engine.alerts_by_state(AlertState::Resolved);
-    assert!(!alerts_after.is_empty(), "Alert should resolve when condition clears");
+    assert!(
+        !alerts_after.is_empty(),
+        "Alert should resolve when condition clears"
+    );
 }
 
 // ============================================================================
@@ -290,8 +298,11 @@ fn test_recovery_time_objective_slo() {
     chaos.simulate_recovery();
     let recovery_time = failure_start.elapsed();
 
-    assert!(recovery_time < slo_deadline,
-            "Recovery should complete within SLO: {:?}", recovery_time);
+    assert!(
+        recovery_time < slo_deadline,
+        "Recovery should complete within SLO: {:?}",
+        recovery_time
+    );
 }
 
 #[test]
@@ -334,11 +345,16 @@ fn test_no_data_loss_during_network_partition() {
     engine.evaluate(&metrics_2);
 
     let alerts_during_partition = engine.alerts().len();
-    assert!(alerts_during_partition > 0, "Alerts should be tracked during partition");
+    assert!(
+        alerts_during_partition > 0,
+        "Alerts should be tracked during partition"
+    );
 
     // After recovery, all alerts should still be present
-    assert_eq!(alerts_during_partition, alerts_before_partition,
-               "No data loss during network partition");
+    assert_eq!(
+        alerts_during_partition, alerts_before_partition,
+        "No data loss during network partition"
+    );
 }
 
 // ============================================================================

@@ -87,16 +87,26 @@ fn test_metric_value_validation() {
     for (_case_name, metrics) in test_cases {
         // Health score should always be in [0, 100]
         let score = metrics.health_score();
-        assert!(score >= 0.0 && score <= 100.0, "Health score out of range: {}", score);
+        assert!(
+            score >= 0.0 && score <= 100.0,
+            "Health score out of range: {}",
+            score
+        );
 
         // Recovery and timeout rates are computed as raw percentages (may exceed 100)
         let recovery_rate = metrics.recovery_success_rate();
         assert!(!recovery_rate.is_nan(), "Recovery rate should not be NaN");
-        assert!(!recovery_rate.is_infinite(), "Recovery rate should not be infinite");
+        assert!(
+            !recovery_rate.is_infinite(),
+            "Recovery rate should not be infinite"
+        );
 
         let timeout_rate = metrics.eoiu_timeout_rate();
         assert!(!timeout_rate.is_nan(), "Timeout rate should not be NaN");
-        assert!(!timeout_rate.is_infinite(), "Timeout rate should not be infinite");
+        assert!(
+            !timeout_rate.is_infinite(),
+            "Timeout rate should not be infinite"
+        );
     }
 }
 
@@ -213,7 +223,10 @@ fn test_rule_enable_disable_authorization() {
 
     // Attempt to disable non-existent rule
     let disable_invalid = engine.set_rule_enabled("nonexistent", false);
-    assert!(!disable_invalid, "Should reject disable of non-existent rule");
+    assert!(
+        !disable_invalid,
+        "Should reject disable of non-existent rule"
+    );
 }
 
 // ============================================================================
@@ -319,7 +332,10 @@ fn test_alert_state_consistency() {
         // Unsuppress and verify state changes back
         engine.unsuppress_alert("state_test");
         let after_unsuppress = engine.alerts_by_state(AlertState::Firing);
-        assert!(after_unsuppress.len() > 0, "Should have firing alerts after unsuppress");
+        assert!(
+            after_unsuppress.len() > 0,
+            "Should have firing alerts after unsuppress"
+        );
     }
 }
 
@@ -376,9 +392,9 @@ fn test_invalid_metric_name_handling() {
 fn test_division_by_zero_protection() {
     // Verify metrics handle edge cases without panicking
     let edge_cases = vec![
-        (0, 0, 0),        // All zeros
-        (100, 0, 0),      // Only detected, no events
-        (1, 1, 0),        // Minimal values
+        (0, 0, 0),                      // All zeros
+        (100, 0, 0),                    // Only detected, no events
+        (1, 1, 0),                      // Minimal values
         (u64::MAX, u64::MAX, u64::MAX), // Large values
     ];
 
@@ -670,8 +686,14 @@ fn test_time_window_validity() {
     };
 
     // Time windows should be positive
-    assert!(rule.evaluation_window_secs > 0, "Evaluation window should be positive");
-    assert!(rule.for_duration_secs >= 0, "For duration should be non-negative");
+    assert!(
+        rule.evaluation_window_secs > 0,
+        "Evaluation window should be positive"
+    );
+    assert!(
+        rule.for_duration_secs >= 0,
+        "For duration should be non-negative"
+    );
 
     // For duration should not exceed evaluation window
     assert!(

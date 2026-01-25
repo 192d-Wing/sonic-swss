@@ -73,11 +73,7 @@ fn test_alert_evaluation_latency_p50() {
     let p50 = latencies[p50_idx];
 
     // P50 should be under 100 microseconds
-    assert!(
-        p50 < 100,
-        "P50 latency {} µs should be < 100 µs",
-        p50
-    );
+    assert!(p50 < 100, "P50 latency {} µs should be < 100 µs", p50);
 }
 
 #[test]
@@ -137,11 +133,7 @@ fn test_alert_evaluation_latency_p95() {
     let p95 = latencies[p95_idx];
 
     // P95 should be under 500 microseconds
-    assert!(
-        p95 < 500,
-        "P95 latency {} µs should be < 500 µs",
-        p95
-    );
+    assert!(p95 < 500, "P95 latency {} µs should be < 500 µs", p95);
 }
 
 #[test]
@@ -201,11 +193,7 @@ fn test_alert_evaluation_latency_p99() {
     let p99 = latencies[p99_idx];
 
     // P99 should be under 1000 microseconds (1ms)
-    assert!(
-        p99 < 1000,
-        "P99 latency {} µs should be < 1000 µs",
-        p99
-    );
+    assert!(p99 < 1000, "P99 latency {} µs should be < 1000 µs", p99);
 }
 
 // ============================================================================

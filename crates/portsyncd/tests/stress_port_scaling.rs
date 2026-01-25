@@ -126,7 +126,11 @@ fn test_100k_ports_health_distribution() {
     }
 
     // Verify we have 100K scores
-    assert_eq!(health_scores.len(), 100000, "Should have 100000 health scores");
+    assert_eq!(
+        health_scores.len(),
+        100000,
+        "Should have 100000 health scores"
+    );
 
     // Calculate basic statistics
     let sum: f64 = health_scores.iter().sum();
@@ -140,16 +144,16 @@ fn test_100k_ports_health_distribution() {
     );
 
     // Find min/max for sanity check
-    let min = health_scores
-        .iter()
-        .copied()
-        .fold(f64::INFINITY, f64::min);
+    let min = health_scores.iter().copied().fold(f64::INFINITY, f64::min);
     let max = health_scores
         .iter()
         .copied()
         .fold(f64::NEG_INFINITY, f64::max);
 
-    assert!(min >= 0.0 && max <= 100.0, "Health scores should be in [0, 100]");
+    assert!(
+        min >= 0.0 && max <= 100.0,
+        "Health scores should be in [0, 100]"
+    );
 }
 
 #[test]
@@ -284,11 +288,17 @@ fn test_metric_distribution_remains_valid() {
     }
 
     // At least one bucket should have data
-    assert!(!distribution.is_empty(), "Should have some health score data");
+    assert!(
+        !distribution.is_empty(),
+        "Should have some health score data"
+    );
 
     // Total should equal 10K
     let total: u32 = distribution.values().sum();
-    assert_eq!(total, 10000, "Distribution should account for all 10K ports");
+    assert_eq!(
+        total, 10000,
+        "Distribution should account for all 10K ports"
+    );
 }
 
 // ============================================================================

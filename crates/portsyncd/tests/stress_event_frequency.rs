@@ -131,10 +131,7 @@ fn test_1000_events_per_second_throughput() {
 
     // Verify alerts were generated
     let alerts = engine.alerts();
-    assert!(
-        alerts.len() > 0,
-        "Should generate alerts from 1000 events"
-    );
+    assert!(alerts.len() > 0, "Should generate alerts from 1000 events");
 }
 
 #[test]
@@ -313,10 +310,7 @@ fn test_sustained_5000_eps_for_10_seconds() {
         elapsed
     );
 
-    assert_eq!(
-        event_count, 50000,
-        "Should have processed all 50000 events"
-    );
+    assert_eq!(event_count, 50000, "Should have processed all 50000 events");
 }
 
 #[test]
@@ -372,7 +366,10 @@ fn test_alternating_severity_events() {
 
     // Verify alerts by severity
     let alerts_map = engine.alerts();
-    assert!(alerts_map.len() > 0, "Should have alerts from mixed severity events");
+    assert!(
+        alerts_map.len() > 0,
+        "Should have alerts from mixed severity events"
+    );
 
     // At least one should be critical
     let alerts: Vec<_> = alerts_map.values().collect();

@@ -8,8 +8,8 @@
 //! - Heat soaking validation
 
 use sonic_portsyncd::*;
-use std::time::Instant;
 use std::collections::HashMap;
+use std::time::Instant;
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -118,7 +118,8 @@ fn test_memory_stability_during_continuous_operation() {
             assert!(
                 last < first * 3.0,
                 "Memory usage grew from {} to {}, possible leak detected",
-                first, last
+                first,
+                last
             );
         }
     }
@@ -173,7 +174,10 @@ fn test_alert_state_consistency_over_time() {
     // Verify all states are valid (no invalid state values)
     for state in &state_history {
         match state {
-            AlertState::Pending | AlertState::Firing | AlertState::Resolved | AlertState::Suppressed => {
+            AlertState::Pending
+            | AlertState::Firing
+            | AlertState::Resolved
+            | AlertState::Suppressed => {
                 // Valid states
             }
         }
@@ -534,10 +538,10 @@ fn test_varying_metric_patterns_over_extended_period() {
     for iteration in 0..100_000 {
         // Mix different patterns
         let metrics = match iteration % 4 {
-            0 => create_healthy_metrics(iteration),           // Healthy
-            1 => create_degraded_metrics(iteration),          // Degraded
-            2 => create_degraded_metrics(iteration + 1),      // Degraded variant
-            _ => create_healthy_metrics(iteration + 1),       // Healthy variant
+            0 => create_healthy_metrics(iteration),      // Healthy
+            1 => create_degraded_metrics(iteration),     // Degraded
+            2 => create_degraded_metrics(iteration + 1), // Degraded variant
+            _ => create_healthy_metrics(iteration + 1),  // Healthy variant
         };
 
         engine.evaluate(&metrics);
@@ -755,7 +759,10 @@ fn test_state_machine_correctness_over_extended_operation() {
             let alerts = engine.alerts();
             for alert in alerts.values() {
                 match alert.state {
-                    AlertState::Pending | AlertState::Firing | AlertState::Resolved | AlertState::Suppressed => {
+                    AlertState::Pending
+                    | AlertState::Firing
+                    | AlertState::Resolved
+                    | AlertState::Suppressed => {
                         // Valid state
                     }
                 }

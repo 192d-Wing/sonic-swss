@@ -23,7 +23,7 @@ fn test_alert_state_machine_consistency() {
         threshold: 50.0,
         threshold_range: None,
         evaluation_window_secs: 300,
-        for_duration_secs: 0,  // Immediate firing for test
+        for_duration_secs: 0, // Immediate firing for test
         enabled: true,
         severity: AlertSeverity::Critical,
         actions: vec![],
@@ -73,7 +73,7 @@ fn test_alert_recovery_from_invalid_state() {
         rule_id: "invalid_metric_test".to_string(),
         name: "Invalid Metric Test".to_string(),
         description: "Test invalid metric handling".to_string(),
-        metric_name: "nonexistent_metric".to_string(),  // This metric doesn't exist
+        metric_name: "nonexistent_metric".to_string(), // This metric doesn't exist
         condition: AlertCondition::Above,
         threshold: 50.0,
         threshold_range: None,
@@ -106,7 +106,11 @@ fn test_alert_recovery_from_invalid_state() {
 
     // Should not panic, should handle gracefully
     let alerts = engine.evaluate(&metrics);
-    assert_eq!(alerts.len(), 0, "Non-existent metrics should not trigger alerts");
+    assert_eq!(
+        alerts.len(),
+        0,
+        "Non-existent metrics should not trigger alerts"
+    );
 }
 
 #[test]
@@ -162,14 +166,18 @@ fn test_state_consistency_with_alert_suppression() {
     // Evaluate again - should stay suppressed
     engine.evaluate(&metrics);
     let still_suppressed = engine.alerts_by_state(AlertState::Suppressed).len();
-    assert_eq!(suppressed_count, still_suppressed,
-               "Suppression state should be consistent");
+    assert_eq!(
+        suppressed_count, still_suppressed,
+        "Suppression state should be consistent"
+    );
 
     // Unsuppress alert
     engine.unsuppress_alert("suppression_test");
     let firing_again = engine.alerts_by_state(AlertState::Firing).len();
-    assert!(firing_again > 0,
-            "Alert should fire again after unsuppression");
+    assert!(
+        firing_again > 0,
+        "Alert should fire again after unsuppression"
+    );
 }
 
 #[test]
@@ -234,10 +242,18 @@ fn test_health_score_monotonicity_during_recovery() {
     let health_recovered = recovered.health_score();
 
     // Health should improve as system recovers
-    assert!(health_recovery > health_bad,
-            "Health should improve during recovery: {} > {}", health_recovery, health_bad);
-    assert!(health_recovered > health_recovery,
-            "Health should continue improving: {} > {}", health_recovered, health_recovery);
+    assert!(
+        health_recovery > health_bad,
+        "Health should improve during recovery: {} > {}",
+        health_recovery,
+        health_bad
+    );
+    assert!(
+        health_recovered > health_recovery,
+        "Health should continue improving: {} > {}",
+        health_recovered,
+        health_recovery
+    );
 }
 
 #[test]
@@ -290,6 +306,8 @@ fn test_alert_evaluation_determinism() {
     let alerts_1 = engine_1.alerts().len();
     let alerts_2 = engine_2.alerts().len();
 
-    assert_eq!(alerts_1, alerts_2,
-               "Alert evaluation should be deterministic");
+    assert_eq!(
+        alerts_1, alerts_2,
+        "Alert evaluation should be deterministic"
+    );
 }

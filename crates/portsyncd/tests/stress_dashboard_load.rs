@@ -53,8 +53,14 @@ impl DashboardSimulator {
         // Simulate query execution by filtering alerts
         let alerts_map = engine.alerts();
         let alerts: Vec<_> = alerts_map.values().collect();
-        let critical_count = alerts.iter().filter(|a| a.severity == AlertSeverity::Critical).count();
-        let warning_count = alerts.iter().filter(|a| a.severity == AlertSeverity::Warning).count();
+        let critical_count = alerts
+            .iter()
+            .filter(|a| a.severity == AlertSeverity::Critical)
+            .count();
+        let warning_count = alerts
+            .iter()
+            .filter(|a| a.severity == AlertSeverity::Warning)
+            .count();
 
         let response_time = start.elapsed().as_millis();
 
@@ -122,8 +128,14 @@ fn test_grafana_dashboard_with_10k_ports() {
     // Simulate dashboard query
     let start = Instant::now();
     let all_alerts = engine.alerts().values().collect::<Vec<_>>();
-    let critical = all_alerts.iter().filter(|a| a.severity == AlertSeverity::Critical).count();
-    let warning = all_alerts.iter().filter(|a| a.severity == AlertSeverity::Warning).count();
+    let critical = all_alerts
+        .iter()
+        .filter(|a| a.severity == AlertSeverity::Critical)
+        .count();
+    let warning = all_alerts
+        .iter()
+        .filter(|a| a.severity == AlertSeverity::Warning)
+        .count();
     let query_time = start.elapsed();
 
     // Dashboard query should complete in reasonable time (<100ms)
@@ -134,7 +146,10 @@ fn test_grafana_dashboard_with_10k_ports() {
     );
 
     // Should have found some alerts
-    assert!(critical > 0 || warning > 0, "Dashboard should find some alerts");
+    assert!(
+        critical > 0 || warning > 0,
+        "Dashboard should find some alerts"
+    );
 }
 
 #[test]
@@ -178,7 +193,10 @@ fn test_dashboard_query_filtering_100k_ports() {
 
     // Verify we got some results or alerts exist
     let all_alerts = engine.alerts().len();
-    assert!(all_alerts > 0 || critical_alerts.len() > 0, "Should have some alerts from 100K ports");
+    assert!(
+        all_alerts > 0 || critical_alerts.len() > 0,
+        "Should have some alerts from 100K ports"
+    );
 }
 
 #[test]
@@ -230,8 +248,14 @@ fn test_dashboard_aggregation_metrics() {
     // Aggregate alerts by severity
     let start = Instant::now();
     let all_alerts = engine.alerts().values().collect::<Vec<_>>();
-    let critical_count = all_alerts.iter().filter(|a| a.severity == AlertSeverity::Critical).count();
-    let warning_count = all_alerts.iter().filter(|a| a.severity == AlertSeverity::Warning).count();
+    let critical_count = all_alerts
+        .iter()
+        .filter(|a| a.severity == AlertSeverity::Critical)
+        .count();
+    let warning_count = all_alerts
+        .iter()
+        .filter(|a| a.severity == AlertSeverity::Warning)
+        .count();
     let agg_time = start.elapsed();
 
     assert!(
@@ -241,9 +265,15 @@ fn test_dashboard_aggregation_metrics() {
     );
 
     // Verify we have reasonable counts
-    assert!(critical_count > 0 || warning_count > 0, "Should have some alerts");
+    assert!(
+        critical_count > 0 || warning_count > 0,
+        "Should have some alerts"
+    );
     if critical_count > 0 && warning_count > 0 {
-        assert!(critical_count <= warning_count, "More warnings than critical expected");
+        assert!(
+            critical_count <= warning_count,
+            "More warnings than critical expected"
+        );
     }
 }
 
@@ -296,7 +326,10 @@ fn test_concurrent_dashboard_readers_10_users() {
         };
 
         let result = simulator.execute_query(&query);
-        assert!(result.response_time_ms < 100, "Each query should complete in <100ms");
+        assert!(
+            result.response_time_ms < 100,
+            "Each query should complete in <100ms"
+        );
 
         let mut results = simulator.query_results.lock().unwrap();
         results.insert(query.query_id.clone(), result);
@@ -313,11 +346,7 @@ fn test_concurrent_dashboard_readers_10_users() {
 
     // Verify all queries succeeded
     let results = simulator.query_results.lock().unwrap();
-    assert_eq!(
-        results.len(),
-        10,
-        "All 10 queries should have completed"
-    );
+    assert_eq!(results.len(), 10, "All 10 queries should have completed");
 }
 
 #[test]
