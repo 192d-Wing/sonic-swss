@@ -2262,6 +2262,30 @@ dependencies = [
 
 [[package]]
 name = "redis"
+version = "0.28.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e37ec3fd44bea2ec947ba6cc7634d7999a6590aca7c35827c250bc0de502bda6"
+dependencies = [
+ "arc-swap",
+ "backon",
+ "bytes",
+ "combine",
+ "futures-channel",
+ "futures-util",
+ "itoa",
+ "num-bigint",
+ "percent-encoding",
+ "pin-project-lite",
+ "ryu",
+ "sha1_smol",
+ "socket2 0.5.10",
+ "tokio",
+ "tokio-util",
+ "url",
+]
+
+[[package]]
+name = "redis"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5dfe20977fe93830c0e9817a16fbf1ed1cfd8d4bba366087a1841d2c6033c251"
@@ -2657,6 +2681,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "sonic-neighsyncd"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "mockall",
+ "netlink-packet-core 0.8.1",
+ "netlink-packet-route",
+ "netlink-sys",
+ "nix",
+ "redis 0.28.2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "sonic-orch-common"
 version = "0.1.0"
 dependencies = [
@@ -2710,7 +2757,7 @@ dependencies = [
  "nix",
  "parking_lot",
  "prometheus",
- "redis",
+ "redis 1.0.2",
  "sd-notify",
  "serde",
  "serde_json",

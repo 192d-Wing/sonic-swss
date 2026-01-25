@@ -1,0 +1,54 @@
+[package]
+name = "sonic-neighsyncd"
+version.workspace = true
+edition = "2024"
+rust-version = "1.85"
+authors.workspace = true
+description = "Neighbor synchronization daemon for SONiC - Rust rewrite (IPv6-only by default)"
+license.workspace = true
+
+[[bin]]
+name = "neighsyncd"
+path = "src/main.rs"
+
+[features]
+default = []
+# Enable IPv4/ARP neighbor discovery support (disabled by default)
+ipv4 = []
+# Enable both IPv4 and IPv6 (convenience feature)
+dual-stack = ["ipv4"]
+
+[dependencies]
+# Async runtime - use workspace version for compatibility
+tokio = { workspace = true }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Standard library extensions
+futures = "0.3"
+async-trait = "0.1"
+
+# Redis client for SWSS database
+redis = { version = "0.28", features = ["tokio-comp", "connection-manager"] }
+
+# Netlink for kernel socket integration - Linux only
+[target.'cfg(target_os = "linux")'.dependencies]
+netlink-packet-route = "0.28"
+netlink-packet-core = "0.8"
+netlink-sys = "0.8"
+nix = { version = "0.31", features = ["net", "socket"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockall = "0.14"
+tempfile = "3.15"
