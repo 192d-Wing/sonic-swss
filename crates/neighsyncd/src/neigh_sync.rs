@@ -7,7 +7,7 @@
 //! - CM-8: System Component Inventory - Track network neighbors
 
 use crate::error::{NeighsyncError, Result};
-use crate::netlink::NetlinkSocket;
+use crate::netlink::{AsyncNetlinkSocket, NetlinkSocket};
 use crate::redis_adapter::RedisAdapter;
 use crate::types::{MacAddress, NeighborEntry, NeighborMessageType, NeighborState};
 use std::collections::HashMap;
@@ -424,6 +424,343 @@ impl NeighSync {
     /// Get the netlink socket file descriptor for async polling
     pub fn netlink_fd(&self) -> i32 {
         self.netlink.as_raw_fd()
+    }
+
+    /// Check if warm restart is in progress
+    pub fn is_warm_restart_in_progress(&self) -> bool {
+        self.warm_restart.in_progress
+    }
+}
+
+/// Async NeighSync - Synchronizes kernel neighbor table to Redis using async I/O
+///
+/// # NIST Controls
+/// - SI-4(4): System Monitoring - Automated analysis of network events
+/// - AU-6: Audit Record Review - Neighbor changes available for analysis
+/// - SC-5: DoS Protection - Async I/O for efficient resource usage
+///
+/// # Performance (P2)
+/// Uses AsyncNetlinkSocket with epoll integration for efficient event-driven
+/// processing without busy-waiting or dedicated threads.
+pub struct AsyncNeighSync {
+    redis: RedisAdapter,
+    netlink: AsyncNetlinkSocket,
+    warm_restart: WarmRestartState,
+    is_dual_tor: bool,
+}
+
+impl AsyncNeighSync {
+    /// Create a new AsyncNeighSync instance
+    ///
+    /// # NIST Controls
+    /// - AC-3: Access Enforcement - Initialize with appropriate permissions
+    #[instrument(skip_all)]
+    pub async fn new(redis_host: &str, redis_port: u16) -> Result<Self> {
+        info!("Initializing AsyncNeighSync with epoll integration");
+
+        let redis = RedisAdapter::new(redis_host, redis_port).await?;
+        let netlink = AsyncNetlinkSocket::new()?;
+
+        let mut sync = Self {
+            redis,
+            netlink,
+            warm_restart: WarmRestartState::default(),
+            is_dual_tor: false,
+        };
+
+        // Check if this is a dual-ToR deployment
+        sync.is_dual_tor = sync.redis.is_dual_tor().await?;
+        info!(is_dual_tor = sync.is_dual_tor, "Detected deployment type");
+
+        Ok(sync)
+    }
+
+    /// Start warm restart handling if applicable
+    #[instrument(skip(self))]
+    pub async fn start_warm_restart(&mut self) -> Result<bool> {
+        self.warm_restart.cached_neighbors = self.redis.get_all_neighbors().await?;
+        self.warm_restart.in_progress = !self.warm_restart.cached_neighbors.is_empty();
+
+        if self.warm_restart.in_progress {
+            info!(
+                cached_count = self.warm_restart.cached_neighbors.len(),
+                "Warm restart initiated, cached existing neighbors"
+            );
+        }
+
+        Ok(self.warm_restart.in_progress)
+    }
+
+    /// Wait for neighbor restore to complete (during warm restart)
+    #[instrument(skip(self))]
+    pub async fn wait_for_restore(&mut self) -> Result<()> {
+        if !self.warm_restart.in_progress {
+            return Ok(());
+        }
+
+        let start = std::time::Instant::now();
+
+        loop {
+            if self.redis.is_neighbor_restore_done().await? {
+                info!(
+                    elapsed_secs = start.elapsed().as_secs(),
+                    "Neighbor restore completed"
+                );
+                return Ok(());
+            }
+
+            let elapsed = start.elapsed().as_secs();
+            if elapsed > RESTORE_NEIGH_WAIT_TIMEOUT_SECS {
+                return Err(NeighsyncError::WarmRestartTimeout(elapsed));
+            }
+
+            debug!(elapsed_secs = elapsed, "Waiting for neighbor restore");
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        }
+    }
+
+    /// Request initial neighbor table dump
+    #[instrument(skip(self))]
+    pub fn request_dump(&mut self) -> Result<()> {
+        info!("Requesting neighbor table dump");
+        self.netlink.request_dump()
+    }
+
+    /// Process incoming netlink events asynchronously
+    ///
+    /// # NIST Controls
+    /// - SI-4: System Monitoring - Process monitoring events
+    /// - AU-12: Audit Record Generation - Generate audit records
+    ///
+    /// # Performance (P2)
+    /// Uses async recv_events() which integrates with tokio's epoll loop,
+    /// yielding when no data is available instead of busy-waiting.
+    #[instrument(skip(self))]
+    pub async fn process_events(&mut self) -> Result<usize> {
+        let events = self.netlink.recv_events().await?;
+        let mut processed = 0;
+
+        for (msg_type, entry) in events {
+            if self.should_process_entry(&entry).await? {
+                self.handle_neighbor_event(msg_type, entry).await?;
+                processed += 1;
+            }
+        }
+
+        Ok(processed)
+    }
+
+    /// Process incoming netlink events with batched Redis operations
+    ///
+    /// # Performance (P2)
+    /// Combines async netlink with Redis pipelining for maximum throughput.
+    #[instrument(skip(self))]
+    pub async fn process_events_batched(&mut self) -> Result<usize> {
+        let events = self.netlink.recv_events().await?;
+
+        let mut batch_sets: Vec<NeighborEntry> = Vec::with_capacity(DEFAULT_BATCH_SIZE);
+        let mut batch_deletes: Vec<NeighborEntry> = Vec::with_capacity(DEFAULT_BATCH_SIZE);
+
+        for (msg_type, mut entry) in events {
+            if !self.should_process_entry(&entry).await? {
+                continue;
+            }
+
+            let is_delete = self.should_delete(&msg_type, &entry);
+
+            if self.is_dual_tor && !entry.state.is_resolved() && !is_delete {
+                entry.mac = MacAddress::ZERO;
+            }
+
+            if !is_delete && entry.mac.is_zero() && !self.is_dual_tor {
+                continue;
+            }
+            if !is_delete && entry.mac.is_broadcast() {
+                continue;
+            }
+
+            if self.warm_restart.in_progress {
+                let key = entry.redis_key();
+                self.warm_restart
+                    .pending_entries
+                    .push((key, entry, is_delete));
+                continue;
+            }
+
+            if is_delete {
+                batch_deletes.push(entry);
+            } else {
+                batch_sets.push(entry);
+            }
+        }
+
+        let total = batch_sets.len() + batch_deletes.len();
+
+        if !batch_sets.is_empty() {
+            info!(count = batch_sets.len(), "Batch setting neighbors");
+            self.redis.set_neighbors_batch(&batch_sets).await?;
+        }
+
+        if !batch_deletes.is_empty() {
+            info!(count = batch_deletes.len(), "Batch deleting neighbors");
+            self.redis.delete_neighbors_batch(&batch_deletes).await?;
+        }
+
+        Ok(total)
+    }
+
+    /// Check if a neighbor entry should be processed
+    async fn should_process_entry(&mut self, entry: &NeighborEntry) -> Result<bool> {
+        if entry.is_ipv6_multicast_link_local() {
+            debug!(ip = %entry.ip, "Ignoring IPv6 multicast link-local");
+            return Ok(false);
+        }
+
+        if entry.is_ipv6_link_local() {
+            let enabled = self
+                .redis
+                .is_ipv6_link_local_enabled(&entry.interface)
+                .await?;
+            if !enabled {
+                debug!(
+                    ip = %entry.ip,
+                    interface = %entry.interface,
+                    "Ignoring IPv6 link-local (not enabled on interface)"
+                );
+                return Ok(false);
+            }
+        }
+
+        #[cfg(feature = "ipv4")]
+        if entry.is_ipv4_link_local() && self.is_dual_tor {
+            debug!(ip = %entry.ip, "Ignoring IPv4 link-local on dual-ToR");
+            return Ok(false);
+        }
+
+        if entry.state == NeighborState::NoArp && !entry.externally_learned {
+            debug!(ip = %entry.ip, "Ignoring NOARP entry (not externally learned)");
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+
+    /// Handle a single neighbor event
+    async fn handle_neighbor_event(
+        &mut self,
+        msg_type: NeighborMessageType,
+        mut entry: NeighborEntry,
+    ) -> Result<()> {
+        let key = entry.redis_key();
+        let is_delete = self.should_delete(&msg_type, &entry);
+
+        if self.is_dual_tor && !entry.state.is_resolved() && !is_delete {
+            debug!(
+                ip = %entry.ip,
+                state = ?entry.state,
+                "Using zero MAC for unresolved neighbor on dual-ToR"
+            );
+            entry.mac = MacAddress::ZERO;
+        }
+
+        if !is_delete && entry.mac.is_zero() && !self.is_dual_tor {
+            debug!(ip = %entry.ip, "Ignoring add with zero MAC (non-dual-ToR)");
+            return Ok(());
+        }
+
+        if !is_delete && entry.mac.is_broadcast() {
+            debug!(ip = %entry.ip, "Ignoring broadcast MAC");
+            return Ok(());
+        }
+
+        if self.warm_restart.in_progress {
+            debug!(key, is_delete, "Caching event during warm restart");
+            self.warm_restart
+                .pending_entries
+                .push((key, entry, is_delete));
+            return Ok(());
+        }
+
+        if is_delete {
+            self.redis.delete_neighbor(&entry).await?;
+            info!(
+                interface = %entry.interface,
+                ip = %entry.ip,
+                "Deleted neighbor"
+            );
+        } else {
+            self.redis.set_neighbor(&entry).await?;
+            info!(
+                interface = %entry.interface,
+                ip = %entry.ip,
+                mac = %entry.mac,
+                "Set neighbor"
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Determine if this event should result in a delete
+    fn should_delete(&self, msg_type: &NeighborMessageType, entry: &NeighborEntry) -> bool {
+        match msg_type {
+            NeighborMessageType::Delete => true,
+            NeighborMessageType::New | NeighborMessageType::Get => {
+                if self.is_dual_tor {
+                    false
+                } else {
+                    matches!(
+                        entry.state,
+                        NeighborState::Incomplete | NeighborState::Failed
+                    )
+                }
+            }
+        }
+    }
+
+    /// Perform warm restart reconciliation
+    #[instrument(skip(self))]
+    pub async fn reconcile(&mut self) -> Result<()> {
+        if !self.warm_restart.in_progress {
+            return Ok(());
+        }
+
+        info!(
+            pending_count = self.warm_restart.pending_entries.len(),
+            cached_count = self.warm_restart.cached_neighbors.len(),
+            "Starting warm restart reconciliation"
+        );
+
+        let pending = std::mem::take(&mut self.warm_restart.pending_entries);
+        let mut batch_sets: Vec<NeighborEntry> = Vec::with_capacity(pending.len());
+        let mut batch_deletes: Vec<NeighborEntry> = Vec::with_capacity(pending.len() / 4);
+
+        for (_key, entry, is_delete) in pending {
+            if is_delete {
+                batch_deletes.push(entry);
+            } else {
+                batch_sets.push(entry);
+            }
+        }
+
+        if !batch_sets.is_empty() {
+            info!(count = batch_sets.len(), "Reconciling: batch set neighbors");
+            self.redis.set_neighbors_batch(&batch_sets).await?;
+        }
+
+        if !batch_deletes.is_empty() {
+            info!(
+                count = batch_deletes.len(),
+                "Reconciling: batch delete neighbors"
+            );
+            self.redis.delete_neighbors_batch(&batch_deletes).await?;
+        }
+
+        self.warm_restart.in_progress = false;
+        self.warm_restart.cached_neighbors.clear();
+
+        info!("Warm restart reconciliation complete");
+        Ok(())
     }
 
     /// Check if warm restart is in progress

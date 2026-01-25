@@ -20,8 +20,13 @@ mod linux {
     use netlink_packet_route::RouteNetlinkMessage;
     use netlink_packet_route::neighbour::{NeighbourAddress, NeighbourAttribute, NeighbourMessage};
     use netlink_sys::{Socket, SocketAddr, protocols::NETLINK_ROUTE};
+    #[cfg(not(feature = "perf-fxhash"))]
     use std::collections::HashMap;
     use std::net::IpAddr;
+
+    // Use FxHashMap when perf-fxhash feature is enabled for faster lookups
+    #[cfg(feature = "perf-fxhash")]
+    use rustc_hash::FxHashMap as HashMap;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     use tokio::io::unix::AsyncFd;
     use tracing::{debug, instrument, trace, warn};
@@ -41,6 +46,10 @@ mod linux {
     ///
     /// # NIST Controls
     /// - CM-8: System Component Inventory - Track interface names
+    ///
+    /// # Performance
+    /// When `perf-fxhash` feature is enabled, uses FxHashMap for 2-3x faster
+    /// lookups with small integer keys like interface indices.
     #[derive(Debug, Default)]
     pub struct InterfaceCache {
         cache: HashMap<u32, String>,

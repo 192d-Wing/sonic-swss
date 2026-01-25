@@ -9,8 +9,12 @@
 //! - CP-10: System Recovery - Warm restart support
 //! - SC-7: Boundary Protection - Network neighbor awareness
 //! - SI-4: System Monitoring - Real-time event processing
+//!
+//! # Performance
+//! Uses AsyncNeighSync with epoll-based async netlink I/O for efficient
+//! event processing without busy-waiting.
 
-use sonic_neighsyncd::{NeighSync, NeighsyncError, Result};
+use sonic_neighsyncd::{AsyncNeighSync, NeighsyncError, Result};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::signal;
@@ -73,15 +77,20 @@ fn init_logging() -> Result<()> {
 /// # NIST Controls
 /// - SI-4: System Monitoring - Event loop for monitoring
 /// - CP-10: System Recovery - Warm restart handling
+///
+/// # Performance
+/// Uses AsyncNeighSync with epoll-based async I/O. The netlink socket
+/// integrates with tokio's event loop, yielding when no data is available
+/// instead of busy-waiting.
 async fn run_daemon() -> Result<()> {
     // Setup signal handlers for graceful shutdown
     // NIST: AU-12 - Log shutdown events
     let shutdown = setup_signal_handlers();
 
-    // Initialize NeighSync
+    // Initialize AsyncNeighSync with epoll integration
     // NIST: AC-3 - Access enforcement via kernel permissions
-    let mut neigh_sync = NeighSync::new(REDIS_HOST, REDIS_PORT).await?;
-    info!("neighsyncd: Initialized NeighSync");
+    let mut neigh_sync = AsyncNeighSync::new(REDIS_HOST, REDIS_PORT).await?;
+    info!("neighsyncd: Initialized AsyncNeighSync with epoll integration");
 
     // Handle warm restart if applicable
     // NIST: CP-10 - System recovery
@@ -94,7 +103,7 @@ async fn run_daemon() -> Result<()> {
         info!("neighsyncd: Neighbor restore complete");
 
         // Start reconciliation timer
-        let reconcile_time = tokio::time::Instant::now()
+        let reconcile_deadline = tokio::time::Instant::now()
             + tokio::time::Duration::from_secs(WARMSTART_RECONCILE_TIMER_SECS);
 
         // Process events until reconciliation timer expires
@@ -105,16 +114,22 @@ async fn run_daemon() -> Result<()> {
             }
 
             // Check if reconciliation timer expired
-            if tokio::time::Instant::now() >= reconcile_time {
+            if tokio::time::Instant::now() >= reconcile_deadline {
                 info!("neighsyncd: Reconciliation timer expired");
                 neigh_sync.reconcile().await?;
                 break;
             }
 
-            // Process events with timeout
+            // Process events with timeout (async - yields when no data)
             tokio::select! {
-                _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
-                    let _ = neigh_sync.process_events().await;
+                biased;
+                result = neigh_sync.process_events_batched() => {
+                    if let Err(e) = result {
+                        warn!(error = %e, "neighsyncd: Error processing events during warm restart");
+                    }
+                }
+                _ = tokio::time::sleep_until(reconcile_deadline) => {
+                    // Timer expired, will be handled in next iteration
                 }
             }
         }
@@ -123,29 +138,38 @@ async fn run_daemon() -> Result<()> {
     // Request initial neighbor table dump
     // NIST: CM-8 - Initial inventory
     neigh_sync.request_dump()?;
-    info!("neighsyncd: Listening to neighbor events...");
+    info!("neighsyncd: Listening to neighbor events (async epoll mode)...");
 
-    // Main event loop
+    // Main event loop - true async, no polling!
     // NIST: SI-4 - Continuous monitoring
     loop {
-        if shutdown.load(Ordering::Relaxed) {
-            info!("neighsyncd: Received shutdown signal");
-            break;
-        }
-
-        // Process netlink events
         tokio::select! {
-            _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
-                match neigh_sync.process_events().await {
+            biased;
+            // Check shutdown first
+            _ = tokio::signal::ctrl_c() => {
+                info!("neighsyncd: Received SIGINT");
+                break;
+            }
+            // Process netlink events (async - waits via epoll)
+            result = neigh_sync.process_events_batched() => {
+                match result {
                     Ok(count) if count > 0 => {
                         info!(count, "neighsyncd: Processed neighbor events");
                     }
                     Ok(_) => {}
                     Err(e) => {
                         warn!(error = %e, "neighsyncd: Error processing events");
+                        // Brief pause on error to avoid tight loop
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     }
                 }
             }
+        }
+
+        // Check shutdown flag (set by signal handler)
+        if shutdown.load(Ordering::Relaxed) {
+            info!("neighsyncd: Received shutdown signal");
+            break;
         }
     }
 

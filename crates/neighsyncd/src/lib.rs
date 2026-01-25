@@ -54,7 +54,7 @@ pub mod redis_adapter;
 pub mod types;
 
 pub use error::{NeighsyncError, Result};
-pub use neigh_sync::NeighSync;
-pub use netlink::NetlinkSocket;
+pub use neigh_sync::{AsyncNeighSync, NeighSync};
+pub use netlink::{AsyncNetlinkSocket, NetlinkSocket};
 pub use redis_adapter::RedisAdapter;
 pub use types::{MacAddress, NeighborEntry, NeighborMessageType, NeighborState};
