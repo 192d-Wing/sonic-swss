@@ -547,13 +547,11 @@ impl WarmRestartManager {
                 continue;
             }
 
-            if let Ok(metadata) = fs::metadata(&path) {
-                if let Ok(modified) = metadata.modified() {
-                    if let Ok(elapsed) = modified.elapsed() {
+            if let Ok(metadata) = fs::metadata(&path)
+                && let Ok(modified) = metadata.modified()
+                    && let Ok(elapsed) = modified.elapsed() {
                         backups.push((path, elapsed.as_secs()));
                     }
-                }
-            }
         }
 
         // Sort by age (newest first) and delete oldest if we exceed max_backups
