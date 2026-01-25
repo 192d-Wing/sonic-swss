@@ -1,8 +1,8 @@
 //! FFI exports for NvgreOrch.
 
+use super::orch::{NvgreOrch, NvgreOrchConfig};
 use std::cell::RefCell;
 use std::ffi::{c_char, CStr};
-use super::orch::{NvgreOrch, NvgreOrchConfig};
 
 thread_local! {
     static NVGRE_ORCH: RefCell<Option<Box<NvgreOrch>>> = const { RefCell::new(None) };

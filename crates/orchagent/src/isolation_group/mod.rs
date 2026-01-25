@@ -23,5 +23,8 @@ mod orch;
 mod types;
 
 pub use ffi::{register_isolation_group_orch, unregister_isolation_group_orch};
-pub use orch::{IsolationGroupOrch, IsolationGroupOrchCallbacks, IsolationGroupOrchConfig, IsolationGroupOrchError, IsolationGroupOrchStats};
+pub use orch::{
+    IsolationGroupOrch, IsolationGroupOrchCallbacks, IsolationGroupOrchConfig,
+    IsolationGroupOrchError, IsolationGroupOrchStats,
+};
 pub use types::{IsolationGroupConfig, IsolationGroupEntry, IsolationGroupType};

@@ -1,9 +1,9 @@
 //! Fine-Grained Next Hop Group orchestration logic.
 
 use super::types::{FgNhgEntry, FgNhgPrefix, FgNhgStats};
-use std::collections::HashMap;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
 use crate::audit_log;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub enum FgNhgOrchError {
@@ -64,7 +64,11 @@ impl FgNhgOrch {
     }
 
     /// Create a fine-grained next hop group with audit logging.
-    pub fn create_fg_nhg(&mut self, prefix: FgNhgPrefix, entry: FgNhgEntry) -> Result<(), FgNhgOrchError> {
+    pub fn create_fg_nhg(
+        &mut self,
+        prefix: FgNhgPrefix,
+        entry: FgNhgEntry,
+    ) -> Result<(), FgNhgOrchError> {
         if self.nhgs.contains_key(&prefix) {
             let record = AuditRecord::new(
                 AuditCategory::ErrorCondition,
@@ -105,15 +109,22 @@ impl FgNhgOrch {
     }
 
     /// Update a fine-grained next hop group with audit logging.
-    pub fn update_fg_nhg(&mut self, prefix: FgNhgPrefix, entry: FgNhgEntry) -> Result<(), FgNhgOrchError> {
-        let old_entry = self.nhgs.get(&prefix)
+    pub fn update_fg_nhg(
+        &mut self,
+        prefix: FgNhgPrefix,
+        entry: FgNhgEntry,
+    ) -> Result<(), FgNhgOrchError> {
+        let old_entry = self
+            .nhgs
+            .get(&prefix)
             .ok_or_else(|| FgNhgOrchError::NhgNotFound(prefix.clone()))?;
 
         let old_member_count = old_entry.next_hops.len();
         let new_member_count = entry.next_hops.len();
 
         self.nhgs.insert(prefix.clone(), entry);
-        self.stats.stats.members_added += (new_member_count - old_member_count.min(new_member_count)) as u64;
+        self.stats.stats.members_added +=
+            (new_member_count - old_member_count.min(new_member_count)) as u64;
 
         let record = AuditRecord::new(
             AuditCategory::ResourceModify,
@@ -134,21 +145,20 @@ impl FgNhgOrch {
 
     /// Remove a fine-grained next hop group with audit logging.
     pub fn remove_fg_nhg(&mut self, prefix: &FgNhgPrefix) -> Result<(), FgNhgOrchError> {
-        let entry = self.nhgs.remove(prefix)
-            .ok_or_else(|| {
-                let record = AuditRecord::new(
-                    AuditCategory::ErrorCondition,
-                    "FgNhgOrch",
-                    format!("remove_fg_nhg_failed: {}", prefix.ip_prefix),
-                )
-                .with_outcome(AuditOutcome::Failure)
-                .with_object_id(&prefix.ip_prefix)
-                .with_object_type("fg_nhg")
-                .with_error("NHG not found");
-                audit_log!(record);
+        let entry = self.nhgs.remove(prefix).ok_or_else(|| {
+            let record = AuditRecord::new(
+                AuditCategory::ErrorCondition,
+                "FgNhgOrch",
+                format!("remove_fg_nhg_failed: {}", prefix.ip_prefix),
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&prefix.ip_prefix)
+            .with_object_type("fg_nhg")
+            .with_error("NHG not found");
+            audit_log!(record);
 
-                FgNhgOrchError::NhgNotFound(prefix.clone())
-            })?;
+            FgNhgOrchError::NhgNotFound(prefix.clone())
+        })?;
 
         self.stats.stats.nhgs_created -= 1;
         self.stats.stats.members_added -= entry.next_hops.len() as u64;

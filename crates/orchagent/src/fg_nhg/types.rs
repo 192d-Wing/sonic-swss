@@ -47,7 +47,11 @@ pub struct FgNextHop {
 
 impl FgNextHop {
     pub fn new(ip: String, interface: String, weight: u32) -> Self {
-        Self { ip, interface, weight }
+        Self {
+            ip,
+            interface,
+            weight,
+        }
     }
 }
 

@@ -1,25 +1,30 @@
 use std::process::{Command, Stdio};
-use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use std::time::Duration;
 use std::{net::SocketAddr, thread};
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use tokio::runtime::Builder;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::Instant;
 use tokio::task::spawn_blocking;
+use tokio::time::Instant;
 use tokio_stream::wrappers::TcpListenerStream;
-use tonic::{Request, Response, Status};
 use tonic::transport::Server;
+use tonic::{Request, Response, Status};
 
 use countersyncd::actor::counter_db::{CounterDBActor, CounterDBConfig};
 use countersyncd::actor::ipfix::IpfixActor;
 use countersyncd::actor::otel::{OtelActor, OtelActorConfig};
 use countersyncd::actor::stats_reporter::{OutputWriter, StatsReporterActor, StatsReporterConfig};
-use countersyncd::message::{buffer::SocketBufferMessage, ipfix::IPFixTemplatesMessage, saistats::SAIStatsMessage};
+use countersyncd::message::{
+    buffer::SocketBufferMessage, ipfix::IPFixTemplatesMessage, saistats::SAIStatsMessage,
+};
 
 mod ipfix_bench_data;
-use ipfix_bench_data::{PreparedDataset, datasets, randomize_record, rng_for_template};
+use ipfix_bench_data::{datasets, randomize_record, rng_for_template, PreparedDataset};
 
 const COUNTERS_DB_ID: i32 = 2;
 const SOCK_PATH: &str = "/var/run/redis/redis.sock";
@@ -36,18 +41,30 @@ struct MockMetricsService {
 }
 
 #[tonic::async_trait]
-impl opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server::MetricsService for MockMetricsService {
+impl opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server::MetricsService
+    for MockMetricsService
+{
     async fn export(
         &self,
-        _request: Request<opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest>,
-    ) -> Result<Response<opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse>, Status> {
+        _request: Request<
+            opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest,
+        >,
+    ) -> Result<
+        Response<opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse>,
+        Status,
+    > {
         self.exports.fetch_add(1, Ordering::Relaxed);
         Ok(Response::new(Default::default()))
     }
 }
 
 /// Start a mock OTLP collector on an ephemeral port, returning its endpoint and a shutdown handle.
-fn start_mock_collector() -> (String, oneshot::Sender<()>, thread::JoinHandle<()>, Arc<AtomicU64>) {
+fn start_mock_collector() -> (
+    String,
+    oneshot::Sender<()>,
+    thread::JoinHandle<()>,
+    Arc<AtomicU64>,
+) {
     let (addr_tx, addr_rx) = std::sync::mpsc::channel();
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let exports = Arc::new(AtomicU64::new(0));
@@ -113,8 +130,13 @@ fn seed_port_name_map(port_count: usize) {
     }
 }
 
-async fn run_end_to_end(prepared: PreparedDataset, endpoint: String, exports_counter: Arc<AtomicU64>) -> (Duration, usize, u64) {
-    let (template_tx, template_rx) = mpsc::channel::<IPFixTemplatesMessage>(prepared.template_messages.len() + 4);
+async fn run_end_to_end(
+    prepared: PreparedDataset,
+    endpoint: String,
+    exports_counter: Arc<AtomicU64>,
+) -> (Duration, usize, u64) {
+    let (template_tx, template_rx) =
+        mpsc::channel::<IPFixTemplatesMessage>(prepared.template_messages.len() + 4);
     let (buffer_tx, buffer_rx) = mpsc::channel::<SocketBufferMessage>(1024);
     let (counter_tx, counter_rx) = mpsc::channel::<SAIStatsMessage>(1024);
     let (otel_tx, otel_rx) = mpsc::channel::<SAIStatsMessage>(1024);
@@ -138,7 +160,8 @@ async fn run_end_to_end(prepared: PreparedDataset, endpoint: String, exports_cou
         interval: Duration::from_millis(100),
     };
     let counter_interval = counter_cfg.interval;
-    let counter_actor = CounterDBActor::new(counter_rx, counter_cfg).expect("create counter db actor");
+    let counter_actor =
+        CounterDBActor::new(counter_rx, counter_cfg).expect("create counter db actor");
     let counter_handle = tokio::spawn(async move { counter_actor.run().await });
 
     let otel_cfg = OtelActorConfig {
@@ -234,11 +257,10 @@ fn bench_end_to_end(c: &mut Criterion) {
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(60));
 
-    for spec in datasets()
-    {
+    for spec in datasets() {
         let bench_id = BenchmarkId::from_parameter(spec.name);
         group.throughput(Throughput::Elements(
-            spec.total_counters_per_iteration() as u64,
+            spec.total_counters_per_iteration() as u64
         ));
 
         let bench_spec = Arc::new(spec.clone());

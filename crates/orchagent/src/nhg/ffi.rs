@@ -1,8 +1,8 @@
 //! FFI exports for NhgOrch.
 
+use super::orch::{NhgOrch, NhgOrchConfig};
 use std::cell::RefCell;
 use std::ffi::{c_char, CStr};
-use super::orch::{NhgOrch, NhgOrchConfig};
 
 thread_local! {
     static NHG_ORCH: RefCell<Option<Box<NhgOrch>>> = const { RefCell::new(None) };

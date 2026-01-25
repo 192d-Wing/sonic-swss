@@ -172,9 +172,9 @@ impl ClearRequest {
         match self {
             Self::PgHeadroom => "SAI_INGRESS_PRIORITY_GROUP_STAT_XOFF_ROOM_WATERMARK_BYTES",
             Self::PgShared => "SAI_INGRESS_PRIORITY_GROUP_STAT_SHARED_WATERMARK_BYTES",
-            Self::QueueSharedUnicast
-            | Self::QueueSharedMulticast
-            | Self::QueueSharedAll => "SAI_QUEUE_STAT_SHARED_WATERMARK_BYTES",
+            Self::QueueSharedUnicast | Self::QueueSharedMulticast | Self::QueueSharedAll => {
+                "SAI_QUEUE_STAT_SHARED_WATERMARK_BYTES"
+            }
             Self::BufferPool => "SAI_BUFFER_POOL_STAT_WATERMARK_BYTES",
             Self::HeadroomPool => "SAI_BUFFER_POOL_STAT_XOFF_ROOM_WATERMARK_BYTES",
         }
@@ -320,8 +320,14 @@ mod tests {
         assert_eq!(WatermarkGroup::Queue.status_mask(), 0x01);
         assert_eq!(WatermarkGroup::PriorityGroup.status_mask(), 0x02);
 
-        assert_eq!("QUEUE_WATERMARK".parse::<WatermarkGroup>().unwrap(), WatermarkGroup::Queue);
-        assert_eq!("PG_WATERMARK".parse::<WatermarkGroup>().unwrap(), WatermarkGroup::PriorityGroup);
+        assert_eq!(
+            "QUEUE_WATERMARK".parse::<WatermarkGroup>().unwrap(),
+            WatermarkGroup::Queue
+        );
+        assert_eq!(
+            "PG_WATERMARK".parse::<WatermarkGroup>().unwrap(),
+            WatermarkGroup::PriorityGroup
+        );
     }
 
     #[test]
@@ -348,16 +354,34 @@ mod tests {
 
     #[test]
     fn test_watermark_table() {
-        assert_eq!("PERIODIC".parse::<WatermarkTable>().unwrap(), WatermarkTable::Periodic);
-        assert_eq!("PERSISTENT".parse::<WatermarkTable>().unwrap(), WatermarkTable::Persistent);
-        assert_eq!("USER".parse::<WatermarkTable>().unwrap(), WatermarkTable::User);
+        assert_eq!(
+            "PERIODIC".parse::<WatermarkTable>().unwrap(),
+            WatermarkTable::Periodic
+        );
+        assert_eq!(
+            "PERSISTENT".parse::<WatermarkTable>().unwrap(),
+            WatermarkTable::Persistent
+        );
+        assert_eq!(
+            "USER".parse::<WatermarkTable>().unwrap(),
+            WatermarkTable::User
+        );
     }
 
     #[test]
     fn test_clear_request() {
-        assert_eq!("PG_HEADROOM".parse::<ClearRequest>().unwrap(), ClearRequest::PgHeadroom);
-        assert_eq!("Q_SHARED_UNI".parse::<ClearRequest>().unwrap(), ClearRequest::QueueSharedUnicast);
-        assert_eq!("BUFFER_POOL".parse::<ClearRequest>().unwrap(), ClearRequest::BufferPool);
+        assert_eq!(
+            "PG_HEADROOM".parse::<ClearRequest>().unwrap(),
+            ClearRequest::PgHeadroom
+        );
+        assert_eq!(
+            "Q_SHARED_UNI".parse::<ClearRequest>().unwrap(),
+            ClearRequest::QueueSharedUnicast
+        );
+        assert_eq!(
+            "BUFFER_POOL".parse::<ClearRequest>().unwrap(),
+            ClearRequest::BufferPool
+        );
 
         assert_eq!(
             ClearRequest::PgHeadroom.stat_name(),

@@ -130,7 +130,10 @@ impl TwampUdpPort {
         if value == 862 || value == 863 || value >= 1025 {
             Ok(Self(value))
         } else {
-            Err(format!("UDP port {} invalid (must be 862, 863, or >= 1025)", value))
+            Err(format!(
+                "UDP port {} invalid (must be 862, 863, or >= 1025)",
+                value
+            ))
         }
     }
 

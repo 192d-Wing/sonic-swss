@@ -15,9 +15,9 @@ use crate::actor::{
     counter_db::{CounterDBActor, CounterDBConfig},
     data_netlink::{get_genl_family_group, DataNetlinkActor},
     ipfix::IpfixActor,
+    otel::{OtelActor, OtelActorConfig},
     stats_reporter::{ConsoleWriter, StatsReporterActor, StatsReporterConfig},
     swss::SwssActor,
-    otel::{OtelActor, OtelActorConfig},
 };
 
 // Internal exit codes
@@ -240,7 +240,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     info!(
         "Channel capacities - ipfix_records: {}, stats_reporter: {}, counter_db: {}, otel: {}",
-        args.data_netlink_capacity, args.stats_reporter_capacity, args.counter_db_capacity, args.otel_capacity
+        args.data_netlink_capacity,
+        args.stats_reporter_capacity,
+        args.counter_db_capacity,
+        args.otel_capacity
     );
 
     // Create communication channels between actors with configurable capacities
@@ -439,7 +442,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Handle results based on what actors were enabled
-    let all_successful = match (reporter_result.is_some(), counter_db_result.is_some(), otel_result.is_some()) {
+    let all_successful = match (
+        reporter_result.is_some(),
+        counter_db_result.is_some(),
+        otel_result.is_some(),
+    ) {
         (true, true, true) => {
             // All optional actors enabled
             matches!(

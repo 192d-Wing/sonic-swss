@@ -74,117 +74,114 @@ pub mod zmq;
 
 // Re-export commonly used types
 pub use sonic_orch_common::{
-    Consumer, ConsumerConfig, KeyOpFieldsValues, Operation,
-    Orch, OrchContext, TaskStatus, TaskResult,
-    SyncMap, RetryCache, Constraint,
+    Constraint, Consumer, ConsumerConfig, KeyOpFieldsValues, Operation, Orch, OrchContext,
+    RetryCache, SyncMap, TaskResult, TaskStatus,
 };
-pub use sonic_sai::{SaiError, SaiResult, PortOid, SwitchOid};
-pub use sonic_types::{MacAddress, IpAddress, IpPrefix, VlanId};
+pub use sonic_sai::{PortOid, SaiError, SaiResult, SwitchOid};
+pub use sonic_types::{IpAddress, IpPrefix, MacAddress, VlanId};
 
 // Re-export FlexCounterOrch and related types
 pub use flex_counter::{
-    FlexCounterCallbacks, FlexCounterError, FlexCounterGroup, FlexCounterGroupMap,
-    FlexCounterOrch, FlexCounterOrchConfig, FlexCounterPgStates, FlexCounterQueueStates,
-    PgConfigurations, QueueConfigurations, register_flex_counter_orch, unregister_flex_counter_orch,
+    register_flex_counter_orch, unregister_flex_counter_orch, FlexCounterCallbacks,
+    FlexCounterError, FlexCounterGroup, FlexCounterGroupMap, FlexCounterOrch,
+    FlexCounterOrchConfig, FlexCounterPgStates, FlexCounterQueueStates, PgConfigurations,
+    QueueConfigurations,
 };
 
 // Re-export RouteOrch and related types
 pub use route::{
-    NextHopFlags, NextHopGroupEntry, NextHopGroupKey, NextHopGroupTable, NextHopKey,
-    RouteEntry, RouteError, RouteKey, RouteNhg, RouteOrch, RouteOrchCallbacks, RouteOrchConfig,
-    RouteTables, register_route_orch, unregister_route_orch,
+    register_route_orch, unregister_route_orch, NextHopFlags, NextHopGroupEntry, NextHopGroupKey,
+    NextHopGroupTable, NextHopKey, RouteEntry, RouteError, RouteKey, RouteNhg, RouteOrch,
+    RouteOrchCallbacks, RouteOrchConfig, RouteTables,
 };
 
 // Re-export PortsOrch and related types
 pub use ports::{
-    Port, PortAdminState, PortConfig, PortConfigError, PortFecMode, PortOperState,
-    PortRole, PortsOrch, PortsOrchCallbacks, PortsOrchConfig, PortsOrchError, PortType,
-    QueueInfo, QueueType, SchedulerInfo, VlanTaggingMode, register_ports_orch, unregister_ports_orch,
+    register_ports_orch, unregister_ports_orch, Port, PortAdminState, PortConfig, PortConfigError,
+    PortFecMode, PortOperState, PortRole, PortType, PortsOrch, PortsOrchCallbacks, PortsOrchConfig,
+    PortsOrchError, QueueInfo, QueueType, SchedulerInfo, VlanTaggingMode,
 };
 
 // Re-export AclOrch and related types
 pub use acl::{
-    AclActionType, AclBindPointType, AclMatchField, AclMatchValue, AclOrch, AclOrchCallbacks,
-    AclOrchConfig, AclOrchError, AclPacketAction, AclPriority, AclRange,
-    AclRangeType, AclRedirectTarget, AclRule, AclRuleAction, AclRuleId, AclRuleMatch, AclRuleType,
-    AclStage, AclTable, AclTableConfig, AclTableId, AclTableType, AclTableTypeBuilder,
-    MetaDataValue, register_acl_orch, unregister_acl_orch,
+    register_acl_orch, unregister_acl_orch, AclActionType, AclBindPointType, AclMatchField,
+    AclMatchValue, AclOrch, AclOrchCallbacks, AclOrchConfig, AclOrchError, AclPacketAction,
+    AclPriority, AclRange, AclRangeType, AclRedirectTarget, AclRule, AclRuleAction, AclRuleId,
+    AclRuleMatch, AclRuleType, AclStage, AclTable, AclTableConfig, AclTableId, AclTableType,
+    AclTableTypeBuilder, MetaDataValue,
 };
 
 // Re-export VRFOrch and related types
 pub use vrf::{
-    L3VniEntry, VrfEntry, VrfId, VrfName, VrfOrch, VrfOrchCallbacks, VrfOrchConfig,
-    VrfOrchError, VrfVlanId, Vni, register_vrf_orch, unregister_vrf_orch,
+    register_vrf_orch, unregister_vrf_orch, L3VniEntry, Vni, VrfEntry, VrfId, VrfName, VrfOrch,
+    VrfOrchCallbacks, VrfOrchConfig, VrfOrchError, VrfVlanId,
 };
 
 // Re-export WatermarkOrch and related types
 pub use watermark::{
-    ClearRequest, WatermarkGroup, WatermarkOrch, WatermarkOrchCallbacks,
-    WatermarkOrchConfig, WatermarkOrchError, WatermarkStatus, WatermarkTable,
-    register_watermark_orch, unregister_watermark_orch,
+    register_watermark_orch, unregister_watermark_orch, ClearRequest, WatermarkGroup,
+    WatermarkOrch, WatermarkOrchCallbacks, WatermarkOrchConfig, WatermarkOrchError,
+    WatermarkStatus, WatermarkTable,
 };
 
 // Re-export CrmOrch and related types
 pub use crm::{
-    CrmOrch, CrmOrchCallbacks, CrmOrchConfig, CrmOrchError, CrmOrchStats,
-    CrmResourceCounter, CrmResourceEntry, CrmResourceStatus, CrmResourceType,
-    CrmThresholdField, CrmThresholdType, ThresholdCheck, register_crm_orch,
-    unregister_crm_orch,
+    register_crm_orch, unregister_crm_orch, CrmOrch, CrmOrchCallbacks, CrmOrchConfig, CrmOrchError,
+    CrmOrchStats, CrmResourceCounter, CrmResourceEntry, CrmResourceStatus, CrmResourceType,
+    CrmThresholdField, CrmThresholdType, ThresholdCheck,
 };
 
 // Re-export MlagOrch and related types
 pub use mlag::{
-    MlagIfUpdate, MlagIslUpdate, MlagOrch, MlagOrchCallbacks, MlagOrchConfig,
-    MlagOrchError, MlagOrchStats, MlagSubjectType, MlagUpdate, register_mlag_orch,
-    unregister_mlag_orch,
+    register_mlag_orch, unregister_mlag_orch, MlagIfUpdate, MlagIslUpdate, MlagOrch,
+    MlagOrchCallbacks, MlagOrchConfig, MlagOrchError, MlagOrchStats, MlagSubjectType, MlagUpdate,
 };
 
 // Re-export BfdOrch and related types
 pub use bfd::{
-    BfdOrch, BfdOrchCallbacks, BfdOrchConfig, BfdOrchError, BfdOrchStats,
-    BfdSessionConfig, BfdSessionInfo, BfdSessionKey, BfdSessionState, BfdSessionType,
-    BfdUpdate, register_bfd_orch, unregister_bfd_orch,
+    register_bfd_orch, unregister_bfd_orch, BfdOrch, BfdOrchCallbacks, BfdOrchConfig, BfdOrchError,
+    BfdOrchStats, BfdSessionConfig, BfdSessionInfo, BfdSessionKey, BfdSessionState, BfdSessionType,
+    BfdUpdate,
 };
 
 // Re-export SflowOrch and related types
 pub use sflow::{
-    PortSflowInfo, SampleDirection, SflowConfig, SflowOrch, SflowOrchCallbacks,
-    SflowOrchConfig, SflowOrchError, SflowOrchStats, SflowSession,
-    register_sflow_orch, unregister_sflow_orch,
+    register_sflow_orch, unregister_sflow_orch, PortSflowInfo, SampleDirection, SflowConfig,
+    SflowOrch, SflowOrchCallbacks, SflowOrchConfig, SflowOrchError, SflowOrchStats, SflowSession,
 };
 
 // Re-export PolicerOrch and related types
 pub use policer::{
-    ColorSource, MeterType, PacketAction, PolicerConfig, PolicerEntry, PolicerMode,
-    PolicerOrch, PolicerOrchCallbacks, PolicerOrchConfig, PolicerOrchError, PolicerOrchStats,
-    StormType, register_policer_orch, unregister_policer_orch,
+    register_policer_orch, unregister_policer_orch, ColorSource, MeterType, PacketAction,
+    PolicerConfig, PolicerEntry, PolicerMode, PolicerOrch, PolicerOrchCallbacks, PolicerOrchConfig,
+    PolicerOrchError, PolicerOrchStats, StormType,
 };
 
 // Re-export StpOrch and related types
 pub use stp::{
-    SaiStpPortState, StpInstanceEntry, StpOrch, StpOrchCallbacks, StpOrchConfig,
-    StpOrchError, StpOrchStats, StpPortIds, StpState, register_stp_orch, unregister_stp_orch,
+    register_stp_orch, unregister_stp_orch, SaiStpPortState, StpInstanceEntry, StpOrch,
+    StpOrchCallbacks, StpOrchConfig, StpOrchError, StpOrchStats, StpPortIds, StpState,
 };
 
 // Re-export NvgreOrch and related types
 pub use nvgre::{
-    MapType, NvgreTunnel, NvgreTunnelConfig, NvgreTunnelMapConfig, NvgreTunnelMapEntry,
-    NvgreOrch, NvgreOrchCallbacks, NvgreOrchConfig, NvgreOrchError, NvgreOrchStats,
-    TunnelSaiIds, NVGRE_VSID_MAX_VALUE, register_nvgre_orch, unregister_nvgre_orch,
+    register_nvgre_orch, unregister_nvgre_orch, MapType, NvgreOrch, NvgreOrchCallbacks,
+    NvgreOrchConfig, NvgreOrchError, NvgreOrchStats, NvgreTunnel, NvgreTunnelConfig,
+    NvgreTunnelMapConfig, NvgreTunnelMapEntry, TunnelSaiIds, NVGRE_VSID_MAX_VALUE,
 };
 
 // Re-export IsolationGroupOrch and related types
 pub use isolation_group::{
-    IsolationGroupConfig, IsolationGroupEntry, IsolationGroupOrch, IsolationGroupOrchCallbacks,
-    IsolationGroupOrchConfig, IsolationGroupOrchError, IsolationGroupOrchStats, IsolationGroupType,
-    register_isolation_group_orch, unregister_isolation_group_orch,
+    register_isolation_group_orch, unregister_isolation_group_orch, IsolationGroupConfig,
+    IsolationGroupEntry, IsolationGroupOrch, IsolationGroupOrchCallbacks, IsolationGroupOrchConfig,
+    IsolationGroupOrchError, IsolationGroupOrchStats, IsolationGroupType,
 };
 
 // Re-export DebugCounterOrch and related types
 pub use debug_counter::{
-    DebugCounterConfig, DebugCounterEntry, DebugCounterOrch, DebugCounterOrchCallbacks,
-    DebugCounterOrchConfig, DebugCounterOrchError, DebugCounterOrchStats, DebugCounterType,
-    DropReason, FreeCounter, register_debug_counter_orch, unregister_debug_counter_orch,
+    register_debug_counter_orch, unregister_debug_counter_orch, DebugCounterConfig,
+    DebugCounterEntry, DebugCounterOrch, DebugCounterOrchCallbacks, DebugCounterOrchConfig,
+    DebugCounterOrchError, DebugCounterOrchStats, DebugCounterType, DropReason, FreeCounter,
 };
 
 // Re-export TwampOrch and related types
@@ -199,9 +196,7 @@ pub use pfcwd::{
 };
 
 // Re-export NhgOrch and related types
-pub use nhg::{
-    LabelStack, NextHopGroupMember, NhgEntry,
-};
+pub use nhg::{LabelStack, NextHopGroupMember, NhgEntry};
 
 // Re-export TunnelDecapOrch and related types
 pub use tunnel_decap::{

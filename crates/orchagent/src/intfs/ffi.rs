@@ -1,7 +1,7 @@
 //! FFI exports for IntfsOrch.
 
-use std::cell::RefCell;
 use super::orch::{IntfsOrch, IntfsOrchConfig};
+use std::cell::RefCell;
 
 thread_local! {
     static INTFS_ORCH: RefCell<Option<Box<IntfsOrch>>> = const { RefCell::new(None) };

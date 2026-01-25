@@ -43,8 +43,12 @@ impl MacAddress {
     pub fn to_string(&self) -> String {
         format!(
             "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-            self.bytes[0], self.bytes[1], self.bytes[2],
-            self.bytes[3], self.bytes[4], self.bytes[5]
+            self.bytes[0],
+            self.bytes[1],
+            self.bytes[2],
+            self.bytes[3],
+            self.bytes[4],
+            self.bytes[5]
         )
     }
 
@@ -124,9 +128,16 @@ pub struct FdbFlushStats {
 impl Clone for FdbFlushStats {
     fn clone(&self) -> Self {
         Self {
-            port_flushes: AtomicU32::new(self.port_flushes.load(std::sync::atomic::Ordering::Relaxed)),
-            vlan_flushes: AtomicU32::new(self.vlan_flushes.load(std::sync::atomic::Ordering::Relaxed)),
-            total_entries_flushed: AtomicU32::new(self.total_entries_flushed.load(std::sync::atomic::Ordering::Relaxed)),
+            port_flushes: AtomicU32::new(
+                self.port_flushes.load(std::sync::atomic::Ordering::Relaxed),
+            ),
+            vlan_flushes: AtomicU32::new(
+                self.vlan_flushes.load(std::sync::atomic::Ordering::Relaxed),
+            ),
+            total_entries_flushed: AtomicU32::new(
+                self.total_entries_flushed
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            ),
         }
     }
 }

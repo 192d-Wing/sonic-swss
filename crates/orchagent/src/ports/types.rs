@@ -331,9 +331,18 @@ mod tests {
 
     #[test]
     fn test_vlan_tagging_mode_parse() {
-        assert_eq!("tagged".parse::<VlanTaggingMode>().unwrap(), VlanTaggingMode::Tagged);
-        assert_eq!("untagged".parse::<VlanTaggingMode>().unwrap(), VlanTaggingMode::Untagged);
-        assert_eq!("priority_tagged".parse::<VlanTaggingMode>().unwrap(), VlanTaggingMode::PriorityTagged);
+        assert_eq!(
+            "tagged".parse::<VlanTaggingMode>().unwrap(),
+            VlanTaggingMode::Tagged
+        );
+        assert_eq!(
+            "untagged".parse::<VlanTaggingMode>().unwrap(),
+            VlanTaggingMode::Untagged
+        );
+        assert_eq!(
+            "priority_tagged".parse::<VlanTaggingMode>().unwrap(),
+            VlanTaggingMode::PriorityTagged
+        );
         assert!("invalid".parse::<VlanTaggingMode>().is_err());
     }
 

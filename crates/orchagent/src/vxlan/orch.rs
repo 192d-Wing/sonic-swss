@@ -1,9 +1,12 @@
 //! VXLAN orchestration logic.
 
-use super::types::{VxlanStats, VxlanTunnelEntry, VxlanTunnelKey, VxlanVlanMapEntry, VxlanVlanMapKey, VxlanVrfMapEntry, VxlanVrfMapKey};
-use std::collections::HashMap;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
+use super::types::{
+    VxlanStats, VxlanTunnelEntry, VxlanTunnelKey, VxlanVlanMapEntry, VxlanVlanMapKey,
+    VxlanVrfMapEntry, VxlanVrfMapKey,
+};
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
 use crate::audit_log;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum VxlanOrchError {
@@ -84,45 +87,46 @@ impl VxlanOrch {
         self.stats.stats.tunnels_created = self.stats.stats.tunnels_created.saturating_add(1);
         self.tunnels.insert(key, entry.clone());
 
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceCreate,
-            "VxlanOrch",
-            "create_tunnel"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(entry.config.tunnel_name.clone())
-        .with_object_type("vxlan_tunnel")
-        .with_details(serde_json::json!({
-            "tunnel_name": entry.config.tunnel_name,
-            "src_ip": entry.config.src_ip.to_string(),
-            "dst_ip": entry.config.dst_ip.to_string(),
-            "tunnel_oid": entry.tunnel_oid,
-            "stats": {
-                "tunnels_created": self.stats.stats.tunnels_created
-            }
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "VxlanOrch", "create_tunnel")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(entry.config.tunnel_name.clone())
+                .with_object_type("vxlan_tunnel")
+                .with_details(serde_json::json!({
+                    "tunnel_name": entry.config.tunnel_name,
+                    "src_ip": entry.config.src_ip.to_string(),
+                    "dst_ip": entry.config.dst_ip.to_string(),
+                    "tunnel_oid": entry.tunnel_oid,
+                    "stats": {
+                        "tunnels_created": self.stats.stats.tunnels_created
+                    }
+                }))
+        );
 
         Ok(())
     }
 
-    pub fn remove_tunnel(&mut self, key: &VxlanTunnelKey) -> Result<VxlanTunnelEntry, VxlanOrchError> {
-        let entry = self.tunnels.remove(key)
+    pub fn remove_tunnel(
+        &mut self,
+        key: &VxlanTunnelKey,
+    ) -> Result<VxlanTunnelEntry, VxlanOrchError> {
+        let entry = self
+            .tunnels
+            .remove(key)
             .ok_or_else(|| VxlanOrchError::TunnelNotFound(key.clone()))?;
 
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceDelete,
-            "VxlanOrch",
-            "remove_tunnel"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(entry.config.tunnel_name.clone())
-        .with_object_type("vxlan_tunnel")
-        .with_details(serde_json::json!({
-            "tunnel_name": entry.config.tunnel_name,
-            "src_ip": entry.config.src_ip.to_string(),
-            "dst_ip": entry.config.dst_ip.to_string(),
-            "tunnel_oid": entry.tunnel_oid
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceDelete, "VxlanOrch", "remove_tunnel")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(entry.config.tunnel_name.clone())
+                .with_object_type("vxlan_tunnel")
+                .with_details(serde_json::json!({
+                    "tunnel_name": entry.config.tunnel_name,
+                    "src_ip": entry.config.src_ip.to_string(),
+                    "dst_ip": entry.config.dst_ip.to_string(),
+                    "tunnel_oid": entry.tunnel_oid
+                }))
+        );
 
         Ok(entry)
     }
@@ -166,9 +170,15 @@ impl VxlanOrch {
         Ok(())
     }
 
-    pub fn remove_vrf_map(&mut self, vni: u32, vrf_name: &str) -> Result<VxlanVrfMapEntry, VxlanOrchError> {
+    pub fn remove_vrf_map(
+        &mut self,
+        vni: u32,
+        vrf_name: &str,
+    ) -> Result<VxlanVrfMapEntry, VxlanOrchError> {
         let key = VxlanVrfMapKey::new(vni, vrf_name.to_string());
-        let entry = self.vrf_maps.remove(&key)
+        let entry = self
+            .vrf_maps
+            .remove(&key)
             .ok_or_else(|| VxlanOrchError::VrfMapNotFound(vni, vrf_name.to_string()))?;
 
         audit_log!(AuditRecord::new(
@@ -177,7 +187,7 @@ impl VxlanOrch {
             "remove_vrf_vxlan_map"
         )
         .with_outcome(AuditOutcome::Success)
-        .with_object_id(format!("vrf_map_{}_{}",vni, vrf_name))
+        .with_object_id(format!("vrf_map_{}_{}", vni, vrf_name))
         .with_object_type("vrf_vxlan_map")
         .with_details(serde_json::json!({
             "vni": vni,
@@ -234,9 +244,15 @@ impl VxlanOrch {
         Ok(())
     }
 
-    pub fn remove_vlan_map(&mut self, vni: u32, vlan_id: u16) -> Result<VxlanVlanMapEntry, VxlanOrchError> {
+    pub fn remove_vlan_map(
+        &mut self,
+        vni: u32,
+        vlan_id: u16,
+    ) -> Result<VxlanVlanMapEntry, VxlanOrchError> {
         let key = VxlanVlanMapKey::new(vni, vlan_id);
-        let entry = self.vlan_maps.remove(&key)
+        let entry = self
+            .vlan_maps
+            .remove(&key)
             .ok_or_else(|| VxlanOrchError::VlanMapNotFound(vni, vlan_id))?;
 
         audit_log!(AuditRecord::new(
@@ -264,12 +280,14 @@ impl VxlanOrch {
     }
 
     pub fn get_maps_by_vni(&self, vni: u32) -> (Vec<&VxlanVrfMapEntry>, Vec<&VxlanVlanMapEntry>) {
-        let vrf_maps: Vec<_> = self.vrf_maps
+        let vrf_maps: Vec<_> = self
+            .vrf_maps
             .values()
             .filter(|entry| entry.key.vni == vni)
             .collect();
 
-        let vlan_maps: Vec<_> = self.vlan_maps
+        let vlan_maps: Vec<_> = self
+            .vlan_maps
             .values()
             .filter(|entry| entry.key.vni == vni)
             .collect();
@@ -307,15 +325,16 @@ mod tests {
     }
 
     fn create_test_vrf_map(vni: u32, vrf_name: &str) -> VxlanVrfMapEntry {
-        super::super::types::VxlanVrfMapEntry::new(
-            super::super::types::VxlanVrfMapKey::new(vni, vrf_name.to_string())
-        )
+        super::super::types::VxlanVrfMapEntry::new(super::super::types::VxlanVrfMapKey::new(
+            vni,
+            vrf_name.to_string(),
+        ))
     }
 
     fn create_test_vlan_map(vni: u32, vlan_id: u16) -> VxlanVlanMapEntry {
-        super::super::types::VxlanVlanMapEntry::new(
-            super::super::types::VxlanVlanMapKey::new(vni, vlan_id)
-        )
+        super::super::types::VxlanVlanMapEntry::new(super::super::types::VxlanVlanMapKey::new(
+            vni, vlan_id,
+        ))
     }
 
     #[test]
@@ -366,7 +385,10 @@ mod tests {
 
         let result = orch.remove_tunnel(&key);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), VxlanOrchError::TunnelNotFound(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            VxlanOrchError::TunnelNotFound(_)
+        ));
     }
 
     #[test]
@@ -410,7 +432,10 @@ mod tests {
         let mut orch = VxlanOrch::new(VxlanOrchConfig::default());
         let result = orch.remove_vrf_map(1000, "Vrf_default");
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), VxlanOrchError::VrfMapNotFound(_, _)));
+        assert!(matches!(
+            result.unwrap_err(),
+            VxlanOrchError::VrfMapNotFound(_, _)
+        ));
     }
 
     #[test]

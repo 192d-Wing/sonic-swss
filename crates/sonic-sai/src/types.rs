@@ -153,7 +153,11 @@ define_object_kind!(VirtualRouterKind, "VirtualRouter", VirtualRouterOid);
 define_object_kind!(RouterInterfaceKind, "RouterInterface", RouterInterfaceOid);
 define_object_kind!(NextHopKind, "NextHop", NextHopOid);
 define_object_kind!(NextHopGroupKind, "NextHopGroup", NextHopGroupOid);
-define_object_kind!(NextHopGroupMemberKind, "NextHopGroupMember", NextHopGroupMemberOid);
+define_object_kind!(
+    NextHopGroupMemberKind,
+    "NextHopGroupMember",
+    NextHopGroupMemberOid
+);
 define_object_kind!(AclTableKind, "AclTable", AclTableOid);
 define_object_kind!(AclEntryKind, "AclEntry", AclEntryOid);
 define_object_kind!(AclCounterKind, "AclCounter", AclCounterOid);
@@ -171,7 +175,11 @@ define_object_kind!(BufferProfileKind, "BufferProfile", BufferProfileOid);
 define_object_kind!(QueueKind, "Queue", QueueOid);
 define_object_kind!(SchedulerKind, "Scheduler", SchedulerOid);
 define_object_kind!(SchedulerGroupKind, "SchedulerGroup", SchedulerGroupOid);
-define_object_kind!(IngressPriorityGroupKind, "IngressPriorityGroup", IngressPriorityGroupOid);
+define_object_kind!(
+    IngressPriorityGroupKind,
+    "IngressPriorityGroup",
+    IngressPriorityGroupOid
+);
 define_object_kind!(TunnelKind, "Tunnel", TunnelOid);
 define_object_kind!(TunnelMapKind, "TunnelMap", TunnelMapOid);
 define_object_kind!(TunnelMapEntryKind, "TunnelMapEntry", TunnelMapEntryOid);

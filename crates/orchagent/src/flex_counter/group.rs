@@ -180,11 +180,7 @@ impl FlexCounterGroup {
     pub fn supports_gearbox(&self) -> bool {
         matches!(
             self,
-            Self::Port
-                | Self::PortRates
-                | Self::MacsecSa
-                | Self::MacsecSaAttr
-                | Self::MacsecFlow
+            Self::Port | Self::PortRates | Self::MacsecSa | Self::MacsecSaAttr | Self::MacsecFlow
         )
     }
 }
@@ -316,9 +312,18 @@ mod tests {
 
     #[test]
     fn test_group_from_str() {
-        assert_eq!("PORT".parse::<FlexCounterGroup>().unwrap(), FlexCounterGroup::Port);
-        assert_eq!("QUEUE".parse::<FlexCounterGroup>().unwrap(), FlexCounterGroup::Queue);
-        assert_eq!("PFCWD".parse::<FlexCounterGroup>().unwrap(), FlexCounterGroup::Pfcwd);
+        assert_eq!(
+            "PORT".parse::<FlexCounterGroup>().unwrap(),
+            FlexCounterGroup::Port
+        );
+        assert_eq!(
+            "QUEUE".parse::<FlexCounterGroup>().unwrap(),
+            FlexCounterGroup::Queue
+        );
+        assert_eq!(
+            "PFCWD".parse::<FlexCounterGroup>().unwrap(),
+            FlexCounterGroup::Pfcwd
+        );
 
         assert!("INVALID".parse::<FlexCounterGroup>().is_err());
     }
@@ -326,13 +331,19 @@ mod tests {
     #[test]
     fn test_group_sai_name() {
         assert_eq!(FlexCounterGroup::Port.sai_group_name(), "PORT_STAT_COUNTER");
-        assert_eq!(FlexCounterGroup::Queue.sai_group_name(), "QUEUE_STAT_COUNTER");
+        assert_eq!(
+            FlexCounterGroup::Queue.sai_group_name(),
+            "QUEUE_STAT_COUNTER"
+        );
     }
 
     #[test]
     fn test_group_redis_key() {
         assert_eq!(FlexCounterGroup::Port.redis_key(), "PORT");
-        assert_eq!(FlexCounterGroup::QueueWatermark.redis_key(), "QUEUE_WATERMARK");
+        assert_eq!(
+            FlexCounterGroup::QueueWatermark.redis_key(),
+            "QUEUE_WATERMARK"
+        );
     }
 
     #[test]

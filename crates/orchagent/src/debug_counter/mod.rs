@@ -25,5 +25,8 @@ mod orch;
 mod types;
 
 pub use ffi::{register_debug_counter_orch, unregister_debug_counter_orch};
-pub use orch::{DebugCounterOrch, DebugCounterOrchCallbacks, DebugCounterOrchConfig, DebugCounterOrchError, DebugCounterOrchStats};
+pub use orch::{
+    DebugCounterOrch, DebugCounterOrchCallbacks, DebugCounterOrchConfig, DebugCounterOrchError,
+    DebugCounterOrchStats,
+};
 pub use types::{DebugCounterConfig, DebugCounterEntry, DebugCounterType, DropReason, FreeCounter};

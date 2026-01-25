@@ -31,7 +31,7 @@ use super::table_type::{
 };
 use super::types::{AclPriority, AclStage, AclTableId, MetaDataValue};
 use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
-use crate::{audit_log, debug_log, info_log, warn_log, error_log};
+use crate::{audit_log, debug_log, error_log, info_log, warn_log};
 
 /// Error type for AclOrch operations with NIST-compliant error messages.
 #[derive(Debug, Clone, Error)]
@@ -77,8 +77,7 @@ pub struct AclOrchCallbacks {
     /// Get port OID by alias.
     pub get_port_oid: Option<Arc<dyn Fn(&str) -> Option<RawSaiObjectId> + Send + Sync>>,
     /// Get mirror session OID by name.
-    pub get_mirror_session_oid:
-        Option<Arc<dyn Fn(&str) -> Option<RawSaiObjectId> + Send + Sync>>,
+    pub get_mirror_session_oid: Option<Arc<dyn Fn(&str) -> Option<RawSaiObjectId> + Send + Sync>>,
     /// Increment mirror session reference.
     pub incr_mirror_ref: Option<Arc<dyn Fn(&str) + Send + Sync>>,
     /// Decrement mirror session reference.
@@ -95,7 +94,10 @@ impl std::fmt::Debug for AclOrchCallbacks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AclOrchCallbacks")
             .field("get_port_oid", &self.get_port_oid.is_some())
-            .field("get_mirror_session_oid", &self.get_mirror_session_oid.is_some())
+            .field(
+                "get_mirror_session_oid",
+                &self.get_mirror_session_oid.is_some(),
+            )
             .finish()
     }
 }
@@ -317,14 +319,12 @@ impl AclOrch {
 
         if let Err(e) = config.validate() {
             error_log!("AclOrch", table_id = %table_id, error = %e, "ACL table configuration validation failed");
-            audit_log!(AuditRecord::new(
-                AuditCategory::ResourceCreate,
-                "AclOrch",
-                "create_table"
-            )
-            .with_object_id(format!("table:{}", table_id))
-            .with_object_type("ACL_TABLE")
-            .with_error(format!("Configuration validation failed: {}", e)));
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "AclOrch", "create_table")
+                    .with_object_id(format!("table:{}", table_id))
+                    .with_object_type("ACL_TABLE")
+                    .with_error(format!("Configuration validation failed: {}", e))
+            );
             return Err(AclOrchError::InvalidConfig(e));
         }
 
@@ -333,29 +333,27 @@ impl AclOrch {
         // Check if table already exists
         if self.tables.contains_key(&table_id) {
             warn_log!("AclOrch", table_id = %table_id, "ACL table already exists");
-            audit_log!(AuditRecord::new(
-                AuditCategory::ResourceCreate,
-                "AclOrch",
-                "create_table"
-            )
-            .with_object_id(format!("table:{}", table_id))
-            .with_object_type("ACL_TABLE")
-            .with_error(format!("Table already exists: {}", table_id)));
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "AclOrch", "create_table")
+                    .with_object_id(format!("table:{}", table_id))
+                    .with_object_type("ACL_TABLE")
+                    .with_error(format!("Table already exists: {}", table_id))
+            );
             return Err(AclOrchError::TableAlreadyExists(table_id));
         }
 
         // Check resource limits
         if self.tables.len() >= self.config.max_tables {
             error_log!("AclOrch", "ACL table resource limit reached");
-            audit_log!(AuditRecord::new(
-                AuditCategory::ErrorCondition,
-                "AclOrch",
-                "create_table"
-            )
-            .with_object_id(format!("table:{}", table_id))
-            .with_object_type("ACL_TABLE")
-            .with_error("Maximum number of ACL tables reached".to_string()));
-            return Err(AclOrchError::ResourceExhausted("Max tables reached".to_string()));
+            audit_log!(
+                AuditRecord::new(AuditCategory::ErrorCondition, "AclOrch", "create_table")
+                    .with_object_id(format!("table:{}", table_id))
+                    .with_object_type("ACL_TABLE")
+                    .with_error("Maximum number of ACL tables reached".to_string())
+            );
+            return Err(AclOrchError::ResourceExhausted(
+                "Max tables reached".to_string(),
+            ));
         }
 
         // Get table type
@@ -369,19 +367,16 @@ impl AclOrch {
             .clone();
 
         // Create table
-        let table = AclTable::from_config(config, table_type)
-            .map_err(|e| {
-                error_log!("AclOrch", table_id = %table_id, error = %e, "ACL table validation error");
-                audit_log!(AuditRecord::new(
-                    AuditCategory::ResourceCreate,
-                    "AclOrch",
-                    "create_table"
-                )
-                .with_object_id(format!("table:{}", table_id))
-                .with_object_type("ACL_TABLE")
-                .with_error(format!("Table validation failed: {}", e)));
-                AclOrchError::ValidationError(e)
-            })?;
+        let table = AclTable::from_config(config, table_type).map_err(|e| {
+            error_log!("AclOrch", table_id = %table_id, error = %e, "ACL table validation error");
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "AclOrch", "create_table")
+                    .with_object_id(format!("table:{}", table_id))
+                    .with_object_type("ACL_TABLE")
+                    .with_error(format!("Table validation failed: {}", e))
+            );
+            AclOrchError::ValidationError(e)
+        })?;
 
         // In a real implementation, we would call SAI here to create the table
         // For now, just store it
@@ -389,21 +384,19 @@ impl AclOrch {
         self.stats.tables_created += 1;
 
         info_log!("AclOrch", table_id = %table_id, stage = ?table.stage, table_type = %type_name, "ACL table created successfully");
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceCreate,
-            "AclOrch",
-            "create_table"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(format!("table:{}", table_id))
-        .with_object_type("ACL_TABLE")
-        .with_details(serde_json::json!({
-            "table_id": table_id,
-            "table_type": type_name,
-            "stage": format!("{:?}", table.stage),
-            "priority_min": self.config.min_priority,
-            "priority_max": self.config.max_priority
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "AclOrch", "create_table")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("table:{}", table_id))
+                .with_object_type("ACL_TABLE")
+                .with_details(serde_json::json!({
+                    "table_id": table_id,
+                    "table_type": type_name,
+                    "stage": format!("{:?}", table.stage),
+                    "priority_min": self.config.min_priority,
+                    "priority_max": self.config.max_priority
+                }))
+        );
 
         Ok(())
     }
@@ -412,21 +405,16 @@ impl AclOrch {
     pub fn remove_table(&mut self, table_id: &str) -> Result<()> {
         debug_log!("AclOrch", table_id = %table_id, "Removing ACL table");
 
-        let table = self
-            .tables
-            .remove(&table_id.to_string())
-            .ok_or_else(|| {
-                warn_log!("AclOrch", table_id = %table_id, "ACL table not found for deletion");
-                audit_log!(AuditRecord::new(
-                    AuditCategory::ResourceDelete,
-                    "AclOrch",
-                    "remove_table"
-                )
-                .with_object_id(format!("table:{}", table_id))
-                .with_object_type("ACL_TABLE")
-                .with_error(format!("Table not found: {}", table_id)));
-                AclOrchError::TableNotFound(table_id.to_string())
-            })?;
+        let table = self.tables.remove(&table_id.to_string()).ok_or_else(|| {
+            warn_log!("AclOrch", table_id = %table_id, "ACL table not found for deletion");
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceDelete, "AclOrch", "remove_table")
+                    .with_object_id(format!("table:{}", table_id))
+                    .with_object_type("ACL_TABLE")
+                    .with_error(format!("Table not found: {}", table_id))
+            );
+            AclOrchError::TableNotFound(table_id.to_string())
+        })?;
 
         // Clean up OID mapping
         if table.table_oid != 0 {
@@ -441,19 +429,17 @@ impl AclOrch {
         self.stats.tables_deleted += 1;
 
         info_log!("AclOrch", table_id = %table_id, rule_count = table.rule_count(), "ACL table removed successfully");
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceDelete,
-            "AclOrch",
-            "remove_table"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(format!("table:{}", table_id))
-        .with_object_type("ACL_TABLE")
-        .with_details(serde_json::json!({
-            "table_id": table_id,
-            "rules_deleted": table.rule_count(),
-            "ports_unbound": table.bound_ports().len()
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceDelete, "AclOrch", "remove_table")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("table:{}", table_id))
+                .with_object_type("ACL_TABLE")
+                .with_details(serde_json::json!({
+                    "table_id": table_id,
+                    "rules_deleted": table.rule_count(),
+                    "ports_unbound": table.bound_ports().len()
+                }))
+        );
 
         Ok(())
     }
@@ -495,14 +481,12 @@ impl AclOrch {
         // Validate priority
         if let Err(e) = rule.validate(self.config.min_priority, self.config.max_priority) {
             error_log!("AclOrch", table_id = %table_id, rule_id = %rule_id, error = %e, "ACL rule validation failed");
-            audit_log!(AuditRecord::new(
-                AuditCategory::ResourceCreate,
-                "AclOrch",
-                "create_rule"
-            )
-            .with_object_id(format!("rule:{}:{}", table_id, rule_id))
-            .with_object_type("ACL_RULE")
-            .with_error(format!("Rule validation failed: {}", e)));
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "AclOrch", "create_rule")
+                    .with_object_id(format!("rule:{}:{}", table_id, rule_id))
+                    .with_object_type("ACL_RULE")
+                    .with_error(format!("Rule validation failed: {}", e))
+            );
             return Err(AclOrchError::ValidationError(e));
         }
 
@@ -542,22 +526,20 @@ impl AclOrch {
         self.stats.rules_created += 1;
 
         info_log!("AclOrch", table_id = %table_id, rule_id = %rule_id, priority = rule.priority, "ACL rule created successfully");
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceCreate,
-            "AclOrch",
-            "create_rule"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(format!("rule:{}:{}", table_id, rule_id))
-        .with_object_type("ACL_RULE")
-        .with_details(serde_json::json!({
-            "table_id": table_id,
-            "rule_id": rule_id,
-            "priority": rule.priority,
-            "match_count": rule.matches.len(),
-            "action_count": rule.actions.len(),
-            "counter_enabled": rule.counter_enabled
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "AclOrch", "create_rule")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("rule:{}:{}", table_id, rule_id))
+                .with_object_type("ACL_RULE")
+                .with_details(serde_json::json!({
+                    "table_id": table_id,
+                    "rule_id": rule_id,
+                    "priority": rule.priority,
+                    "match_count": rule.matches.len(),
+                    "action_count": rule.actions.len(),
+                    "counter_enabled": rule.counter_enabled
+                }))
+        );
 
         Ok(())
     }
@@ -602,21 +584,19 @@ impl AclOrch {
         self.stats.rules_deleted += 1;
 
         info_log!("AclOrch", table_id = %table_id, rule_id = %rule_id, priority = rule.priority, "ACL rule removed successfully");
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceDelete,
-            "AclOrch",
-            "delete_rule"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(format!("rule:{}:{}", table_id, rule_id))
-        .with_object_type("ACL_RULE")
-        .with_details(serde_json::json!({
-            "table_id": table_id,
-            "rule_id": rule_id,
-            "priority": rule.priority,
-            "match_count": rule.matches.len(),
-            "action_count": rule.actions.len()
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceDelete, "AclOrch", "delete_rule")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("rule:{}:{}", table_id, rule_id))
+                .with_object_type("ACL_RULE")
+                .with_details(serde_json::json!({
+                    "table_id": table_id,
+                    "rule_id": rule_id,
+                    "priority": rule.priority,
+                    "match_count": rule.matches.len(),
+                    "action_count": rule.actions.len()
+                }))
+        );
 
         Ok(rule)
     }
@@ -629,14 +609,12 @@ impl AclOrch {
         // Validate priority
         if let Err(e) = rule.validate(self.config.min_priority, self.config.max_priority) {
             error_log!("AclOrch", table_id = %table_id, rule_id = %rule_id, error = %e, "ACL rule validation failed");
-            audit_log!(AuditRecord::new(
-                AuditCategory::ResourceModify,
-                "AclOrch",
-                "update_rule"
-            )
-            .with_object_id(format!("rule:{}:{}", table_id, rule_id))
-            .with_object_type("ACL_RULE")
-            .with_error(format!("Rule validation failed: {}", e)));
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceModify, "AclOrch", "update_rule")
+                    .with_object_id(format!("rule:{}:{}", table_id, rule_id))
+                    .with_object_type("ACL_RULE")
+                    .with_error(format!("Rule validation failed: {}", e))
+            );
             return Err(AclOrchError::ValidationError(e));
         }
 
@@ -676,24 +654,22 @@ impl AclOrch {
         self.stats.rules_updated += 1;
 
         info_log!("AclOrch", table_id = %table_id, rule_id = %rule_id, old_priority = old_rule.priority, new_priority = rule.priority, "ACL rule updated successfully");
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceModify,
-            "AclOrch",
-            "update_rule"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(format!("rule:{}:{}", table_id, rule_id))
-        .with_object_type("ACL_RULE")
-        .with_details(serde_json::json!({
-            "table_id": table_id,
-            "rule_id": rule_id,
-            "old_priority": old_rule.priority,
-            "new_priority": rule.priority,
-            "old_match_count": old_rule.matches.len(),
-            "new_match_count": rule.matches.len(),
-            "old_action_count": old_rule.actions.len(),
-            "new_action_count": rule.actions.len()
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceModify, "AclOrch", "update_rule")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("rule:{}:{}", table_id, rule_id))
+                .with_object_type("ACL_RULE")
+                .with_details(serde_json::json!({
+                    "table_id": table_id,
+                    "rule_id": rule_id,
+                    "old_priority": old_rule.priority,
+                    "new_priority": rule.priority,
+                    "old_match_count": old_rule.matches.len(),
+                    "new_match_count": rule.matches.len(),
+                    "old_action_count": old_rule.actions.len(),
+                    "new_action_count": rule.actions.len()
+                }))
+        );
 
         Ok(old_rule)
     }
@@ -733,19 +709,17 @@ impl AclOrch {
         table.bind_port(port_alias, port_oid, 0);
 
         info_log!("AclOrch", table_id = %table_id, port_alias = %port_alias, port_oid = %port_oid, "Port bound to ACL table successfully");
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceModify,
-            "AclOrch",
-            "bind_port"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(format!("table:{}", table_id))
-        .with_object_type("ACL_TABLE")
-        .with_details(serde_json::json!({
-            "table_id": table_id,
-            "port_alias": port_alias,
-            "port_oid": format!("0x{:x}", port_oid)
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceModify, "AclOrch", "bind_port")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("table:{}", table_id))
+                .with_object_type("ACL_TABLE")
+                .with_details(serde_json::json!({
+                    "table_id": table_id,
+                    "port_alias": port_alias,
+                    "port_oid": format!("0x{:x}", port_oid)
+                }))
+        );
 
         Ok(())
     }
@@ -775,18 +749,16 @@ impl AclOrch {
         table.unbind_port(port_alias);
 
         info_log!("AclOrch", table_id = %table_id, port_alias = %port_alias, "Port unbound from ACL table successfully");
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceModify,
-            "AclOrch",
-            "unbind_port"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(format!("table:{}", table_id))
-        .with_object_type("ACL_TABLE")
-        .with_details(serde_json::json!({
-            "table_id": table_id,
-            "port_alias": port_alias
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceModify, "AclOrch", "unbind_port")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("table:{}", table_id))
+                .with_object_type("ACL_TABLE")
+                .with_details(serde_json::json!({
+                    "table_id": table_id,
+                    "port_alias": port_alias
+                }))
+        );
 
         Ok(())
     }
@@ -805,8 +777,9 @@ impl AclOrch {
         for value in self.config.metadata_min..=self.config.metadata_max {
             if !self.metadata_refs.contains_key(&value) {
                 self.metadata_refs.insert(value, 1);
-                return MetaDataValue::new(value)
-                    .ok_or_else(|| AclOrchError::InvalidConfig("Invalid metadata value".to_string()));
+                return MetaDataValue::new(value).ok_or_else(|| {
+                    AclOrchError::InvalidConfig("Invalid metadata value".to_string())
+                });
             }
         }
 
@@ -1417,7 +1390,9 @@ mod tests {
         let rule = AclRule::packet("rule1")
             .with_priority(100)
             .with_match(AclRuleMatch::ip_protocol(6))
-            .with_action(AclRuleAction::redirect(AclRedirectTarget::Port("Ethernet0".to_string())));
+            .with_action(AclRuleAction::redirect(AclRedirectTarget::Port(
+                "Ethernet0".to_string(),
+            )));
 
         orch.add_rule("TestTable", rule).unwrap();
         let stored_rule = orch.get_rule("TestTable", "rule1").unwrap();
@@ -1629,7 +1604,9 @@ mod tests {
         let rule = AclRule::packet("rule1")
             .with_priority(100)
             .with_match(AclRuleMatch::ip_protocol(6))
-            .with_action(AclRuleAction::redirect(AclRedirectTarget::Port("Ethernet0".to_string())))
+            .with_action(AclRuleAction::redirect(AclRedirectTarget::Port(
+                "Ethernet0".to_string(),
+            )))
             .with_action(AclRuleAction::counter(true));
 
         orch.add_rule("TestTable", rule).unwrap();

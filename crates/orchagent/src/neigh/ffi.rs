@@ -1,7 +1,7 @@
 //! FFI exports for NeighOrch.
 
-use std::cell::RefCell;
 use super::orch::{NeighOrch, NeighOrchConfig};
+use std::cell::RefCell;
 
 thread_local! {
     static NEIGH_ORCH: RefCell<Option<Box<NeighOrch>>> = const { RefCell::new(None) };

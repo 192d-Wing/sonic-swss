@@ -148,11 +148,7 @@ pub struct DebugCounterEntry {
 
 impl DebugCounterEntry {
     /// Creates a new debug counter entry.
-    pub fn new(
-        name: String,
-        counter_type: DebugCounterType,
-        counter_id: RawSaiObjectId,
-    ) -> Self {
+    pub fn new(name: String, counter_type: DebugCounterType, counter_id: RawSaiObjectId) -> Self {
         Self {
             name,
             counter_type,

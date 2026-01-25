@@ -243,8 +243,8 @@ impl PolicerConfig {
                     .ok_or_else(|| format!("Invalid meter_type: {}", value))?;
             }
             "mode" => {
-                self.mode = PolicerMode::parse(value)
-                    .ok_or_else(|| format!("Invalid mode: {}", value))?;
+                self.mode =
+                    PolicerMode::parse(value).ok_or_else(|| format!("Invalid mode: {}", value))?;
             }
             "color_source" => {
                 self.color_source = ColorSource::parse(value)

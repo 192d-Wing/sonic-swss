@@ -110,7 +110,10 @@ pub struct VnetBridgePortKey {
 
 impl VnetBridgePortKey {
     pub fn new(vnet_name: String, bridge_name: String) -> Self {
-        Self { vnet_name, bridge_name }
+        Self {
+            vnet_name,
+            bridge_name,
+        }
     }
 }
 

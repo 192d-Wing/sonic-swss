@@ -7,8 +7,8 @@ use std::fmt;
 use std::str::FromStr;
 
 use super::port::{
-    Port, PortAdminState, PortAutoNegMode, PortFecMode, PortInterfaceType,
-    PortLinkTrainingMode, PortRole,
+    Port, PortAdminState, PortAutoNegMode, PortFecMode, PortInterfaceType, PortLinkTrainingMode,
+    PortRole,
 };
 
 /// Error type for port configuration parsing.
@@ -260,8 +260,12 @@ impl PortConfig {
     ///
     /// Returns an error if required fields (alias, lanes) are missing.
     pub fn into_port(self) -> Result<Port, PortConfigError> {
-        let alias = self.alias.ok_or_else(|| PortConfigError::missing_field("alias"))?;
-        let lanes = self.lanes.ok_or_else(|| PortConfigError::missing_field("lanes"))?;
+        let alias = self
+            .alias
+            .ok_or_else(|| PortConfigError::missing_field("alias"))?;
+        let lanes = self
+            .lanes
+            .ok_or_else(|| PortConfigError::missing_field("lanes"))?;
 
         let mut port = Port::physical(alias, lanes);
 
@@ -329,9 +333,10 @@ impl PortConfig {
         // Validate MTU range
         if let Some(mtu) = self.mtu {
             if mtu < 68 || mtu > 9216 {
-                return Err(PortConfigError::new("mtu", format!(
-                    "MTU {} out of range (68-9216)", mtu
-                )));
+                return Err(PortConfigError::new(
+                    "mtu",
+                    format!("MTU {} out of range (68-9216)", mtu),
+                ));
             }
         }
 
@@ -341,7 +346,9 @@ impl PortConfig {
 
 /// Parses a u32 value.
 fn parse_u32(field: &str, value: &str) -> Result<u32, PortConfigError> {
-    value.parse().map_err(|_| PortConfigError::invalid_value(field, value))
+    value
+        .parse()
+        .map_err(|_| PortConfigError::invalid_value(field, value))
 }
 
 /// Parses a boolean value.
@@ -358,14 +365,20 @@ fn parse_enum<T: FromStr>(field: &str, value: &str) -> Result<T, PortConfigError
 where
     T::Err: fmt::Display,
 {
-    value.parse().map_err(|e| PortConfigError::new(field, format!("{}", e)))
+    value
+        .parse()
+        .map_err(|e| PortConfigError::new(field, format!("{}", e)))
 }
 
 /// Parses lane values (comma-separated).
 fn parse_lanes(value: &str) -> Result<Vec<u32>, PortConfigError> {
     value
         .split(',')
-        .map(|s| s.trim().parse().map_err(|_| PortConfigError::invalid_value("lanes", s)))
+        .map(|s| {
+            s.trim()
+                .parse()
+                .map_err(|_| PortConfigError::invalid_value("lanes", s))
+        })
         .collect()
 }
 
@@ -376,7 +389,11 @@ fn parse_speeds(value: &str) -> Result<Vec<u32>, PortConfigError> {
     }
     value
         .split(',')
-        .map(|s| s.trim().parse().map_err(|_| PortConfigError::invalid_value("adv_speeds", s)))
+        .map(|s| {
+            s.trim()
+                .parse()
+                .map_err(|_| PortConfigError::invalid_value("adv_speeds", s))
+        })
         .collect()
 }
 
@@ -387,7 +404,11 @@ fn parse_interface_types(value: &str) -> Result<Vec<PortInterfaceType>, PortConf
     }
     value
         .split(',')
-        .map(|s| s.trim().parse().map_err(|e| PortConfigError::new("adv_interface_types", e)))
+        .map(|s| {
+            s.trim()
+                .parse()
+                .map_err(|e| PortConfigError::new("adv_interface_types", e))
+        })
         .collect()
 }
 
@@ -398,7 +419,9 @@ fn parse_tpid(value: &str) -> Result<u16, PortConfigError> {
         u16::from_str_radix(&value[2..], 16)
             .map_err(|_| PortConfigError::invalid_value("tpid", value))
     } else {
-        value.parse().map_err(|_| PortConfigError::invalid_value("tpid", value))
+        value
+            .parse()
+            .map_err(|_| PortConfigError::invalid_value("tpid", value))
     }
 }
 
@@ -415,7 +438,8 @@ fn parse_preemphasis(value: &str) -> Result<Vec<i32>, PortConfigError> {
                 i32::from_str_radix(&s[2..], 16)
                     .map_err(|_| PortConfigError::invalid_value("preemphasis", s))
             } else {
-                s.parse().map_err(|_| PortConfigError::invalid_value("preemphasis", s))
+                s.parse()
+                    .map_err(|_| PortConfigError::invalid_value("preemphasis", s))
             }
         })
         .collect()
@@ -527,9 +551,7 @@ impl VlanConfig {
                 self.description = Some(value.to_string());
             }
             "dhcp_servers" => {
-                self.dhcp_servers = Some(
-                    value.split(',').map(|s| s.trim().to_string()).collect()
-                );
+                self.dhcp_servers = Some(value.split(',').map(|s| s.trim().to_string()).collect());
             }
             _ => {}
         }

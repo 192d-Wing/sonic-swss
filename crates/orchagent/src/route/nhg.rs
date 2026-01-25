@@ -261,16 +261,18 @@ impl NextHopGroupEntry {
     /// Returns 0 if the count was already 0 (underflow protection).
     pub fn decrement_ref(&self) -> u32 {
         // Use fetch_update to prevent underflow
-        let result = self.ref_count.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-            if current > 0 {
-                Some(current - 1)
-            } else {
-                None // Don't update if already 0
-            }
-        });
+        let result = self
+            .ref_count
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                if current > 0 {
+                    Some(current - 1)
+                } else {
+                    None // Don't update if already 0
+                }
+            });
 
         match result {
-            Ok(prev) => prev - 1, // Successfully decremented
+            Ok(prev) => prev - 1,    // Successfully decremented
             Err(current) => current, // Was already 0
         }
     }
@@ -336,7 +338,9 @@ impl NextHopGroupEntry {
     }
 
     /// Returns a mutable reference to the default route swap members.
-    pub fn default_route_members_mut(&mut self) -> &mut HashMap<NextHopKey, NextHopGroupMemberEntry> {
+    pub fn default_route_members_mut(
+        &mut self,
+    ) -> &mut HashMap<NextHopKey, NextHopGroupMemberEntry> {
         &mut self.default_route_nhopgroup_members
     }
 }
@@ -354,10 +358,7 @@ mod tests {
     use std::net::Ipv4Addr;
 
     fn make_nexthop(ip: &str, alias: &str) -> NextHopKey {
-        NextHopKey::new(
-            IpAddress::V4(ip.parse::<Ipv4Addr>().unwrap().into()),
-            alias,
-        )
+        NextHopKey::new(IpAddress::V4(ip.parse::<Ipv4Addr>().unwrap().into()), alias)
     }
 
     #[test]

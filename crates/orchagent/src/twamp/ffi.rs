@@ -1,8 +1,8 @@
 //! FFI exports for TwampOrch.
 
+use super::orch::{TwampOrch, TwampOrchConfig};
 use std::cell::RefCell;
 use std::ffi::{c_char, CStr};
-use super::orch::{TwampOrch, TwampOrchConfig};
 
 thread_local! {
     static TWAMP_ORCH: RefCell<Option<Box<TwampOrch>>> = const { RefCell::new(None) };

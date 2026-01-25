@@ -27,7 +27,7 @@ impl IntfsEntry {
         self.ref_count = self.ref_count.saturating_add(1);
         self.ref_count
     }
-    
+
     pub fn remove_ref(&mut self) -> Result<u32, String> {
         if self.ref_count == 0 {
             return Err("Reference count already 0".to_string());

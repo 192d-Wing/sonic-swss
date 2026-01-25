@@ -249,7 +249,11 @@ impl AuditRecord {
     /// * `category` - Security event category (authentication, resource, config, etc.)
     /// * `source` - Component name/module originating the audit event
     /// * `action` - Description of the action/operation performed
-    pub fn new(category: AuditCategory, source: impl Into<String>, action: impl Into<String>) -> Self {
+    pub fn new(
+        category: AuditCategory,
+        source: impl Into<String>,
+        action: impl Into<String>,
+    ) -> Self {
         Self {
             timestamp: Utc::now(),
             category,
@@ -352,12 +356,8 @@ impl AuditRecord {
     /// - **AU-6**: Structured JSON for automated SIEM analysis
     /// - **AU-4**: Efficient storage and transmission format
     pub fn to_json(&self) -> String {
-        serde_json::to_string(self).unwrap_or_else(|e| {
-            format!(
-                r#"{{"error":"serialization_failed","message":"{}"}}"#,
-                e
-            )
-        })
+        serde_json::to_string(self)
+            .unwrap_or_else(|e| format!(r#"{{"error":"serialization_failed","message":"{}"}}"#, e))
     }
 }
 
@@ -625,8 +625,7 @@ macro_rules! security_audit {
 pub fn init_logging(log_level: &str) {
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(log_level));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
 
     tracing_subscriber::registry()
         .with(filter)
@@ -636,7 +635,7 @@ pub fn init_logging(log_level: &str) {
                 .with_thread_ids(true)
                 .with_file(true)
                 .with_line_number(true)
-                .json()
+                .json(),
         )
         .init();
 }
@@ -673,8 +672,7 @@ pub fn init_logging(log_level: &str) {
 pub fn init_logging_pretty(log_level: &str) {
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(log_level));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
 
     tracing_subscriber::registry()
         .with(filter)
@@ -684,7 +682,7 @@ pub fn init_logging_pretty(log_level: &str) {
                 .with_thread_ids(false)
                 .with_file(true)
                 .with_line_number(true)
-                .pretty()
+                .pretty(),
         )
         .init();
 }
@@ -695,14 +693,10 @@ mod tests {
 
     #[test]
     fn test_audit_record_creation() {
-        let record = AuditRecord::new(
-            AuditCategory::ResourceCreate,
-            "CoppOrch",
-            "create_trap",
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id("0x1000")
-        .with_object_type("copp_trap");
+        let record = AuditRecord::new(AuditCategory::ResourceCreate, "CoppOrch", "create_trap")
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id("0x1000")
+            .with_object_type("copp_trap");
 
         assert_eq!(record.category, AuditCategory::ResourceCreate);
         assert_eq!(record.source, "CoppOrch");
@@ -722,7 +716,10 @@ mod tests {
         .with_error("SAI operation failed: invalid port");
 
         assert_eq!(record.outcome, AuditOutcome::Failure);
-        assert_eq!(record.error, Some("SAI operation failed: invalid port".to_string()));
+        assert_eq!(
+            record.error,
+            Some("SAI operation failed: invalid port".to_string())
+        );
     }
 
     #[test]

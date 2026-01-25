@@ -114,25 +114,25 @@ impl IpfixActor {
     /// Formatted string representation of the sets within the message
     fn format_ipfix_sets_for_debug(message_data: &[u8]) -> String {
         let mut result = String::new();
-        
+
         // Skip IPFIX message header (16 bytes) to get to sets
         if message_data.len() < 16 {
             result.push_str("    Error: Message too short for IPFIX header\n");
             return result;
         }
-        
+
         let mut offset = 16; // Start after IPFIX header
         let mut set_count = 0;
-        
+
         result.push_str("    Sets within message:\n");
-        
+
         while offset + 4 <= message_data.len() {
             // Each set starts with 4-byte header: set_id (2 bytes) + length (2 bytes)
             let set_id = NetworkEndian::read_u16(&message_data[offset..offset + 2]);
             let set_length = NetworkEndian::read_u16(&message_data[offset + 2..offset + 4]);
-            
+
             set_count += 1;
-            
+
             // Validate set length
             if set_length < 4 {
                 result.push_str(&format!(
@@ -141,7 +141,7 @@ impl IpfixActor {
                 ));
                 break;
             }
-            
+
             if offset + set_length as usize > message_data.len() {
                 result.push_str(&format!(
                     "      Set {}: TRUNCATED (set_id={}, length={}, exceeds message boundary)\n",
@@ -149,7 +149,7 @@ impl IpfixActor {
                 ));
                 break;
             }
-            
+
             // Determine set type based on set_id
             let set_type = if set_id == 2 {
                 "Template Set"
@@ -160,21 +160,18 @@ impl IpfixActor {
             } else {
                 "Reserved/Unknown"
             };
-            
+
             result.push_str(&format!(
                 "      Set {} (offset: {}, set_id: {}, length: {} bytes, type: {})\n",
                 set_count, offset, set_id, set_length, set_type
             ));
-            
+
             // For data sets, show complete structure info
             if set_id >= 256 && set_length > 4 {
                 let data_length = set_length as usize - 4; // Exclude 4-byte set header
                 let data_start = offset + 4;
-                result.push_str(&format!(
-                    "        Data payload: {} bytes",
-                    data_length
-                ));
-                
+                result.push_str(&format!("        Data payload: {} bytes", data_length));
+
                 // Show complete data payload
                 if data_length > 0 {
                     let data_bytes = &message_data[data_start..data_start + data_length];
@@ -183,7 +180,7 @@ impl IpfixActor {
                         .map(|b| format!("{:02x}", b))
                         .collect::<Vec<_>>()
                         .join(" ");
-                    
+
                     // Format with line breaks for better readability if data is long
                     if data_length <= 32 {
                         // Short data on single line
@@ -197,28 +194,24 @@ impl IpfixActor {
                                 .map(|b| format!("{:02x}", b))
                                 .collect::<Vec<_>>()
                                 .join(" ");
-                            result.push_str(&format!(
-                                "          {:04x}: {}\n",
-                                i * 16,
-                                chunk_hex
-                            ));
+                            result.push_str(&format!("          {:04x}: {}\n", i * 16, chunk_hex));
                         }
                     }
                 } else {
                     result.push_str("\n");
                 }
             }
-            
+
             // Move to next set
             offset += set_length as usize;
         }
-        
+
         if set_count == 0 {
             result.push_str("      No valid sets found\n");
         } else {
             result.push_str(&format!("      Total sets: {}\n", set_count));
         }
-        
+
         result
     }
 
@@ -770,9 +763,7 @@ impl IpfixActor {
             });
 
             if should_drop_message {
-                debug!(
-                    "Dropping IPFIX data message because template was deleted or unknown"
-                );
+                debug!("Dropping IPFIX data message because template was deleted or unknown");
                 read_size += len as usize;
                 continue;
             }
@@ -955,11 +946,11 @@ impl Drop for IpfixActor {
 }
 
 /// IPFIX Information Element ID for observationTimeNanoseconds (Field ID 325).
-/// 
+///
 /// This field represents the absolute timestamp of the observation of the packet
-/// within a nanosecond resolution. The timestamp is based on the local time zone 
+/// within a nanosecond resolution. The timestamp is based on the local time zone
 /// of the Exporter and is represented as nanoseconds since the UNIX epoch.
-/// 
+///
 /// According to IANA IPFIX Information Elements Registry:
 /// - ElementId: 325
 /// - Data Type: dateTimeNanoseconds
@@ -968,11 +959,11 @@ impl Drop for IpfixActor {
 const OBSERVATION_TIME_NANOSECONDS: u16 = 325;
 
 /// IPFIX Information Element ID for observationTimeSeconds (Field ID 322).
-/// 
+///
 /// This field represents the absolute timestamp of the observation of the packet
 /// within a second resolution. The timestamp is based on the local time zone
 /// of the Exporter and is represented as seconds since the UNIX epoch.
-/// 
+///
 /// According to IANA IPFIX Information Elements Registry:
 /// - ElementId: 322
 /// - Data Type: dateTimeSeconds  
@@ -981,7 +972,7 @@ const OBSERVATION_TIME_NANOSECONDS: u16 = 325;
 const OBSERVATION_TIME_SECONDS: u16 = 322;
 
 /// Extracts observation time from an IPFIX data record.
-/// 
+///
 /// Converts timestamp to 64-bit nanoseconds following this priority:
 /// 1. If 64-bit nanoseconds field exists, use it directly
 /// 2. If 32-bit seconds and 32-bit nanoseconds fields exist, combine them
@@ -1005,15 +996,24 @@ fn get_observation_time(data_record: &DataRecord) -> Option<u64> {
             if field_spec.enterprise_number.is_none() {
                 match field_spec.information_element_identifier {
                     OBSERVATION_TIME_NANOSECONDS => {
-                        debug!("Found observation time nanoseconds field with value: {:?}", val);
+                        debug!(
+                            "Found observation time nanoseconds field with value: {:?}",
+                            val
+                        );
                         match val {
                             DataRecordValue::Bytes(bytes) => {
                                 if bytes.len() == 8 {
                                     full_nanoseconds_value = Some(NetworkEndian::read_u64(bytes));
-                                    debug!("Extracted 64-bit nanoseconds: {}", full_nanoseconds_value.unwrap());
+                                    debug!(
+                                        "Extracted 64-bit nanoseconds: {}",
+                                        full_nanoseconds_value.unwrap()
+                                    );
                                 } else if bytes.len() == 4 {
                                     nanoseconds_value = Some(NetworkEndian::read_u32(bytes));
-                                    debug!("Extracted 32-bit nanoseconds: {}", nanoseconds_value.unwrap());
+                                    debug!(
+                                        "Extracted 32-bit nanoseconds: {}",
+                                        nanoseconds_value.unwrap()
+                                    );
                                 }
                             }
                             DataRecordValue::U64(val) => {
@@ -1062,8 +1062,10 @@ fn get_observation_time(data_record: &DataRecord) -> Option<u64> {
     // Priority 2: Combine 32-bit seconds and 32-bit nanoseconds
     if let (Some(seconds), Some(nanoseconds)) = (seconds_value, nanoseconds_value) {
         let combined_timestamp = (seconds as u64) * 1_000_000_000 + (nanoseconds as u64);
-        debug!("Combined timestamp from seconds({}) and nanoseconds({}): {}", 
-               seconds, nanoseconds, combined_timestamp);
+        debug!(
+            "Combined timestamp from seconds({}) and nanoseconds({}): {}",
+            seconds, nanoseconds, combined_timestamp
+        );
         return Some(combined_timestamp);
     }
 
@@ -1073,7 +1075,10 @@ fn get_observation_time(data_record: &DataRecord) -> Option<u64> {
         .duration_since(SystemTime::UNIX_EPOCH)
         .expect("System time should be after Unix epoch")
         .as_nanos() as u64;
-    debug!("Using current UTC time as observation time: {}", current_time);
+    debug!(
+        "Using current UTC time as observation time: {}",
+        current_time
+    );
     Some(current_time)
 }
 

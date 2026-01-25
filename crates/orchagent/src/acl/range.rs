@@ -49,7 +49,11 @@ pub struct AclRangeProperties {
 impl AclRangeProperties {
     /// Creates new range properties.
     pub fn new(range_type: AclRangeType, min: u32, max: u32) -> Self {
-        Self { range_type, min, max }
+        Self {
+            range_type,
+            min,
+            max,
+        }
     }
 
     /// Validates the range.
@@ -65,18 +69,12 @@ impl AclRangeProperties {
         match self.range_type {
             AclRangeType::L4SrcPort | AclRangeType::L4DstPort => {
                 if self.max > 65535 {
-                    return Err(format!(
-                        "Port range max ({}) exceeds 65535",
-                        self.max
-                    ));
+                    return Err(format!("Port range max ({}) exceeds 65535", self.max));
                 }
             }
             AclRangeType::OuterVlan | AclRangeType::InnerVlan => {
                 if self.max > 4094 {
-                    return Err(format!(
-                        "VLAN range max ({}) exceeds 4094",
-                        self.max
-                    ));
+                    return Err(format!("VLAN range max ({}) exceeds 4094", self.max));
                 }
             }
             AclRangeType::PacketLength => {
@@ -196,11 +194,7 @@ impl AclRangeCache {
     ///
     /// If the reference count reaches 0, calls the remove function and
     /// removes the range from the cache.
-    pub fn release<F>(
-        &self,
-        properties: &AclRangeProperties,
-        remove_fn: F,
-    ) -> Result<(), String>
+    pub fn release<F>(&self, properties: &AclRangeProperties, remove_fn: F) -> Result<(), String>
     where
         F: FnOnce(RawSaiObjectId) -> Result<(), String>,
     {
@@ -220,11 +214,7 @@ impl AclRangeCache {
 
     /// Gets a range by properties (if it exists).
     pub fn get(&self, properties: &AclRangeProperties) -> Option<RawSaiObjectId> {
-        self.ranges
-            .read()
-            .ok()?
-            .get(properties)
-            .map(|r| r.oid)
+        self.ranges.read().ok()?.get(properties).map(|r| r.oid)
     }
 
     /// Returns the number of cached ranges.
@@ -252,7 +242,11 @@ pub struct AclRangeConfig {
 impl AclRangeConfig {
     /// Creates a new range config.
     pub fn new(range_type: AclRangeType, min: u32, max: u32) -> Self {
-        Self { range_type, min, max }
+        Self {
+            range_type,
+            min,
+            max,
+        }
     }
 
     /// Parses a range config from a string like "1000-2000".
@@ -364,16 +358,12 @@ mod tests {
         let props = AclRangeProperties::new(AclRangeType::L4SrcPort, 1000, 2000);
 
         // Create first range
-        let oid1 = cache
-            .get_or_create(props.clone(), |_| Ok(0x1234))
-            .unwrap();
+        let oid1 = cache.get_or_create(props.clone(), |_| Ok(0x1234)).unwrap();
         assert_eq!(oid1, 0x1234);
         assert_eq!(cache.len(), 1);
 
         // Get same range (should increment ref count)
-        let oid2 = cache
-            .get_or_create(props.clone(), |_| Ok(0x5678))
-            .unwrap();
+        let oid2 = cache.get_or_create(props.clone(), |_| Ok(0x5678)).unwrap();
         assert_eq!(oid2, 0x1234); // Same OID, not new
         assert_eq!(cache.len(), 1);
 

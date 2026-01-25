@@ -43,7 +43,12 @@ pub enum BfdOrchError {
 /// Callbacks for BfdOrch operations.
 pub trait BfdOrchCallbacks: Send + Sync {
     /// Creates a BFD session via SAI.
-    fn create_bfd_session(&self, config: &BfdSessionConfig, discriminator: u32, src_port: u16) -> Result<RawSaiObjectId, String>;
+    fn create_bfd_session(
+        &self,
+        config: &BfdSessionConfig,
+        discriminator: u32,
+        src_port: u16,
+    ) -> Result<RawSaiObjectId, String>;
 
     /// Removes a BFD session via SAI.
     fn remove_bfd_session(&self, sai_oid: RawSaiObjectId) -> Result<(), String>;
@@ -226,15 +231,12 @@ impl BfdOrch {
         // Check if session already exists
         if self.sessions.contains_key(&key) {
             let err = BfdOrchError::SessionExists(key.clone());
-            let audit_record = AuditRecord::new(
-                AuditCategory::ResourceCreate,
-                "BfdOrch",
-                "create_session",
-            )
-            .with_outcome(AuditOutcome::Failure)
-            .with_object_id(&key)
-            .with_object_type("bfd_session")
-            .with_error("Session already exists");
+            let audit_record =
+                AuditRecord::new(AuditCategory::ResourceCreate, "BfdOrch", "create_session")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(&key)
+                    .with_object_type("bfd_session")
+                    .with_error("Session already exists");
             audit_log!(audit_record);
             return Err(err);
         }
@@ -249,22 +251,19 @@ impl BfdOrch {
             let state_db_key = config.key.to_state_db_key();
             callbacks.create_software_bfd_session(&state_db_key, &config);
 
-            let audit_record = AuditRecord::new(
-                AuditCategory::ResourceCreate,
-                "BfdOrch",
-                "create_session",
-            )
-            .with_outcome(AuditOutcome::Success)
-            .with_object_id(&key)
-            .with_object_type("bfd_session_software")
-            .with_details(serde_json::json!({
-                "session_key": key,
-                "session_type": config.session_type.config_string(),
-                "tx_interval": config.tx_interval,
-                "rx_interval": config.rx_interval,
-                "multiplier": config.multiplier,
-                "mode": "software",
-            }));
+            let audit_record =
+                AuditRecord::new(AuditCategory::ResourceCreate, "BfdOrch", "create_session")
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_id(&key)
+                    .with_object_type("bfd_session_software")
+                    .with_details(serde_json::json!({
+                        "session_key": key,
+                        "session_type": config.session_type.config_string(),
+                        "tx_interval": config.tx_interval,
+                        "rx_interval": config.rx_interval,
+                        "multiplier": config.multiplier,
+                        "mode": "software",
+                    }));
             audit_log!(audit_record);
             return Ok(());
         }
@@ -455,23 +454,17 @@ impl BfdOrch {
 
         // Get session info and extract all needed data before releasing the borrow
         let (sai_oid, state_db_key, config_copy, local_disc, src_port) = {
-            let info = self
-                .sessions
-                .get(key)
-                .ok_or_else(|| {
-                    let err = BfdOrchError::SessionNotFound(key.to_string());
-                    let audit_record = AuditRecord::new(
-                        AuditCategory::ResourceDelete,
-                        "BfdOrch",
-                        "remove_session",
-                    )
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(key)
-                    .with_object_type("bfd_session")
-                    .with_error("Session not found");
-                    audit_log!(audit_record);
-                    err
-                })?;
+            let info = self.sessions.get(key).ok_or_else(|| {
+                let err = BfdOrchError::SessionNotFound(key.to_string());
+                let audit_record =
+                    AuditRecord::new(AuditCategory::ResourceDelete, "BfdOrch", "remove_session")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(key)
+                        .with_object_type("bfd_session")
+                        .with_error("Session not found");
+                audit_log!(audit_record);
+                err
+            })?;
 
             (
                 info.sai_oid,
@@ -483,22 +476,17 @@ impl BfdOrch {
         };
 
         // Remove via SAI
-        callbacks
-            .remove_bfd_session(sai_oid)
-            .map_err(|e| {
-                let err = BfdOrchError::SaiError(e.clone());
-                let audit_record = AuditRecord::new(
-                    AuditCategory::ResourceDelete,
-                    "BfdOrch",
-                    "remove_session",
-                )
-                .with_outcome(AuditOutcome::Failure)
-                .with_object_id(key)
-                .with_object_type("bfd_session_hardware")
-                .with_error(&e);
-                audit_log!(audit_record);
-                err
-            })?;
+        callbacks.remove_bfd_session(sai_oid).map_err(|e| {
+            let err = BfdOrchError::SaiError(e.clone());
+            let audit_record =
+                AuditRecord::new(AuditCategory::ResourceDelete, "BfdOrch", "remove_session")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(key)
+                    .with_object_type("bfd_session_hardware")
+                    .with_error(&e);
+            audit_log!(audit_record);
+            err
+        })?;
 
         // Clean up internal state
         self.sessions.remove(key);
@@ -509,25 +497,22 @@ impl BfdOrch {
         callbacks.remove_state_db(&state_db_key);
 
         // Log successful session deletion with NIST AU-3 audit details
-        let audit_record = AuditRecord::new(
-            AuditCategory::ResourceDelete,
-            "BfdOrch",
-            "remove_session",
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(key)
-        .with_object_type("bfd_session_hardware")
-        .with_details(serde_json::json!({
-            "session_key": key,
-            "sai_oid": format!("0x{:x}", sai_oid),
-            "local_discriminator": local_disc,
-            "source_port": src_port,
-            "session_type": config_copy.session_type.config_string(),
-            "remote_peer": config_copy.key.peer_ip.to_string(),
-            "interface": config_copy.key.interface.as_deref(),
-            "vrf": config_copy.key.vrf.as_str(),
-            "mode": "hardware",
-        }));
+        let audit_record =
+            AuditRecord::new(AuditCategory::ResourceDelete, "BfdOrch", "remove_session")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(key)
+                .with_object_type("bfd_session_hardware")
+                .with_details(serde_json::json!({
+                    "session_key": key,
+                    "sai_oid": format!("0x{:x}", sai_oid),
+                    "local_discriminator": local_disc,
+                    "source_port": src_port,
+                    "session_type": config_copy.session_type.config_string(),
+                    "remote_peer": config_copy.key.peer_ip.to_string(),
+                    "interface": config_copy.key.interface.as_deref(),
+                    "vrf": config_copy.key.vrf.as_str(),
+                    "mode": "hardware",
+                }));
         audit_log!(audit_record);
 
         Ok(())
@@ -562,11 +547,7 @@ impl BfdOrch {
 
         if let Some(callbacks) = &self.callbacks {
             // Update state DB
-            callbacks.write_state_db(
-                &info.state_db_key,
-                new_state,
-                info.config.session_type,
-            );
+            callbacks.write_state_db(&info.state_db_key, new_state, info.config.session_type);
 
             // Notify observers
             callbacks.notify(BfdUpdate::new(&info.state_db_key, new_state));
@@ -722,10 +703,11 @@ mod tests {
                 return Err("Creation failed".to_string());
             }
             let oid = (discriminator as u64) << 16 | (src_port as u64);
-            self.created_sessions
-                .lock()
-                .unwrap()
-                .push((config.key.to_config_key(), discriminator, src_port));
+            self.created_sessions.lock().unwrap().push((
+                config.key.to_config_key(),
+                discriminator,
+                src_port,
+            ));
             Ok(oid)
         }
 
@@ -781,11 +763,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks.clone());
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key);
 
         let result = orch.create_session(config);
@@ -805,11 +783,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks);
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key.clone());
 
         orch.create_session(config.clone()).unwrap();
@@ -825,11 +799,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks.clone());
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key);
 
         orch.create_session(config).unwrap();
@@ -860,11 +830,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks.clone());
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key);
 
         orch.create_session(config).unwrap();
@@ -893,11 +859,7 @@ mod tests {
         orch.set_callbacks(callbacks);
 
         // Create session with shutdown_bfd_during_tsa=true
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key).with_shutdown_bfd_during_tsa(true);
 
         orch.create_session(config).unwrap();
@@ -920,11 +882,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::with_software_bfd());
         orch.set_callbacks(callbacks.clone());
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key);
 
         // Should succeed without creating SAI session
@@ -942,11 +900,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks);
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key);
 
         orch.create_session(config).unwrap();
@@ -1025,11 +979,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks.clone());
 
-        let key = BfdSessionKey::new(
-            "Vrf-RED",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 10, 10, 1)),
-        );
+        let key = BfdSessionKey::new("Vrf-RED", None, IpAddr::V4(Ipv4Addr::new(10, 10, 10, 1)));
         let config = BfdSessionConfig::new(key);
 
         let result = orch.create_session(config);
@@ -1046,11 +996,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks.clone());
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key)
             .with_tx_interval(500)
             .with_rx_interval(600)
@@ -1074,11 +1020,7 @@ mod tests {
 
         // Create 3 different sessions
         for i in 1..=3 {
-            let key = BfdSessionKey::new(
-                "default",
-                None,
-                IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)),
-            );
+            let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)));
             let config = BfdSessionConfig::new(key);
             orch.create_session(config).unwrap();
         }
@@ -1095,11 +1037,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks);
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key);
 
         orch.create_session(config).unwrap();
@@ -1122,11 +1060,7 @@ mod tests {
         let mut discriminators = std::collections::HashSet::new();
 
         for i in 1..=10 {
-            let key = BfdSessionKey::new(
-                "default",
-                None,
-                IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)),
-            );
+            let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)));
             let config = BfdSessionConfig::new(key);
             orch.create_session(config).unwrap();
 
@@ -1147,11 +1081,7 @@ mod tests {
 
         // Create 3 sessions
         for i in 1..=3 {
-            let key = BfdSessionKey::new(
-                "default",
-                None,
-                IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)),
-            );
+            let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)));
             let config = BfdSessionConfig::new(key);
             orch.create_session(config).unwrap();
         }
@@ -1176,11 +1106,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks);
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key)
             .with_tx_interval(50)
             .with_rx_interval(50);
@@ -1198,11 +1124,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks);
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key)
             .with_tx_interval(10000)
             .with_rx_interval(15000);
@@ -1244,13 +1166,8 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks);
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
-        let config = BfdSessionConfig::new(key)
-            .with_session_type(BfdSessionType::AsyncActive);
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
+        let config = BfdSessionConfig::new(key).with_session_type(BfdSessionType::AsyncActive);
 
         orch.create_session(config).unwrap();
 
@@ -1266,13 +1183,8 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks);
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
-        let config = BfdSessionConfig::new(key)
-            .with_session_type(BfdSessionType::AsyncPassive);
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
+        let config = BfdSessionConfig::new(key).with_session_type(BfdSessionType::AsyncPassive);
 
         orch.create_session(config).unwrap();
 
@@ -1288,13 +1200,8 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks);
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
-        let config = BfdSessionConfig::new(key)
-            .with_session_type(BfdSessionType::DemandActive);
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
+        let config = BfdSessionConfig::new(key).with_session_type(BfdSessionType::DemandActive);
 
         orch.create_session(config).unwrap();
 
@@ -1310,11 +1217,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks);
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let local_addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100));
         let config = BfdSessionConfig::new(key).with_local_addr(local_addr);
 
@@ -1334,11 +1237,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks.clone());
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key);
 
         orch.create_session(config).unwrap();
@@ -1358,11 +1257,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks.clone());
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key);
 
         orch.create_session(config).unwrap();
@@ -1371,11 +1266,13 @@ mod tests {
         let sai_oid = session.sai_oid;
 
         // Transition: Down -> Init -> Up
-        orch.handle_state_change(sai_oid, BfdSessionState::Init).unwrap();
+        orch.handle_state_change(sai_oid, BfdSessionState::Init)
+            .unwrap();
         let session = orch.get_session("default::10.0.0.1").unwrap();
         assert_eq!(session.state, BfdSessionState::Init);
 
-        orch.handle_state_change(sai_oid, BfdSessionState::Up).unwrap();
+        orch.handle_state_change(sai_oid, BfdSessionState::Up)
+            .unwrap();
         let session = orch.get_session("default::10.0.0.1").unwrap();
         assert_eq!(session.state, BfdSessionState::Up);
 
@@ -1388,11 +1285,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks);
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key);
 
         orch.create_session(config).unwrap();
@@ -1401,8 +1294,10 @@ mod tests {
         let sai_oid = session.sai_oid;
 
         // Transition: Down -> Up -> Down
-        orch.handle_state_change(sai_oid, BfdSessionState::Up).unwrap();
-        orch.handle_state_change(sai_oid, BfdSessionState::Down).unwrap();
+        orch.handle_state_change(sai_oid, BfdSessionState::Up)
+            .unwrap();
+        orch.handle_state_change(sai_oid, BfdSessionState::Down)
+            .unwrap();
 
         let session = orch.get_session("default::10.0.0.1").unwrap();
         assert_eq!(session.state, BfdSessionState::Down);
@@ -1415,11 +1310,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks);
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key);
 
         orch.create_session(config).unwrap();
@@ -1427,7 +1318,8 @@ mod tests {
         let session = orch.get_session("default::10.0.0.1").unwrap();
         let sai_oid = session.sai_oid;
 
-        orch.handle_state_change(sai_oid, BfdSessionState::AdminDown).unwrap();
+        orch.handle_state_change(sai_oid, BfdSessionState::AdminDown)
+            .unwrap();
 
         let session = orch.get_session("default::10.0.0.1").unwrap();
         assert_eq!(session.state, BfdSessionState::AdminDown);
@@ -1439,11 +1331,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks.clone());
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key);
 
         orch.create_session(config).unwrap();
@@ -1452,7 +1340,8 @@ mod tests {
         let sai_oid = session.sai_oid;
 
         // Try to set the same state (Down)
-        orch.handle_state_change(sai_oid, BfdSessionState::Down).unwrap();
+        orch.handle_state_change(sai_oid, BfdSessionState::Down)
+            .unwrap();
 
         // State change counter should not increment
         assert_eq!(orch.stats().state_changes, 0);
@@ -1468,11 +1357,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks.clone());
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key);
 
         orch.create_session(config).unwrap();
@@ -1480,7 +1365,8 @@ mod tests {
         let session = orch.get_session("default::10.0.0.1").unwrap();
         let sai_oid = session.sai_oid;
 
-        orch.handle_state_change(sai_oid, BfdSessionState::Up).unwrap();
+        orch.handle_state_change(sai_oid, BfdSessionState::Up)
+            .unwrap();
 
         // Verify notification was sent
         let notifications = callbacks.notifications.lock().unwrap();
@@ -1510,11 +1396,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::with_tsa_active());
         orch.set_callbacks(callbacks.clone());
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key).with_shutdown_bfd_during_tsa(true);
 
         orch.create_session(config).unwrap();
@@ -1534,11 +1416,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::with_tsa_active());
         orch.set_callbacks(callbacks);
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key).with_shutdown_bfd_during_tsa(false);
 
         orch.create_session(config).unwrap();
@@ -1554,11 +1432,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::with_tsa_active());
         orch.set_callbacks(callbacks);
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key).with_shutdown_bfd_during_tsa(true);
 
         orch.create_session(config).unwrap();
@@ -1578,14 +1452,9 @@ mod tests {
 
         // Create sessions: some with shutdown flag, some without
         for i in 1..=4 {
-            let key = BfdSessionKey::new(
-                "default",
-                None,
-                IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)),
-            );
+            let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)));
             let shutdown_flag = i % 2 == 0; // shutdown for 2 and 4
-            let config = BfdSessionConfig::new(key)
-                .with_shutdown_bfd_during_tsa(shutdown_flag);
+            let config = BfdSessionConfig::new(key).with_shutdown_bfd_during_tsa(shutdown_flag);
 
             orch.create_session(config).unwrap();
         }
@@ -1613,13 +1482,8 @@ mod tests {
 
         // Create sessions with shutdown flag
         for i in 1..=3 {
-            let key = BfdSessionKey::new(
-                "default",
-                None,
-                IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)),
-            );
-            let config = BfdSessionConfig::new(key)
-                .with_shutdown_bfd_during_tsa(true);
+            let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)));
+            let config = BfdSessionConfig::new(key).with_shutdown_bfd_during_tsa(true);
 
             orch.create_session(config).unwrap();
         }
@@ -1647,11 +1511,7 @@ mod tests {
         orch.set_callbacks(callbacks);
 
         for i in 1..=5 {
-            let key = BfdSessionKey::new(
-                "default",
-                None,
-                IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)),
-            );
+            let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)));
             let config = BfdSessionConfig::new(key);
             orch.create_session(config).unwrap();
         }
@@ -1666,18 +1526,15 @@ mod tests {
         orch.set_callbacks(callbacks);
 
         for i in 1..=5 {
-            let key = BfdSessionKey::new(
-                "default",
-                None,
-                IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)),
-            );
+            let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)));
             let config = BfdSessionConfig::new(key);
             orch.create_session(config).unwrap();
         }
 
         // Remove 3 sessions
         for i in 1..=3 {
-            orch.remove_session(&format!("default::10.0.0.{}", i)).unwrap();
+            orch.remove_session(&format!("default::10.0.0.{}", i))
+                .unwrap();
         }
 
         assert_eq!(orch.stats().sessions_removed, 3);
@@ -1690,11 +1547,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::new());
         orch.set_callbacks(callbacks);
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key);
 
         orch.create_session(config).unwrap();
@@ -1703,10 +1556,14 @@ mod tests {
         let sai_oid = session.sai_oid;
 
         // Multiple state changes
-        orch.handle_state_change(sai_oid, BfdSessionState::Init).unwrap();
-        orch.handle_state_change(sai_oid, BfdSessionState::Up).unwrap();
-        orch.handle_state_change(sai_oid, BfdSessionState::Down).unwrap();
-        orch.handle_state_change(sai_oid, BfdSessionState::Up).unwrap();
+        orch.handle_state_change(sai_oid, BfdSessionState::Init)
+            .unwrap();
+        orch.handle_state_change(sai_oid, BfdSessionState::Up)
+            .unwrap();
+        orch.handle_state_change(sai_oid, BfdSessionState::Down)
+            .unwrap();
+        orch.handle_state_change(sai_oid, BfdSessionState::Up)
+            .unwrap();
 
         assert_eq!(orch.stats().state_changes, 4);
     }
@@ -1718,13 +1575,8 @@ mod tests {
         orch.set_callbacks(callbacks);
 
         for i in 1..=3 {
-            let key = BfdSessionKey::new(
-                "default",
-                None,
-                IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)),
-            );
-            let config = BfdSessionConfig::new(key)
-                .with_shutdown_bfd_during_tsa(true);
+            let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)));
+            let config = BfdSessionConfig::new(key).with_shutdown_bfd_during_tsa(true);
 
             orch.create_session(config).unwrap();
         }
@@ -1748,11 +1600,7 @@ mod tests {
         let callbacks = Arc::new(TestCallbacks::with_software_bfd());
         orch.set_callbacks(callbacks.clone());
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key);
 
         orch.create_session(config).unwrap();
@@ -1783,11 +1631,7 @@ mod tests {
     fn test_create_session_without_callbacks() {
         let mut orch = BfdOrch::new(BfdOrchConfig::default());
 
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         let config = BfdSessionConfig::new(key);
 
         let result = orch.create_session(config);

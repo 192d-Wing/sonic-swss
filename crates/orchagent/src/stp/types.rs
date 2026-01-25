@@ -110,22 +110,13 @@ mod tests {
 
     #[test]
     fn test_stp_state_to_sai() {
-        assert_eq!(
-            StpState::Disabled.to_sai_state(),
-            SaiStpPortState::Blocking
-        );
-        assert_eq!(
-            StpState::Blocking.to_sai_state(),
-            SaiStpPortState::Blocking
-        );
+        assert_eq!(StpState::Disabled.to_sai_state(), SaiStpPortState::Blocking);
+        assert_eq!(StpState::Blocking.to_sai_state(), SaiStpPortState::Blocking);
         assert_eq!(
             StpState::Listening.to_sai_state(),
             SaiStpPortState::Blocking
         );
-        assert_eq!(
-            StpState::Learning.to_sai_state(),
-            SaiStpPortState::Learning
-        );
+        assert_eq!(StpState::Learning.to_sai_state(), SaiStpPortState::Learning);
         assert_eq!(
             StpState::Forwarding.to_sai_state(),
             SaiStpPortState::Forwarding

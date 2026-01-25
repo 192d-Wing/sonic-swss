@@ -436,9 +436,8 @@ impl TryFrom<u16> for MetaDataValue {
     type Error = String;
 
     fn try_from(value: u16) -> Result<Self, Self::Error> {
-        Self::new(value).ok_or_else(|| {
-            format!("Metadata value {} out of range (0-{})", value, Self::MAX)
-        })
+        Self::new(value)
+            .ok_or_else(|| format!("Metadata value {} out of range (0-{})", value, Self::MAX))
     }
 }
 
@@ -482,31 +481,70 @@ mod tests {
 
     #[test]
     fn test_acl_bind_point_parse() {
-        assert_eq!("PORT".parse::<AclBindPointType>().unwrap(), AclBindPointType::Port);
-        assert_eq!("LAG".parse::<AclBindPointType>().unwrap(), AclBindPointType::Lag);
-        assert_eq!("SWITCH".parse::<AclBindPointType>().unwrap(), AclBindPointType::Switch);
+        assert_eq!(
+            "PORT".parse::<AclBindPointType>().unwrap(),
+            AclBindPointType::Port
+        );
+        assert_eq!(
+            "LAG".parse::<AclBindPointType>().unwrap(),
+            AclBindPointType::Lag
+        );
+        assert_eq!(
+            "SWITCH".parse::<AclBindPointType>().unwrap(),
+            AclBindPointType::Switch
+        );
     }
 
     #[test]
     fn test_acl_match_field_parse() {
-        assert_eq!("SRC_IP".parse::<AclMatchField>().unwrap(), AclMatchField::SrcIp);
-        assert_eq!("DST_IPV6".parse::<AclMatchField>().unwrap(), AclMatchField::DstIpv6);
-        assert_eq!("TCP_FLAGS".parse::<AclMatchField>().unwrap(), AclMatchField::TcpFlags);
-        assert_eq!("IN_PORTS".parse::<AclMatchField>().unwrap(), AclMatchField::InPorts);
+        assert_eq!(
+            "SRC_IP".parse::<AclMatchField>().unwrap(),
+            AclMatchField::SrcIp
+        );
+        assert_eq!(
+            "DST_IPV6".parse::<AclMatchField>().unwrap(),
+            AclMatchField::DstIpv6
+        );
+        assert_eq!(
+            "TCP_FLAGS".parse::<AclMatchField>().unwrap(),
+            AclMatchField::TcpFlags
+        );
+        assert_eq!(
+            "IN_PORTS".parse::<AclMatchField>().unwrap(),
+            AclMatchField::InPorts
+        );
     }
 
     #[test]
     fn test_acl_action_type_parse() {
-        assert_eq!("PACKET_ACTION".parse::<AclActionType>().unwrap(), AclActionType::PacketAction);
-        assert_eq!("REDIRECT_ACTION".parse::<AclActionType>().unwrap(), AclActionType::Redirect);
-        assert_eq!("SET_DSCP".parse::<AclActionType>().unwrap(), AclActionType::SetDscp);
+        assert_eq!(
+            "PACKET_ACTION".parse::<AclActionType>().unwrap(),
+            AclActionType::PacketAction
+        );
+        assert_eq!(
+            "REDIRECT_ACTION".parse::<AclActionType>().unwrap(),
+            AclActionType::Redirect
+        );
+        assert_eq!(
+            "SET_DSCP".parse::<AclActionType>().unwrap(),
+            AclActionType::SetDscp
+        );
     }
 
     #[test]
     fn test_acl_packet_action_parse() {
-        assert_eq!("FORWARD".parse::<AclPacketAction>().unwrap(), AclPacketAction::Forward);
-        assert_eq!("DROP".parse::<AclPacketAction>().unwrap(), AclPacketAction::Drop);
-        assert_eq!("TRAP".parse::<AclPacketAction>().unwrap(), AclPacketAction::Trap);
+        assert_eq!(
+            "FORWARD".parse::<AclPacketAction>().unwrap(),
+            AclPacketAction::Forward
+        );
+        assert_eq!(
+            "DROP".parse::<AclPacketAction>().unwrap(),
+            AclPacketAction::Drop
+        );
+        assert_eq!(
+            "TRAP".parse::<AclPacketAction>().unwrap(),
+            AclPacketAction::Trap
+        );
     }
 
     #[test]

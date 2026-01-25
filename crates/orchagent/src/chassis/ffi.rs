@@ -1,8 +1,10 @@
 //! FFI exports for ChassisOrch.
 
-use std::cell::RefCell;
 use super::orch::{ChassisOrch, ChassisOrchCallbacks, ChassisOrchConfig, Result};
-use super::types::{FabricPortKey, RawSaiObjectId, SystemPortConfig, SystemPortEntry, SystemPortKey};
+use super::types::{
+    FabricPortKey, RawSaiObjectId, SystemPortConfig, SystemPortEntry, SystemPortKey,
+};
+use std::cell::RefCell;
 
 /// FFI stub callbacks that do nothing (for C++ interop).
 struct FfiChassisCallbacks;

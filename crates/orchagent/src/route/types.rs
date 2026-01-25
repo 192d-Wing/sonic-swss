@@ -250,8 +250,7 @@ mod tests {
 
     #[test]
     fn test_route_nhg_with_index() {
-        let nhg = RouteNhg::new(NextHopGroupKey::new())
-            .with_nhg_index("nhg_1");
+        let nhg = RouteNhg::new(NextHopGroupKey::new()).with_nhg_index("nhg_1");
         assert!(nhg.is_nhg_orch_owned());
         assert!(!nhg.is_blackhole()); // Has nhg_index, so not blackhole
     }
@@ -282,10 +281,10 @@ mod tests {
         .unwrap();
 
         // Add to default VRF
-        tables.entry(0).or_default().insert(
-            prefix.clone(),
-            RouteEntry::new(RouteNhg::default()),
-        );
+        tables
+            .entry(0)
+            .or_default()
+            .insert(prefix.clone(), RouteEntry::new(RouteNhg::default()));
 
         assert!(tables.contains_key(&0));
         assert!(tables.get(&0).unwrap().contains_key(&prefix));

@@ -1,7 +1,7 @@
 //! FFI exports for MuxOrch.
 
-use std::cell::RefCell;
 use super::orch::{MuxOrch, MuxOrchConfig};
+use std::cell::RefCell;
 
 thread_local! {
     static MUX_ORCH: RefCell<Option<Box<MuxOrch>>> = const { RefCell::new(None) };

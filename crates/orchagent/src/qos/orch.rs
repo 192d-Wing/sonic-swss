@@ -1,9 +1,9 @@
 //! QoS orchestration logic.
 
 use super::types::{QosMapEntry, QosStats, SchedulerEntry, WredProfile};
-use std::collections::HashMap;
 use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
 use crate::audit_log;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub enum QosOrchError {
@@ -108,24 +108,29 @@ impl QosOrch {
     }
 
     pub fn remove_map(&mut self, name: &str) -> Result<QosMapEntry, QosOrchError> {
-        self.qos_maps.remove(name)
+        self.qos_maps
+            .remove(name)
             .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "QosOrch", "remove_map")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(name)
-                        .with_object_type("qos_map")
-                        .with_error(&format!("QoS map not found: {}", name))
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "QosOrch",
+                    "remove_map"
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(name)
+                .with_object_type("qos_map")
+                .with_error(&format!("QoS map not found: {}", name)));
                 QosOrchError::MapNotFound(name.to_string())
             })
             .map(|entry| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "QosOrch", "remove_map")
-                        .with_outcome(AuditOutcome::Success)
-                        .with_object_id(name)
-                        .with_object_type("qos_map")
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "QosOrch",
+                    "remove_map"
+                )
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(name)
+                .with_object_type("qos_map"));
                 entry
             })
     }
@@ -135,7 +140,9 @@ impl QosOrch {
             return Err(QosOrchError::InvalidMapping(from, to));
         }
 
-        let map = self.qos_maps.get_mut(name)
+        let map = self
+            .qos_maps
+            .get_mut(name)
             .ok_or_else(|| QosOrchError::MapNotFound(name.to_string()))?;
 
         map.add_mapping(from, to);
@@ -188,24 +195,29 @@ impl QosOrch {
     }
 
     pub fn remove_scheduler(&mut self, name: &str) -> Result<SchedulerEntry, QosOrchError> {
-        self.schedulers.remove(name)
+        self.schedulers
+            .remove(name)
             .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "QosOrch", "remove_scheduler")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(name)
-                        .with_object_type("scheduler")
-                        .with_error(&format!("Scheduler not found: {}", name))
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "QosOrch",
+                    "remove_scheduler"
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(name)
+                .with_object_type("scheduler")
+                .with_error(&format!("Scheduler not found: {}", name)));
                 QosOrchError::SchedulerNotFound(name.to_string())
             })
             .map(|entry| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "QosOrch", "remove_scheduler")
-                        .with_outcome(AuditOutcome::Success)
-                        .with_object_id(name)
-                        .with_object_type("scheduler")
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "QosOrch",
+                    "remove_scheduler"
+                )
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(name)
+                .with_object_type("scheduler"));
                 entry
             })
     }
@@ -218,7 +230,9 @@ impl QosOrch {
         let name = profile.name.clone();
 
         if self.wred_profiles.contains_key(&name) {
-            return Err(QosOrchError::SaiError("WRED profile already exists".to_string()));
+            return Err(QosOrchError::SaiError(
+                "WRED profile already exists".to_string(),
+            ));
         }
 
         // Validate thresholds
@@ -228,7 +242,8 @@ impl QosOrch {
             }
         }
 
-        if let (Some(min), Some(max)) = (profile.yellow_min_threshold, profile.yellow_max_threshold) {
+        if let (Some(min), Some(max)) = (profile.yellow_min_threshold, profile.yellow_max_threshold)
+        {
             if min > max {
                 return Err(QosOrchError::InvalidThreshold(min));
             }
@@ -240,14 +255,16 @@ impl QosOrch {
             }
         }
 
-        self.stats.stats.wred_profiles_created = self.stats.stats.wred_profiles_created.saturating_add(1);
+        self.stats.stats.wred_profiles_created =
+            self.stats.stats.wred_profiles_created.saturating_add(1);
         self.wred_profiles.insert(name, profile);
 
         Ok(())
     }
 
     pub fn remove_wred_profile(&mut self, name: &str) -> Result<WredProfile, QosOrchError> {
-        self.wred_profiles.remove(name)
+        self.wred_profiles
+            .remove(name)
             .ok_or_else(|| QosOrchError::WredNotFound(name.to_string()))
     }
 
@@ -270,8 +287,8 @@ impl QosOrch {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::{QosMapType, SchedulerConfig, SchedulerType};
+    use super::*;
 
     fn create_test_qos_map(name: &str) -> QosMapEntry {
         let mut map = QosMapEntry::new(name.to_string(), QosMapType::DscpToTc);
@@ -330,7 +347,10 @@ mod tests {
 
         let result = orch.add_map(map);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), QosOrchError::InvalidMapping(64, 0)));
+        assert!(matches!(
+            result.unwrap_err(),
+            QosOrchError::InvalidMapping(64, 0)
+        ));
         assert_eq!(orch.map_count(), 0);
     }
 
@@ -344,7 +364,10 @@ mod tests {
 
         let result = orch.add_map(map);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), QosOrchError::InvalidMapping(0, 64)));
+        assert!(matches!(
+            result.unwrap_err(),
+            QosOrchError::InvalidMapping(0, 64)
+        ));
         assert_eq!(orch.map_count(), 0);
     }
 
@@ -400,12 +423,18 @@ mod tests {
         // Invalid from value
         let result = orch.update_map_mapping("dscp_to_tc_map", 64, 0);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), QosOrchError::InvalidMapping(64, 0)));
+        assert!(matches!(
+            result.unwrap_err(),
+            QosOrchError::InvalidMapping(64, 0)
+        ));
 
         // Invalid to value
         let result = orch.update_map_mapping("dscp_to_tc_map", 0, 64);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), QosOrchError::InvalidMapping(0, 64)));
+        assert!(matches!(
+            result.unwrap_err(),
+            QosOrchError::InvalidMapping(0, 64)
+        ));
     }
 
     #[test]
@@ -454,7 +483,10 @@ mod tests {
 
         let result = orch.add_scheduler(scheduler);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), QosOrchError::InvalidWeight(0)));
+        assert!(matches!(
+            result.unwrap_err(),
+            QosOrchError::InvalidWeight(0)
+        ));
         assert_eq!(orch.scheduler_count(), 0);
     }
 
@@ -491,7 +523,10 @@ mod tests {
 
         let result = orch.remove_scheduler("nonexistent_scheduler");
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), QosOrchError::SchedulerNotFound(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            QosOrchError::SchedulerNotFound(_)
+        ));
     }
 
     #[test]
@@ -523,7 +558,10 @@ mod tests {
 
         let result = orch.add_wred_profile(profile);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), QosOrchError::InvalidThreshold(2000)));
+        assert!(matches!(
+            result.unwrap_err(),
+            QosOrchError::InvalidThreshold(2000)
+        ));
         assert_eq!(orch.wred_profile_count(), 0);
     }
 
@@ -537,7 +575,10 @@ mod tests {
 
         let result = orch.add_wred_profile(profile);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), QosOrchError::InvalidThreshold(3000)));
+        assert!(matches!(
+            result.unwrap_err(),
+            QosOrchError::InvalidThreshold(3000)
+        ));
         assert_eq!(orch.wred_profile_count(), 0);
     }
 
@@ -551,7 +592,10 @@ mod tests {
 
         let result = orch.add_wred_profile(profile);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), QosOrchError::InvalidThreshold(4000)));
+        assert!(matches!(
+            result.unwrap_err(),
+            QosOrchError::InvalidThreshold(4000)
+        ));
         assert_eq!(orch.wred_profile_count(), 0);
     }
 

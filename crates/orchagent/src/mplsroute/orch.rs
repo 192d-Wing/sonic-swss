@@ -1,6 +1,6 @@
 //! MPLS route orchestration logic.
 
-use super::types::{MplsRouteEntry, MplsRouteKey, MplsRouteStats, MplsRouteConfig, RawSaiObjectId};
+use super::types::{MplsRouteConfig, MplsRouteEntry, MplsRouteKey, MplsRouteStats, RawSaiObjectId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -36,7 +36,12 @@ pub struct MplsRouteOrchStats {
 pub trait MplsRouteOrchCallbacks: Send + Sync {
     fn create_mpls_route(&self, label: u32, config: &MplsRouteConfig) -> Result<RawSaiObjectId>;
     fn remove_mpls_route(&self, label: u32, route_oid: RawSaiObjectId) -> Result<()>;
-    fn update_mpls_route(&self, label: u32, route_oid: RawSaiObjectId, config: &MplsRouteConfig) -> Result<()>;
+    fn update_mpls_route(
+        &self,
+        label: u32,
+        route_oid: RawSaiObjectId,
+        config: &MplsRouteConfig,
+    ) -> Result<()>;
     fn create_next_hop(&self, ip_address: &str) -> Result<RawSaiObjectId>;
     fn remove_next_hop(&self, nh_oid: RawSaiObjectId) -> Result<()>;
     fn on_route_created(&self, label: u32, route_oid: RawSaiObjectId);
@@ -65,7 +70,11 @@ impl<C: MplsRouteOrchCallbacks> MplsRouteOrch<C> {
         self
     }
 
-    pub fn add_route(&mut self, key: MplsRouteKey, config: MplsRouteConfig) -> Result<RawSaiObjectId> {
+    pub fn add_route(
+        &mut self,
+        key: MplsRouteKey,
+        config: MplsRouteConfig,
+    ) -> Result<RawSaiObjectId> {
         // Validate label
         key.validate_label()
             .map_err(|_| MplsRouteOrchError::InvalidLabel(key.label))?;
@@ -84,8 +93,9 @@ impl<C: MplsRouteOrchCallbacks> MplsRouteOrch<C> {
             return Err(MplsRouteOrchError::RouteExists(key));
         }
 
-        let callbacks = self.callbacks.as_ref()
-            .ok_or(MplsRouteOrchError::SaiError("No callbacks registered".into()))?;
+        let callbacks = self.callbacks.as_ref().ok_or(MplsRouteOrchError::SaiError(
+            "No callbacks registered".into(),
+        ))?;
 
         // Create the MPLS route
         let route_oid = callbacks.create_mpls_route(key.label, &config)?;
@@ -125,23 +135,23 @@ impl<C: MplsRouteOrchCallbacks> MplsRouteOrch<C> {
     }
 
     pub fn remove_route(&mut self, key: &MplsRouteKey) -> Result<()> {
-        let entry = self.routes.remove(key)
-            .ok_or_else(|| {
-                let audit_record = AuditRecord::new(
-                    AuditCategory::ResourceDelete,
-                    "MplsRouteOrch",
-                    "remove_mpls_route",
-                )
-                .with_outcome(AuditOutcome::Failure)
-                .with_object_id(&key.label.to_string())
-                .with_object_type("mpls_route")
-                .with_error("Route not found");
-                audit_log!(audit_record);
-                MplsRouteOrchError::RouteNotFound(key.clone())
-            })?;
+        let entry = self.routes.remove(key).ok_or_else(|| {
+            let audit_record = AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "MplsRouteOrch",
+                "remove_mpls_route",
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&key.label.to_string())
+            .with_object_type("mpls_route")
+            .with_error("Route not found");
+            audit_log!(audit_record);
+            MplsRouteOrchError::RouteNotFound(key.clone())
+        })?;
 
-        let callbacks = self.callbacks.as_ref()
-            .ok_or(MplsRouteOrchError::SaiError("No callbacks registered".into()))?;
+        let callbacks = self.callbacks.as_ref().ok_or(MplsRouteOrchError::SaiError(
+            "No callbacks registered".into(),
+        ))?;
 
         // Remove the next hop if it exists
         if entry.nh_oid != 0 {
@@ -177,11 +187,14 @@ impl<C: MplsRouteOrchCallbacks> MplsRouteOrch<C> {
         key.validate_label()
             .map_err(|_| MplsRouteOrchError::InvalidLabel(key.label))?;
 
-        let entry = self.routes.get_mut(key)
+        let entry = self
+            .routes
+            .get_mut(key)
             .ok_or_else(|| MplsRouteOrchError::RouteNotFound(key.clone()))?;
 
-        let callbacks = self.callbacks.as_ref()
-            .ok_or(MplsRouteOrchError::SaiError("No callbacks registered".into()))?;
+        let callbacks = self.callbacks.as_ref().ok_or(MplsRouteOrchError::SaiError(
+            "No callbacks registered".into(),
+        ))?;
 
         let old_next_hop = entry.config.next_hop.clone();
 
@@ -235,7 +248,10 @@ impl<C: MplsRouteOrchCallbacks> MplsRouteOrch<C> {
     }
 
     pub fn get_all_routes(&self) -> Vec<(MplsRouteKey, &MplsRouteEntry)> {
-        self.routes.iter().map(|(k, v): (&MplsRouteKey, &MplsRouteEntry)| (k.clone(), v)).collect()
+        self.routes
+            .iter()
+            .map(|(k, v): (&MplsRouteKey, &MplsRouteEntry)| (k.clone(), v))
+            .collect()
     }
 
     pub fn route_exists(&self, key: &MplsRouteKey) -> bool {
@@ -257,13 +273,17 @@ impl<C: MplsRouteOrchCallbacks> MplsRouteOrch<C> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::MplsAction;
+    use super::*;
 
     struct MockMplsCallbacks;
 
     impl MplsRouteOrchCallbacks for MockMplsCallbacks {
-        fn create_mpls_route(&self, _label: u32, _config: &MplsRouteConfig) -> Result<RawSaiObjectId> {
+        fn create_mpls_route(
+            &self,
+            _label: u32,
+            _config: &MplsRouteConfig,
+        ) -> Result<RawSaiObjectId> {
             Ok(0x1000)
         }
 
@@ -271,7 +291,12 @@ mod tests {
             Ok(())
         }
 
-        fn update_mpls_route(&self, _label: u32, _route_oid: RawSaiObjectId, _config: &MplsRouteConfig) -> Result<()> {
+        fn update_mpls_route(
+            &self,
+            _label: u32,
+            _route_oid: RawSaiObjectId,
+            _config: &MplsRouteConfig,
+        ) -> Result<()> {
             Ok(())
         }
 
@@ -289,7 +314,8 @@ mod tests {
 
     #[test]
     fn test_mpls_route_orch_new() {
-        let orch: MplsRouteOrch<MockMplsCallbacks> = MplsRouteOrch::new(MplsRouteOrchConfig::default());
+        let orch: MplsRouteOrch<MockMplsCallbacks> =
+            MplsRouteOrch::new(MplsRouteOrchConfig::default());
         assert_eq!(orch.route_count(), 0);
         assert_eq!(orch.stats().stats.routes_created, 0);
         assert_eq!(orch.stats().stats.routes_removed, 0);
@@ -298,8 +324,9 @@ mod tests {
 
     #[test]
     fn test_add_route_with_pop_action() {
-        let mut orch: MplsRouteOrch<MockMplsCallbacks> = MplsRouteOrch::new(MplsRouteOrchConfig::default())
-            .with_callbacks(Arc::new(MockMplsCallbacks));
+        let mut orch: MplsRouteOrch<MockMplsCallbacks> =
+            MplsRouteOrch::new(MplsRouteOrchConfig::default())
+                .with_callbacks(Arc::new(MockMplsCallbacks));
 
         let key = MplsRouteKey::new(100);
         let config = MplsRouteConfig {
@@ -318,8 +345,9 @@ mod tests {
 
     #[test]
     fn test_add_route_with_swap_action() {
-        let mut orch: MplsRouteOrch<MockMplsCallbacks> = MplsRouteOrch::new(MplsRouteOrchConfig::default())
-            .with_callbacks(Arc::new(MockMplsCallbacks));
+        let mut orch: MplsRouteOrch<MockMplsCallbacks> =
+            MplsRouteOrch::new(MplsRouteOrchConfig::default())
+                .with_callbacks(Arc::new(MockMplsCallbacks));
 
         let key = MplsRouteKey::new(200);
         let config = MplsRouteConfig {
@@ -338,8 +366,9 @@ mod tests {
 
     #[test]
     fn test_add_route_with_push_action() {
-        let mut orch: MplsRouteOrch<MockMplsCallbacks> = MplsRouteOrch::new(MplsRouteOrchConfig::default())
-            .with_callbacks(Arc::new(MockMplsCallbacks));
+        let mut orch: MplsRouteOrch<MockMplsCallbacks> =
+            MplsRouteOrch::new(MplsRouteOrchConfig::default())
+                .with_callbacks(Arc::new(MockMplsCallbacks));
 
         let key = MplsRouteKey::new(300);
         let config = MplsRouteConfig {
@@ -358,8 +387,9 @@ mod tests {
 
     #[test]
     fn test_add_route_invalid_label() {
-        let mut orch: MplsRouteOrch<MockMplsCallbacks> = MplsRouteOrch::new(MplsRouteOrchConfig::default())
-            .with_callbacks(Arc::new(MockMplsCallbacks));
+        let mut orch: MplsRouteOrch<MockMplsCallbacks> =
+            MplsRouteOrch::new(MplsRouteOrchConfig::default())
+                .with_callbacks(Arc::new(MockMplsCallbacks));
 
         let key = MplsRouteKey::new(2_000_000); // Invalid label
         let config = MplsRouteConfig {
@@ -375,8 +405,9 @@ mod tests {
 
     #[test]
     fn test_add_route_duplicate() {
-        let mut orch: MplsRouteOrch<MockMplsCallbacks> = MplsRouteOrch::new(MplsRouteOrchConfig::default())
-            .with_callbacks(Arc::new(MockMplsCallbacks));
+        let mut orch: MplsRouteOrch<MockMplsCallbacks> =
+            MplsRouteOrch::new(MplsRouteOrchConfig::default())
+                .with_callbacks(Arc::new(MockMplsCallbacks));
 
         let key = MplsRouteKey::new(100);
         let config = MplsRouteConfig {
@@ -393,7 +424,8 @@ mod tests {
 
     #[test]
     fn test_add_route_without_callbacks() {
-        let mut orch: MplsRouteOrch<MockMplsCallbacks> = MplsRouteOrch::new(MplsRouteOrchConfig::default());
+        let mut orch: MplsRouteOrch<MockMplsCallbacks> =
+            MplsRouteOrch::new(MplsRouteOrchConfig::default());
 
         let key = MplsRouteKey::new(100);
         let config = MplsRouteConfig {
@@ -409,8 +441,9 @@ mod tests {
 
     #[test]
     fn test_remove_route() {
-        let mut orch: MplsRouteOrch<MockMplsCallbacks> = MplsRouteOrch::new(MplsRouteOrchConfig::default())
-            .with_callbacks(Arc::new(MockMplsCallbacks));
+        let mut orch: MplsRouteOrch<MockMplsCallbacks> =
+            MplsRouteOrch::new(MplsRouteOrchConfig::default())
+                .with_callbacks(Arc::new(MockMplsCallbacks));
 
         let key = MplsRouteKey::new(100);
         let config = MplsRouteConfig {
@@ -431,8 +464,9 @@ mod tests {
 
     #[test]
     fn test_remove_nonexistent_route() {
-        let mut orch: MplsRouteOrch<MockMplsCallbacks> = MplsRouteOrch::new(MplsRouteOrchConfig::default())
-            .with_callbacks(Arc::new(MockMplsCallbacks));
+        let mut orch: MplsRouteOrch<MockMplsCallbacks> =
+            MplsRouteOrch::new(MplsRouteOrchConfig::default())
+                .with_callbacks(Arc::new(MockMplsCallbacks));
 
         let key = MplsRouteKey::new(100);
         let result = orch.remove_route(&key);
@@ -441,8 +475,9 @@ mod tests {
 
     #[test]
     fn test_update_route() {
-        let mut orch: MplsRouteOrch<MockMplsCallbacks> = MplsRouteOrch::new(MplsRouteOrchConfig::default())
-            .with_callbacks(Arc::new(MockMplsCallbacks));
+        let mut orch: MplsRouteOrch<MockMplsCallbacks> =
+            MplsRouteOrch::new(MplsRouteOrchConfig::default())
+                .with_callbacks(Arc::new(MockMplsCallbacks));
 
         let key = MplsRouteKey::new(100);
         let config = MplsRouteConfig {
@@ -470,8 +505,9 @@ mod tests {
 
     #[test]
     fn test_update_nonexistent_route() {
-        let mut orch: MplsRouteOrch<MockMplsCallbacks> = MplsRouteOrch::new(MplsRouteOrchConfig::default())
-            .with_callbacks(Arc::new(MockMplsCallbacks));
+        let mut orch: MplsRouteOrch<MockMplsCallbacks> =
+            MplsRouteOrch::new(MplsRouteOrchConfig::default())
+                .with_callbacks(Arc::new(MockMplsCallbacks));
 
         let key = MplsRouteKey::new(100);
         let config = MplsRouteConfig {
@@ -487,8 +523,9 @@ mod tests {
 
     #[test]
     fn test_get_all_routes() {
-        let mut orch: MplsRouteOrch<MockMplsCallbacks> = MplsRouteOrch::new(MplsRouteOrchConfig::default())
-            .with_callbacks(Arc::new(MockMplsCallbacks));
+        let mut orch: MplsRouteOrch<MockMplsCallbacks> =
+            MplsRouteOrch::new(MplsRouteOrchConfig::default())
+                .with_callbacks(Arc::new(MockMplsCallbacks));
 
         let config = MplsRouteConfig {
             action: MplsAction::Pop,
@@ -508,8 +545,9 @@ mod tests {
 
     #[test]
     fn test_route_exists() {
-        let mut orch: MplsRouteOrch<MockMplsCallbacks> = MplsRouteOrch::new(MplsRouteOrchConfig::default())
-            .with_callbacks(Arc::new(MockMplsCallbacks));
+        let mut orch: MplsRouteOrch<MockMplsCallbacks> =
+            MplsRouteOrch::new(MplsRouteOrchConfig::default())
+                .with_callbacks(Arc::new(MockMplsCallbacks));
 
         let key = MplsRouteKey::new(100);
         let config = MplsRouteConfig {
@@ -526,8 +564,9 @@ mod tests {
 
     #[test]
     fn test_route_count() {
-        let mut orch: MplsRouteOrch<MockMplsCallbacks> = MplsRouteOrch::new(MplsRouteOrchConfig::default())
-            .with_callbacks(Arc::new(MockMplsCallbacks));
+        let mut orch: MplsRouteOrch<MockMplsCallbacks> =
+            MplsRouteOrch::new(MplsRouteOrchConfig::default())
+                .with_callbacks(Arc::new(MockMplsCallbacks));
 
         assert_eq!(orch.route_count(), 0);
 
@@ -556,8 +595,9 @@ mod tests {
 
     #[test]
     fn test_multiple_route_operations_sequence() {
-        let mut orch: MplsRouteOrch<MockMplsCallbacks> = MplsRouteOrch::new(MplsRouteOrchConfig::default())
-            .with_callbacks(Arc::new(MockMplsCallbacks));
+        let mut orch: MplsRouteOrch<MockMplsCallbacks> =
+            MplsRouteOrch::new(MplsRouteOrchConfig::default())
+                .with_callbacks(Arc::new(MockMplsCallbacks));
 
         // Create multiple routes
         let config = MplsRouteConfig {
@@ -614,8 +654,9 @@ mod tests {
 
     #[test]
     fn test_get_route_mut() {
-        let mut orch: MplsRouteOrch<MockMplsCallbacks> = MplsRouteOrch::new(MplsRouteOrchConfig::default())
-            .with_callbacks(Arc::new(MockMplsCallbacks));
+        let mut orch: MplsRouteOrch<MockMplsCallbacks> =
+            MplsRouteOrch::new(MplsRouteOrchConfig::default())
+                .with_callbacks(Arc::new(MockMplsCallbacks));
 
         let key = MplsRouteKey::new(100);
         let config = MplsRouteConfig {

@@ -97,9 +97,7 @@ pub unsafe extern "C" fn rust_route_orch_has_nhg(nhg_key_str: *const c_char) -> 
 ///
 /// - `nhg_key_str` must be a valid null-terminated C string
 #[no_mangle]
-pub unsafe extern "C" fn rust_route_orch_is_nhg_ref_count_zero(
-    nhg_key_str: *const c_char,
-) -> bool {
+pub unsafe extern "C" fn rust_route_orch_is_nhg_ref_count_zero(nhg_key_str: *const c_char) -> bool {
     if nhg_key_str.is_null() {
         return true;
     }
@@ -162,9 +160,7 @@ pub unsafe extern "C" fn rust_route_orch_has_route(
 ///
 /// - `nhg_key_str` must be a valid null-terminated C string
 #[no_mangle]
-pub unsafe extern "C" fn rust_route_orch_get_nhg_id(
-    nhg_key_str: *const c_char,
-) -> RawSaiObjectId {
+pub unsafe extern "C" fn rust_route_orch_get_nhg_id(nhg_key_str: *const c_char) -> RawSaiObjectId {
     if nhg_key_str.is_null() {
         return 0;
     }
@@ -196,9 +192,7 @@ pub unsafe extern "C" fn rust_route_orch_get_nhg_id(
 ///
 /// - `nhg_key_str` must be a valid null-terminated C string
 #[no_mangle]
-pub unsafe extern "C" fn rust_route_orch_get_nhg_ref_count(
-    nhg_key_str: *const c_char,
-) -> u32 {
+pub unsafe extern "C" fn rust_route_orch_get_nhg_ref_count(nhg_key_str: *const c_char) -> u32 {
     if nhg_key_str.is_null() {
         return 0;
     }
@@ -224,8 +218,8 @@ pub unsafe extern "C" fn rust_route_orch_get_nhg_ref_count(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::orch::RouteOrchConfig;
+    use super::*;
     use std::ffi::CString;
 
     #[test]

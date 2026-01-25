@@ -188,7 +188,11 @@ impl PolicerOrch {
     }
 
     /// Creates or updates a policer.
-    pub fn set_policer(&mut self, name: String, config: PolicerConfig) -> Result<(), PolicerOrchError> {
+    pub fn set_policer(
+        &mut self,
+        name: String,
+        config: PolicerConfig,
+    ) -> Result<(), PolicerOrchError> {
         let callbacks = self
             .callbacks
             .as_ref()
@@ -199,70 +203,78 @@ impl PolicerOrch {
             // Only rate/burst parameters can be updated
             if !existing.config.is_rate_burst_update(&config) {
                 let error_msg = "Cannot update policer mode/type/actions".to_string();
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_policer")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(&name)
-                        .with_object_type("policer")
-                        .with_error(&error_msg)
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceModify,
+                    "PolicerOrch",
+                    "set_policer"
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(&name)
+                .with_object_type("policer")
+                .with_error(&error_msg));
                 return Err(PolicerOrchError::InvalidConfig(error_msg));
             }
 
             callbacks
                 .update_policer(existing.sai_oid, &config)
                 .map_err(|e| {
-                    audit_log!(
-                        AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_policer")
-                            .with_outcome(AuditOutcome::Failure)
-                            .with_object_id(&name)
-                            .with_object_type("policer")
-                            .with_error(&e)
-                    );
+                    audit_log!(AuditRecord::new(
+                        AuditCategory::ResourceModify,
+                        "PolicerOrch",
+                        "set_policer"
+                    )
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(&name)
+                    .with_object_type("policer")
+                    .with_error(&e));
                     PolicerOrchError::SaiError(e)
                 })?;
 
             existing.config = config;
             self.stats.policers_updated += 1;
 
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_policer")
-                    .with_outcome(AuditOutcome::Success)
-                    .with_object_id(&name)
-                    .with_object_type("policer")
-                    .with_details(serde_json::json!({
-                        "operation": "update",
-                        "mode": "rate_burst_update"
-                    }))
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceModify,
+                "PolicerOrch",
+                "set_policer"
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(&name)
+            .with_object_type("policer")
+            .with_details(serde_json::json!({
+                "operation": "update",
+                "mode": "rate_burst_update"
+            })));
         } else {
             // Create new policer
-            let sai_oid = callbacks
-                .create_policer(&config)
-                .map_err(|e| {
-                    audit_log!(
-                        AuditRecord::new(AuditCategory::ResourceCreate, "PolicerOrch", "set_policer")
-                            .with_outcome(AuditOutcome::Failure)
-                            .with_object_id(&name)
-                            .with_object_type("policer")
-                            .with_error(&e)
-                    );
-                    PolicerOrchError::SaiError(e)
-                })?;
+            let sai_oid = callbacks.create_policer(&config).map_err(|e| {
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceCreate,
+                    "PolicerOrch",
+                    "set_policer"
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(&name)
+                .with_object_type("policer")
+                .with_error(&e));
+                PolicerOrchError::SaiError(e)
+            })?;
 
             let entry = PolicerEntry::new(sai_oid, config);
             self.policers.insert(name.clone(), entry);
             self.stats.policers_created += 1;
 
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceCreate, "PolicerOrch", "set_policer")
-                    .with_outcome(AuditOutcome::Success)
-                    .with_object_id(&name)
-                    .with_object_type("policer")
-                    .with_details(serde_json::json!({
-                        "sai_oid": format!("0x{:x}", sai_oid)
-                    }))
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "PolicerOrch",
+                "set_policer"
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(&name)
+            .with_object_type("policer")
+            .with_details(serde_json::json!({
+                "sai_oid": format!("0x{:x}", sai_oid)
+            })));
         }
 
         Ok(())
@@ -275,19 +287,18 @@ impl PolicerOrch {
             .as_ref()
             .ok_or_else(|| PolicerOrchError::InvalidConfig("No callbacks set".to_string()))?;
 
-        let entry = self
-            .policers
-            .get(name)
-            .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "PolicerOrch", "remove_policer")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(name)
-                        .with_object_type("policer")
-                        .with_error(&format!("Policer not found: {}", name))
-                );
-                PolicerOrchError::PolicerNotFound(name.to_string())
-            })?;
+        let entry = self.policers.get(name).ok_or_else(|| {
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "PolicerOrch",
+                "remove_policer"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(name)
+            .with_object_type("policer")
+            .with_error(&format!("Policer not found: {}", name)));
+            PolicerOrchError::PolicerNotFound(name.to_string())
+        })?;
 
         // Check if policer is still in use
         if entry.ref_count > 0 {
@@ -295,40 +306,44 @@ impl PolicerOrch {
                 "Policer {} is still in use (ref_count={})",
                 name, entry.ref_count
             );
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceDelete, "PolicerOrch", "remove_policer")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(name)
-                    .with_object_type("policer")
-                    .with_error(&error_msg)
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "PolicerOrch",
+                "remove_policer"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(name)
+            .with_object_type("policer")
+            .with_error(&error_msg));
             return Err(PolicerOrchError::InvalidConfig(error_msg));
         }
 
         let sai_oid = entry.sai_oid;
 
-        callbacks
-            .remove_policer(sai_oid)
-            .map_err(|e| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "PolicerOrch", "remove_policer")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(name)
-                        .with_object_type("policer")
-                        .with_error(&e)
-                );
-                PolicerOrchError::SaiError(e)
-            })?;
+        callbacks.remove_policer(sai_oid).map_err(|e| {
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "PolicerOrch",
+                "remove_policer"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(name)
+            .with_object_type("policer")
+            .with_error(&e));
+            PolicerOrchError::SaiError(e)
+        })?;
 
         self.policers.remove(name);
         self.stats.policers_removed += 1;
 
-        audit_log!(
-            AuditRecord::new(AuditCategory::ResourceDelete, "PolicerOrch", "remove_policer")
-                .with_outcome(AuditOutcome::Success)
-                .with_object_id(name)
-                .with_object_type("policer")
-        );
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "PolicerOrch",
+            "remove_policer"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(name)
+        .with_object_type("policer"));
 
         Ok(())
     }
@@ -348,13 +363,15 @@ impl PolicerOrch {
 
         // Check if ports are ready
         if !callbacks.all_ports_ready() {
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_port_storm_control")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(port_name)
-                    .with_object_type("port")
-                    .with_error("Ports not ready")
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceModify,
+                "PolicerOrch",
+                "set_port_storm_control"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(port_name)
+            .with_object_type("port")
+            .with_error("Ports not ready"));
             return Err(PolicerOrchError::PortNotReady);
         }
 
@@ -364,29 +381,31 @@ impl PolicerOrch {
                 "Storm control only supported on Ethernet interfaces: {}",
                 port_name
             );
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_port_storm_control")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(port_name)
-                    .with_object_type("port")
-                    .with_error(&error_msg)
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceModify,
+                "PolicerOrch",
+                "set_port_storm_control"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(port_name)
+            .with_object_type("port")
+            .with_error(&error_msg));
             return Err(PolicerOrchError::InvalidConfig(error_msg));
         }
 
         // Get port ID
-        let port_id = callbacks
-            .get_port_id(port_name)
-            .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_port_storm_control")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(port_name)
-                        .with_object_type("port")
-                        .with_error(&format!("Port not found: {}", port_name))
-                );
-                PolicerOrchError::PortNotFound(port_name.to_string())
-            })?;
+        let port_id = callbacks.get_port_id(port_name).ok_or_else(|| {
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceModify,
+                "PolicerOrch",
+                "set_port_storm_control"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(port_name)
+            .with_object_type("port")
+            .with_error(&format!("Port not found: {}", port_name)));
+            PolicerOrchError::PortNotFound(port_name.to_string())
+        })?;
 
         // Generate policer name: "_<port>_<storm_type>"
         let policer_name = format!("_{}_{}", port_name, storm_type.as_str());
@@ -398,46 +417,50 @@ impl PolicerOrch {
         self.set_policer(policer_name.clone(), config)?;
 
         // Get the policer OID
-        let policer_oid = self
-            .get_policer_oid(&policer_name)
-            .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_port_storm_control")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(port_name)
-                        .with_object_type("port")
-                        .with_error(&format!("Policer not found: {}", policer_name))
-                );
-                PolicerOrchError::PolicerNotFound(policer_name.clone())
-            })?;
+        let policer_oid = self.get_policer_oid(&policer_name).ok_or_else(|| {
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceModify,
+                "PolicerOrch",
+                "set_port_storm_control"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(port_name)
+            .with_object_type("port")
+            .with_error(&format!("Policer not found: {}", policer_name)));
+            PolicerOrchError::PolicerNotFound(policer_name.clone())
+        })?;
 
         // Apply to port
         callbacks
             .set_port_storm_policer(port_id, storm_type, Some(policer_oid))
             .map_err(|e| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_port_storm_control")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(port_name)
-                        .with_object_type("port")
-                        .with_error(&e)
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceModify,
+                    "PolicerOrch",
+                    "set_port_storm_control"
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(port_name)
+                .with_object_type("port")
+                .with_error(&e));
                 PolicerOrchError::SaiError(e)
             })?;
 
         self.stats.storm_control_applied += 1;
 
-        audit_log!(
-            AuditRecord::new(AuditCategory::ResourceModify, "PolicerOrch", "set_port_storm_control")
-                .with_outcome(AuditOutcome::Success)
-                .with_object_id(port_name)
-                .with_object_type("port")
-                .with_details(serde_json::json!({
-                    "storm_type": storm_type.as_str(),
-                    "kbps": kbps,
-                    "policer_oid": format!("0x{:x}", policer_oid)
-                }))
-        );
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceModify,
+            "PolicerOrch",
+            "set_port_storm_control"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(port_name)
+        .with_object_type("port")
+        .with_details(serde_json::json!({
+            "storm_type": storm_type.as_str(),
+            "kbps": kbps,
+            "policer_oid": format!("0x{:x}", policer_oid)
+        })));
 
         Ok(())
     }
@@ -475,7 +498,7 @@ impl PolicerOrch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::policer::types::{MeterType, PacketAction, PolicerMode, ColorSource};
+    use crate::policer::types::{ColorSource, MeterType, PacketAction, PolicerMode};
     use std::sync::Mutex;
 
     struct TestCallbacks {
@@ -519,7 +542,11 @@ mod tests {
             Ok(oid)
         }
 
-        fn update_policer(&self, oid: RawSaiObjectId, _config: &PolicerConfig) -> Result<(), String> {
+        fn update_policer(
+            &self,
+            oid: RawSaiObjectId,
+            _config: &PolicerConfig,
+        ) -> Result<(), String> {
             self.updated_policers.lock().unwrap().push(oid);
             Ok(())
         }
@@ -622,7 +649,8 @@ mod tests {
         orch.set_callbacks(callbacks.clone());
 
         let config = PolicerConfig::new();
-        orch.set_policer("test_policer".to_string(), config).unwrap();
+        orch.set_policer("test_policer".to_string(), config)
+            .unwrap();
 
         let result = orch.remove_policer("test_policer");
         assert!(result.is_ok());
@@ -640,7 +668,8 @@ mod tests {
         orch.set_callbacks(callbacks);
 
         let config = PolicerConfig::new();
-        orch.set_policer("test_policer".to_string(), config).unwrap();
+        orch.set_policer("test_policer".to_string(), config)
+            .unwrap();
 
         // Increment ref count
         orch.increase_ref_count("test_policer").unwrap();
@@ -658,7 +687,8 @@ mod tests {
         orch.set_callbacks(callbacks);
 
         let config = PolicerConfig::new();
-        orch.set_policer("test_policer".to_string(), config).unwrap();
+        orch.set_policer("test_policer".to_string(), config)
+            .unwrap();
 
         assert_eq!(orch.increase_ref_count("test_policer").unwrap(), 1);
         assert_eq!(orch.increase_ref_count("test_policer").unwrap(), 2);
@@ -783,10 +813,10 @@ mod tests {
             meter_type: MeterType::Bytes,
             mode: PolicerMode::TrTcm,
             color_source: ColorSource::Blind,
-            cir: 10_000_000,  // 10 Mbps committed
-            cbs: 100_000,     // 100 KB committed burst
-            pir: 20_000_000,  // 20 Mbps peak
-            pbs: 200_000,     // 200 KB peak burst
+            cir: 10_000_000, // 10 Mbps committed
+            cbs: 100_000,    // 100 KB committed burst
+            pir: 20_000_000, // 20 Mbps peak
+            pbs: 200_000,    // 200 KB peak burst
             green_action: PacketAction::Forward,
             yellow_action: PacketAction::Forward,
             red_action: PacketAction::Drop,
@@ -810,9 +840,9 @@ mod tests {
             meter_type: MeterType::Bytes,
             mode: PolicerMode::TrTcm,
             color_source: ColorSource::Blind,
-            cir: 5_000_000,   // 5 Mbps
+            cir: 5_000_000, // 5 Mbps
             cbs: 50_000,
-            pir: 10_000_000,  // 10 Mbps
+            pir: 10_000_000, // 10 Mbps
             pbs: 100_000,
             green_action: PacketAction::Forward,
             yellow_action: PacketAction::Forward,
@@ -840,7 +870,7 @@ mod tests {
             color_source: ColorSource::Blind,
             cir: 8_000_000,
             cbs: 80_000,
-            pir: 0,  // SR_TCM uses only CIR
+            pir: 0, // SR_TCM uses only CIR
             pbs: 0,
             green_action: PacketAction::Forward,
             yellow_action: PacketAction::Forward,
@@ -892,7 +922,8 @@ mod tests {
             red_action: PacketAction::Drop,
         };
 
-        orch.set_policer("bytes_policer".to_string(), config).unwrap();
+        orch.set_policer("bytes_policer".to_string(), config)
+            .unwrap();
 
         let created = callbacks.created_policers.lock().unwrap();
         assert_eq!(created[0].1.meter_type, MeterType::Bytes);
@@ -908,8 +939,8 @@ mod tests {
             meter_type: MeterType::Packets,
             mode: PolicerMode::SrTcm,
             color_source: ColorSource::Blind,
-            cir: 10_000,  // 10k packets per second
-            cbs: 1_000,   // 1k packet burst
+            cir: 10_000, // 10k packets per second
+            cbs: 1_000,  // 1k packet burst
             pir: 0,
             pbs: 0,
             green_action: PacketAction::Forward,
@@ -917,7 +948,8 @@ mod tests {
             red_action: PacketAction::Drop,
         };
 
-        orch.set_policer("packets_policer".to_string(), config).unwrap();
+        orch.set_policer("packets_policer".to_string(), config)
+            .unwrap();
 
         let created = callbacks.created_policers.lock().unwrap();
         assert_eq!(created[0].1.meter_type, MeterType::Packets);
@@ -945,7 +977,8 @@ mod tests {
             red_action: PacketAction::Drop,
         };
 
-        orch.set_policer("actions_policer".to_string(), config).unwrap();
+        orch.set_policer("actions_policer".to_string(), config)
+            .unwrap();
 
         let created = callbacks.created_policers.lock().unwrap();
         assert_eq!(created[0].1.green_action, PacketAction::Forward);
@@ -962,7 +995,7 @@ mod tests {
         let config = PolicerConfig {
             meter_type: MeterType::Bytes,
             mode: PolicerMode::TrTcm,
-            color_source: ColorSource::Aware,  // Color-aware
+            color_source: ColorSource::Aware, // Color-aware
             cir: 5_000_000,
             cbs: 50_000,
             pir: 10_000_000,
@@ -972,7 +1005,8 @@ mod tests {
             red_action: PacketAction::Drop,
         };
 
-        orch.set_policer("color_aware_policer".to_string(), config).unwrap();
+        orch.set_policer("color_aware_policer".to_string(), config)
+            .unwrap();
 
         let created = callbacks.created_policers.lock().unwrap();
         assert_eq!(created[0].1.color_source, ColorSource::Aware);
@@ -987,7 +1021,7 @@ mod tests {
         let config = PolicerConfig {
             meter_type: MeterType::Bytes,
             mode: PolicerMode::SrTcm,
-            color_source: ColorSource::Blind,  // Color-blind
+            color_source: ColorSource::Blind, // Color-blind
             cir: 1_000_000,
             cbs: 10_000,
             pir: 0,
@@ -997,7 +1031,8 @@ mod tests {
             red_action: PacketAction::Drop,
         };
 
-        orch.set_policer("color_blind_policer".to_string(), config).unwrap();
+        orch.set_policer("color_blind_policer".to_string(), config)
+            .unwrap();
 
         let created = callbacks.created_policers.lock().unwrap();
         assert_eq!(created[0].1.color_source, ColorSource::Blind);
@@ -1022,7 +1057,8 @@ mod tests {
             red_action: PacketAction::Drop,
         };
 
-        orch.set_policer("test_policer".to_string(), config.clone()).unwrap();
+        orch.set_policer("test_policer".to_string(), config.clone())
+            .unwrap();
 
         // Try to update action (should fail)
         let mut invalid_update = config;
@@ -1062,7 +1098,8 @@ mod tests {
         orch.set_callbacks(callbacks);
 
         let config = PolicerConfig::new();
-        orch.set_policer("active_policer".to_string(), config).unwrap();
+        orch.set_policer("active_policer".to_string(), config)
+            .unwrap();
 
         // Add references
         orch.increase_ref_count("active_policer").unwrap();
@@ -1082,7 +1119,8 @@ mod tests {
         orch.set_callbacks(callbacks);
 
         let config = PolicerConfig::new();
-        orch.set_policer("cleanup_test".to_string(), config).unwrap();
+        orch.set_policer("cleanup_test".to_string(), config)
+            .unwrap();
 
         // Add and remove references
         orch.increase_ref_count("cleanup_test").unwrap();
@@ -1235,8 +1273,8 @@ mod tests {
             color_source: ColorSource::Blind,
             cir: 5_000_000,
             cbs: 50_000,
-            pir: 0,  // No PIR
-            pbs: 0,  // No PBS
+            pir: 0, // No PIR
+            pbs: 0, // No PBS
             green_action: PacketAction::Forward,
             yellow_action: PacketAction::Forward,
             red_action: PacketAction::Drop,
@@ -1270,8 +1308,10 @@ mod tests {
         };
 
         // Create multiple policers with same config
-        orch.set_policer("policer1".to_string(), config.clone()).unwrap();
-        orch.set_policer("policer2".to_string(), config.clone()).unwrap();
+        orch.set_policer("policer1".to_string(), config.clone())
+            .unwrap();
+        orch.set_policer("policer2".to_string(), config.clone())
+            .unwrap();
         orch.set_policer("policer3".to_string(), config).unwrap();
 
         assert_eq!(orch.policer_count(), 3);
@@ -1308,7 +1348,8 @@ mod tests {
             red_action: PacketAction::Drop,
         };
 
-        orch.set_policer("update_test".to_string(), config.clone()).unwrap();
+        orch.set_policer("update_test".to_string(), config.clone())
+            .unwrap();
 
         // Update rate and burst
         config.cir = 8_000_000;
@@ -1356,9 +1397,12 @@ mod tests {
         orch.set_callbacks(callbacks.clone());
 
         // Apply different storm control types to same port
-        orch.set_port_storm_control("Ethernet0", StormType::Broadcast, 8000).unwrap();
-        orch.set_port_storm_control("Ethernet0", StormType::UnknownUnicast, 6000).unwrap();
-        orch.set_port_storm_control("Ethernet0", StormType::UnknownMulticast, 10000).unwrap();
+        orch.set_port_storm_control("Ethernet0", StormType::Broadcast, 8000)
+            .unwrap();
+        orch.set_port_storm_control("Ethernet0", StormType::UnknownUnicast, 6000)
+            .unwrap();
+        orch.set_port_storm_control("Ethernet0", StormType::UnknownMulticast, 10000)
+            .unwrap();
 
         // Should have 3 policers
         assert_eq!(orch.policer_count(), 3);

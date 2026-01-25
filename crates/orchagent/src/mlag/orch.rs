@@ -163,7 +163,10 @@ impl MlagOrch {
     /// Adds or updates the ISL interface.
     ///
     /// Returns Ok(true) if the ISL was changed, Ok(false) if it was already set to this value.
-    pub fn add_isl_interface(&mut self, isl_name: impl Into<String>) -> Result<bool, MlagOrchError> {
+    pub fn add_isl_interface(
+        &mut self,
+        isl_name: impl Into<String>,
+    ) -> Result<bool, MlagOrchError> {
         let isl_name = isl_name.into();
 
         // Check if already set to this ISL
@@ -171,18 +174,14 @@ impl MlagOrch {
             return Ok(false);
         }
 
-        let audit_record = AuditRecord::new(
-            AuditCategory::NetworkConfig,
-            "MlagOrch",
-            "set_isl",
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(&isl_name)
-        .with_object_type("mlag_isl")
-        .with_details(serde_json::json!({
-            "isl_interface": isl_name,
-            "action": "isl_created_or_modified",
-        }));
+        let audit_record = AuditRecord::new(AuditCategory::NetworkConfig, "MlagOrch", "set_isl")
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(&isl_name)
+            .with_object_type("mlag_isl")
+            .with_details(serde_json::json!({
+                "isl_interface": isl_name,
+                "action": "isl_created_or_modified",
+            }));
         audit_log!(audit_record);
 
         self.isl_name = Some(isl_name.clone());
@@ -199,33 +198,26 @@ impl MlagOrch {
     /// Returns Ok(true) if the ISL was removed, Err if it wasn't set.
     pub fn del_isl_interface(&mut self) -> Result<bool, MlagOrchError> {
         if self.isl_name.is_none() {
-            let audit_record = AuditRecord::new(
-                AuditCategory::NetworkConfig,
-                "MlagOrch",
-                "set_isl",
-            )
-            .with_outcome(AuditOutcome::Failure)
-            .with_object_id("ISL")
-            .with_object_type("mlag_isl")
-            .with_error("ISL not set");
+            let audit_record =
+                AuditRecord::new(AuditCategory::NetworkConfig, "MlagOrch", "set_isl")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id("ISL")
+                    .with_object_type("mlag_isl")
+                    .with_error("ISL not set");
             audit_log!(audit_record);
             return Err(MlagOrchError::IslNotSet);
         }
 
         let old_isl = self.isl_name.take().unwrap();
 
-        let audit_record = AuditRecord::new(
-            AuditCategory::NetworkConfig,
-            "MlagOrch",
-            "set_isl",
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(&old_isl)
-        .with_object_type("mlag_isl")
-        .with_details(serde_json::json!({
-            "isl_interface": old_isl,
-            "action": "isl_deleted",
-        }));
+        let audit_record = AuditRecord::new(AuditCategory::NetworkConfig, "MlagOrch", "set_isl")
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(&old_isl)
+            .with_object_type("mlag_isl")
+            .with_details(serde_json::json!({
+                "isl_interface": old_isl,
+                "action": "isl_deleted",
+            }));
         audit_log!(audit_record);
 
         self.stats.isl_deletes += 1;
@@ -246,31 +238,25 @@ impl MlagOrch {
         let if_name = if_name.into();
 
         if self.mlag_intfs.contains(&if_name) {
-            let audit_record = AuditRecord::new(
-                AuditCategory::ResourceCreate,
-                "MlagOrch",
-                "add_mlag_intf",
-            )
-            .with_outcome(AuditOutcome::Failure)
-            .with_object_id(&if_name)
-            .with_object_type("mlag_interface")
-            .with_error("Interface already a member");
+            let audit_record =
+                AuditRecord::new(AuditCategory::ResourceCreate, "MlagOrch", "add_mlag_intf")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(&if_name)
+                    .with_object_type("mlag_interface")
+                    .with_error("Interface already a member");
             audit_log!(audit_record);
             return Err(MlagOrchError::DuplicateInterface(if_name));
         }
 
-        let audit_record = AuditRecord::new(
-            AuditCategory::ResourceCreate,
-            "MlagOrch",
-            "add_mlag_intf",
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(&if_name)
-        .with_object_type("mlag_interface")
-        .with_details(serde_json::json!({
-            "interface_name": if_name,
-            "total_mlag_members": self.mlag_intfs.len() + 1,
-        }));
+        let audit_record =
+            AuditRecord::new(AuditCategory::ResourceCreate, "MlagOrch", "add_mlag_intf")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(&if_name)
+                .with_object_type("mlag_interface")
+                .with_details(serde_json::json!({
+                    "interface_name": if_name,
+                    "total_mlag_members": self.mlag_intfs.len() + 1,
+                }));
         audit_log!(audit_record);
 
         self.mlag_intfs.insert(if_name.clone());
@@ -417,7 +403,9 @@ mod tests {
         // Check notification
         let updates = callbacks.updates.lock().unwrap();
         assert_eq!(updates.len(), 1);
-        assert!(matches!(&updates[0], MlagUpdate::Isl(u) if u.is_add && u.isl_name == "PortChannel100"));
+        assert!(
+            matches!(&updates[0], MlagUpdate::Isl(u) if u.is_add && u.isl_name == "PortChannel100")
+        );
     }
 
     #[test]

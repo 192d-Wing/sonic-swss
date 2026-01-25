@@ -15,6 +15,6 @@ mod types;
 pub use ffi::{register_fg_nhg_orch, unregister_fg_nhg_orch};
 pub use orch::{FgNhgOrch, FgNhgOrchCallbacks, FgNhgOrchConfig, FgNhgOrchError, FgNhgOrchStats};
 pub use types::{
-    BankSelectionMode, FgNhgBankConfig, FgNhgEntry, FgNhgMemberConfig,
-    FgNhgMemberEntry, FgNhgPrefix, FgNhgStats, FgNextHop,
+    BankSelectionMode, FgNextHop, FgNhgBankConfig, FgNhgEntry, FgNhgMemberConfig, FgNhgMemberEntry,
+    FgNhgPrefix, FgNhgStats,
 };

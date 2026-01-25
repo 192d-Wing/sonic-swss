@@ -1,7 +1,7 @@
 //! FFI exports for ZmqOrch.
 
-use std::cell::RefCell;
 use super::orch::{ZmqOrch, ZmqOrchConfig};
+use std::cell::RefCell;
 
 thread_local! {
     static ZMQ_ORCH: RefCell<Option<Box<ZmqOrch>>> = const { RefCell::new(None) };

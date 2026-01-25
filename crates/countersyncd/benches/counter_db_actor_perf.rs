@@ -11,7 +11,7 @@ use countersyncd::sai::saitypes::SaiObjectType;
 use swss_common::{CxxString, DbConnector};
 
 mod ipfix_bench_data;
-use ipfix_bench_data::{PreparedDataset, datasets};
+use ipfix_bench_data::{datasets, PreparedDataset};
 
 const COUNTERS_DB_ID: i32 = 2;
 const SOCK_PATH: &str = "/var/run/redis/redis.sock";
@@ -32,8 +32,8 @@ fn build_stats_message(count: usize, seq: u64) -> SAIStatsMessage {
 }
 
 fn seed_port_name_map(port_count: usize) {
-    let db = DbConnector::new_unix(COUNTERS_DB_ID, SOCK_PATH, 0)
-        .expect("connect counter db for seed");
+    let db =
+        DbConnector::new_unix(COUNTERS_DB_ID, SOCK_PATH, 0).expect("connect counter db for seed");
 
     let table = "COUNTERS_PORT_NAME_MAP";
     for idx in 0..port_count {
@@ -58,10 +58,7 @@ fn flush_counters_db() {
         .expect("spawn redis-cli for flush");
 
     if !output.status.success() {
-        panic!(
-            "redis-cli FLUSHDB failed with status {}",
-            output.status
-        );
+        panic!("redis-cli FLUSHDB failed with status {}", output.status);
     }
 }
 
@@ -106,7 +103,7 @@ fn bench_counter_db_actor(c: &mut Criterion) {
 
     for spec in datasets() {
         group.throughput(Throughput::Elements(
-            spec.total_counters_per_iteration() as u64,
+            spec.total_counters_per_iteration() as u64
         ));
 
         let bench_id = BenchmarkId::from_parameter(spec.name);

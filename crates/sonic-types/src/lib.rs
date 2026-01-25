@@ -9,14 +9,14 @@
 //! - [`PortType`]: Switch port classifications
 //! - [`VlanId`]: IEEE 802.1Q VLAN identifiers
 
-mod mac;
 mod ip;
+mod mac;
 mod port;
 mod vlan;
 
-pub use mac::MacAddress;
 pub use ip::{IpAddress, IpPrefix, Ipv4Address, Ipv6Address};
-pub use port::{PortType, PortRole, AdminState, OperState};
+pub use mac::MacAddress;
+pub use port::{AdminState, OperState, PortRole, PortType};
 pub use vlan::VlanId;
 
 /// Common error type for parsing failures.

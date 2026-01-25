@@ -338,9 +338,7 @@ pub unsafe extern "C" fn rust_ports_orch_get_vlan_id(alias: *const c_char) -> Ra
 ///
 /// - Caller must free the returned string using `rust_free_string`
 #[no_mangle]
-pub extern "C" fn rust_ports_orch_get_port_alias_by_oid(
-    oid: RawSaiObjectId,
-) -> *mut c_char {
+pub extern "C" fn rust_ports_orch_get_port_alias_by_oid(oid: RawSaiObjectId) -> *mut c_char {
     PORTS_ORCH.with(|cell| {
         cell.borrow()
             .as_ref()

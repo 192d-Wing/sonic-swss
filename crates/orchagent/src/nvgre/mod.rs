@@ -21,5 +21,10 @@ mod orch;
 mod types;
 
 pub use ffi::{register_nvgre_orch, unregister_nvgre_orch};
-pub use orch::{NvgreOrch, NvgreOrchCallbacks, NvgreOrchConfig, NvgreOrchError, NvgreOrchStats, NvgreTunnel};
-pub use types::{MapType, NvgreTunnelConfig, NvgreTunnelMapConfig, NvgreTunnelMapEntry, TunnelSaiIds, NVGRE_VSID_MAX_VALUE};
+pub use orch::{
+    NvgreOrch, NvgreOrchCallbacks, NvgreOrchConfig, NvgreOrchError, NvgreOrchStats, NvgreTunnel,
+};
+pub use types::{
+    MapType, NvgreTunnelConfig, NvgreTunnelMapConfig, NvgreTunnelMapEntry, TunnelSaiIds,
+    NVGRE_VSID_MAX_VALUE,
+};

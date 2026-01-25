@@ -1,9 +1,9 @@
 //! Buffer orchestration logic.
 
 use super::types::{BufferPoolEntry, BufferProfileEntry, BufferStats};
+use crate::audit_log;
 use std::collections::HashMap;
 use thiserror::Error;
-use crate::audit_log;
 
 #[derive(Debug, Clone, Error)]
 pub enum BufferOrchError {
@@ -104,20 +104,19 @@ impl BufferOrch {
     }
 
     pub fn remove_pool(&mut self, name: &str) -> Result<BufferPoolEntry, BufferOrchError> {
-        let entry = self.pools.get(name)
-            .ok_or_else(|| {
-                audit_log!(
-                    resource_id: name,
-                    action: "delete_buffer_pool",
-                    category: "ResourceDelete",
-                    outcome: "FAIL",
-                    details: serde_json::json!({
-                        "error": "Pool not found",
-                        "pool_name": name,
-                    })
-                );
-                BufferOrchError::PoolNotFound(name.to_string())
-            })?;
+        let entry = self.pools.get(name).ok_or_else(|| {
+            audit_log!(
+                resource_id: name,
+                action: "delete_buffer_pool",
+                category: "ResourceDelete",
+                outcome: "FAIL",
+                details: serde_json::json!({
+                    "error": "Pool not found",
+                    "pool_name": name,
+                })
+            );
+            BufferOrchError::PoolNotFound(name.to_string())
+        })?;
 
         if entry.ref_count > 0 {
             audit_log!(
@@ -131,12 +130,15 @@ impl BufferOrch {
                     "ref_count": entry.ref_count,
                 })
             );
-            return Err(BufferOrchError::RefCountError(
-                format!("Pool {} still has {} references", name, entry.ref_count)
-            ));
+            return Err(BufferOrchError::RefCountError(format!(
+                "Pool {} still has {} references",
+                name, entry.ref_count
+            )));
         }
 
-        let removed = self.pools.remove(name)
+        let removed = self
+            .pools
+            .remove(name)
             .ok_or_else(|| BufferOrchError::PoolNotFound(name.to_string()))?;
 
         audit_log!(
@@ -155,20 +157,19 @@ impl BufferOrch {
     }
 
     pub fn increment_pool_ref(&mut self, name: &str) -> Result<u32, BufferOrchError> {
-        let pool = self.pools.get_mut(name)
-            .ok_or_else(|| {
-                audit_log!(
-                    resource_id: name,
-                    action: "create_priority_group",
-                    category: "ResourceCreate",
-                    outcome: "FAIL",
-                    details: serde_json::json!({
-                        "error": "Pool not found",
-                        "pool_name": name,
-                    })
-                );
-                BufferOrchError::PoolNotFound(name.to_string())
-            })?;
+        let pool = self.pools.get_mut(name).ok_or_else(|| {
+            audit_log!(
+                resource_id: name,
+                action: "create_priority_group",
+                category: "ResourceCreate",
+                outcome: "FAIL",
+                details: serde_json::json!({
+                    "error": "Pool not found",
+                    "pool_name": name,
+                })
+            );
+            BufferOrchError::PoolNotFound(name.to_string())
+        })?;
         let new_count = pool.add_ref();
 
         audit_log!(
@@ -186,20 +187,19 @@ impl BufferOrch {
     }
 
     pub fn decrement_pool_ref(&mut self, name: &str) -> Result<u32, BufferOrchError> {
-        let pool = self.pools.get_mut(name)
-            .ok_or_else(|| {
-                audit_log!(
-                    resource_id: name,
-                    action: "update_pg_configuration",
-                    category: "ResourceModify",
-                    outcome: "FAIL",
-                    details: serde_json::json!({
-                        "error": "Pool not found",
-                        "pool_name": name,
-                    })
-                );
-                BufferOrchError::PoolNotFound(name.to_string())
-            })?;
+        let pool = self.pools.get_mut(name).ok_or_else(|| {
+            audit_log!(
+                resource_id: name,
+                action: "update_pg_configuration",
+                category: "ResourceModify",
+                outcome: "FAIL",
+                details: serde_json::json!({
+                    "error": "Pool not found",
+                    "pool_name": name,
+                })
+            );
+            BufferOrchError::PoolNotFound(name.to_string())
+        })?;
         pool.remove_ref()
             .map(|new_count| {
                 audit_log!(
@@ -251,7 +251,9 @@ impl BufferOrch {
                     "profile_name": name,
                 })
             );
-            return Err(BufferOrchError::SaiError("Profile already exists".to_string()));
+            return Err(BufferOrchError::SaiError(
+                "Profile already exists".to_string(),
+            ));
         }
 
         // Verify pool exists
@@ -267,7 +269,9 @@ impl BufferOrch {
                     "pool_name": entry.config.pool_name,
                 })
             );
-            return Err(BufferOrchError::PoolNotFound(entry.config.pool_name.clone()));
+            return Err(BufferOrchError::PoolNotFound(
+                entry.config.pool_name.clone(),
+            ));
         }
 
         self.stats.stats.profiles_created = self.stats.stats.profiles_created.saturating_add(1);
@@ -290,20 +294,19 @@ impl BufferOrch {
     }
 
     pub fn remove_profile(&mut self, name: &str) -> Result<BufferProfileEntry, BufferOrchError> {
-        let entry = self.profiles.get(name)
-            .ok_or_else(|| {
-                audit_log!(
-                    resource_id: name,
-                    action: "delete_buffer_profile",
-                    category: "ResourceDelete",
-                    outcome: "FAIL",
-                    details: serde_json::json!({
-                        "error": "Profile not found",
-                        "profile_name": name,
-                    })
-                );
-                BufferOrchError::ProfileNotFound(name.to_string())
-            })?;
+        let entry = self.profiles.get(name).ok_or_else(|| {
+            audit_log!(
+                resource_id: name,
+                action: "delete_buffer_profile",
+                category: "ResourceDelete",
+                outcome: "FAIL",
+                details: serde_json::json!({
+                    "error": "Profile not found",
+                    "profile_name": name,
+                })
+            );
+            BufferOrchError::ProfileNotFound(name.to_string())
+        })?;
 
         if entry.ref_count > 0 {
             audit_log!(
@@ -317,12 +320,15 @@ impl BufferOrch {
                     "ref_count": entry.ref_count,
                 })
             );
-            return Err(BufferOrchError::RefCountError(
-                format!("Profile {} still has {} references", name, entry.ref_count)
-            ));
+            return Err(BufferOrchError::RefCountError(format!(
+                "Profile {} still has {} references",
+                name, entry.ref_count
+            )));
         }
 
-        let removed = self.profiles.remove(name)
+        let removed = self
+            .profiles
+            .remove(name)
             .ok_or_else(|| BufferOrchError::ProfileNotFound(name.to_string()))?;
 
         audit_log!(
@@ -341,15 +347,20 @@ impl BufferOrch {
     }
 
     pub fn increment_profile_ref(&mut self, name: &str) -> Result<u32, BufferOrchError> {
-        let profile = self.profiles.get_mut(name)
+        let profile = self
+            .profiles
+            .get_mut(name)
             .ok_or_else(|| BufferOrchError::ProfileNotFound(name.to_string()))?;
         Ok(profile.add_ref())
     }
 
     pub fn decrement_profile_ref(&mut self, name: &str) -> Result<u32, BufferOrchError> {
-        let profile = self.profiles.get_mut(name)
+        let profile = self
+            .profiles
+            .get_mut(name)
             .ok_or_else(|| BufferOrchError::ProfileNotFound(name.to_string()))?;
-        profile.remove_ref()
+        profile
+            .remove_ref()
             .map_err(|e| BufferOrchError::RefCountError(e))
     }
 
@@ -368,8 +379,8 @@ impl BufferOrch {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::{BufferPoolConfig, BufferProfileConfig};
+    use super::*;
 
     fn create_test_pool(name: &str, size: u64) -> BufferPoolEntry {
         BufferPoolEntry {
@@ -447,7 +458,10 @@ mod tests {
 
         let result = orch.remove_pool("ingress_lossless_pool");
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BufferOrchError::RefCountError(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            BufferOrchError::RefCountError(_)
+        ));
     }
 
     #[test]
@@ -479,7 +493,10 @@ mod tests {
 
         let result = orch.decrement_pool_ref("ingress_lossless_pool");
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BufferOrchError::RefCountError(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            BufferOrchError::RefCountError(_)
+        ));
     }
 
     #[test]
@@ -501,7 +518,10 @@ mod tests {
 
         let result = orch.add_profile(profile);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BufferOrchError::PoolNotFound(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            BufferOrchError::PoolNotFound(_)
+        ));
     }
 
     #[test]
@@ -530,7 +550,10 @@ mod tests {
 
         let result = orch.remove_profile("pg_lossless_profile");
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BufferOrchError::RefCountError(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            BufferOrchError::RefCountError(_)
+        ));
     }
 
     #[test]
@@ -563,6 +586,9 @@ mod tests {
 
         let result = orch.decrement_profile_ref("pg_lossless_profile");
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BufferOrchError::RefCountError(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            BufferOrchError::RefCountError(_)
+        ));
     }
 }

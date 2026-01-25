@@ -2,7 +2,7 @@
 
 use super::types::{FdbEntry, FdbFlushStats, FdbKey, RawSaiObjectId};
 use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
-use crate::{audit_log, debug_log, info_log, warn_log, error_log};
+use crate::{audit_log, debug_log, error_log, info_log, warn_log};
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -109,22 +109,19 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
 
         if self.entries.contains_key(&key) {
             warn_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, "FDB entry already exists");
-            audit_log!(AuditRecord::new(
-                AuditCategory::ResourceCreate,
-                "FdbOrch",
-                "add_entry"
-            )
-            .with_object_id(format!("{}:{}", key.mac_address, key.vlan_id))
-            .with_object_type("fdb_entry")
-            .with_error(format!("Entry already exists: {:?}", key)));
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "FdbOrch", "add_entry")
+                    .with_object_id(format!("{}:{}", key.mac_address, key.vlan_id))
+                    .with_object_type("fdb_entry")
+                    .with_error(format!("Entry already exists: {:?}", key))
+            );
             return Err(FdbOrchError::EntryExists(key));
         }
 
-        let callbacks = self.callbacks.as_ref()
-            .ok_or_else(|| {
-                error_log!("FdbOrch", "Callbacks not configured");
-                FdbOrchError::NotInitialized
-            })?;
+        let callbacks = self.callbacks.as_ref().ok_or_else(|| {
+            error_log!("FdbOrch", "Callbacks not configured");
+            FdbOrchError::NotInitialized
+        })?;
 
         callbacks.add_fdb_entry(&entry).map_err(|e| {
             error_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, error = %e, "SAI add_fdb_entry failed");
@@ -144,19 +141,17 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
         callbacks.on_fdb_entry_added(&entry);
 
         info_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, port = %entry.port_name, "FDB entry created successfully");
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceCreate,
-            "FdbOrch",
-            "add_entry"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(format!("{}:{}", key.mac_address, key.vlan_id))
-        .with_object_type("fdb_entry")
-        .with_details(serde_json::json!({
-            "mac_address": key.mac_address.to_string(),
-            "vlan_id": key.vlan_id,
-            "port_name": entry.port_name
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "FdbOrch", "add_entry")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("{}:{}", key.mac_address, key.vlan_id))
+                .with_object_type("fdb_entry")
+                .with_details(serde_json::json!({
+                    "mac_address": key.mac_address.to_string(),
+                    "vlan_id": key.vlan_id,
+                    "port_name": entry.port_name
+                }))
+        );
 
         Ok(())
     }
@@ -178,11 +173,10 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
                 FdbOrchError::EntryNotFound(key.clone())
             })?;
 
-        let callbacks = self.callbacks.as_ref()
-            .ok_or_else(|| {
-                error_log!("FdbOrch", "Callbacks not configured");
-                FdbOrchError::NotInitialized
-            })?;
+        let callbacks = self.callbacks.as_ref().ok_or_else(|| {
+            error_log!("FdbOrch", "Callbacks not configured");
+            FdbOrchError::NotInitialized
+        })?;
 
         callbacks.remove_fdb_entry(key).map_err(|e| {
             error_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, error = %e, "SAI remove_fdb_entry failed");
@@ -201,18 +195,16 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
         callbacks.on_fdb_entry_removed(key);
 
         info_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, "FDB entry removed successfully");
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceDelete,
-            "FdbOrch",
-            "remove_entry"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(format!("{}:{}", key.mac_address, key.vlan_id))
-        .with_object_type("fdb_entry")
-        .with_details(serde_json::json!({
-            "mac_address": key.mac_address.to_string(),
-            "vlan_id": key.vlan_id
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceDelete, "FdbOrch", "remove_entry")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("{}:{}", key.mac_address, key.vlan_id))
+                .with_object_type("fdb_entry")
+                .with_details(serde_json::json!({
+                    "mac_address": key.mac_address.to_string(),
+                    "vlan_id": key.vlan_id
+                }))
+        );
 
         Ok(())
     }
@@ -228,11 +220,10 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
 
         let old_port = old_entry.port_name.clone();
 
-        let callbacks = self.callbacks.as_ref()
-            .ok_or_else(|| {
-                error_log!("FdbOrch", "Callbacks not configured");
-                FdbOrchError::NotInitialized
-            })?;
+        let callbacks = self.callbacks.as_ref().ok_or_else(|| {
+            error_log!("FdbOrch", "Callbacks not configured");
+            FdbOrchError::NotInitialized
+        })?;
 
         callbacks.update_fdb_entry(key, &entry).map_err(|e| {
             error_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, error = %e, "SAI update_fdb_entry failed");
@@ -251,20 +242,18 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
         self.stats.entries_updated += 1;
 
         info_log!("FdbOrch", mac = %key.mac_address, vlan = key.vlan_id, old_port = %old_port, new_port = %entry.port_name, "FDB entry updated successfully");
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceModify,
-            "FdbOrch",
-            "update_entry"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(format!("{}:{}", key.mac_address, key.vlan_id))
-        .with_object_type("fdb_entry")
-        .with_details(serde_json::json!({
-            "mac_address": key.mac_address.to_string(),
-            "vlan_id": key.vlan_id,
-            "old_port": old_port,
-            "new_port": entry.port_name
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceModify, "FdbOrch", "update_entry")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("{}:{}", key.mac_address, key.vlan_id))
+                .with_object_type("fdb_entry")
+                .with_details(serde_json::json!({
+                    "mac_address": key.mac_address.to_string(),
+                    "vlan_id": key.vlan_id,
+                    "old_port": old_port,
+                    "new_port": entry.port_name
+                }))
+        );
 
         Ok(())
     }
@@ -278,14 +267,16 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
     }
 
     pub fn get_by_vlan(&self, vlan_id: u16) -> Vec<(FdbKey, &FdbEntry)> {
-        self.entries.iter()
+        self.entries
+            .iter()
             .filter(|(k, _)| k.vlan_id == vlan_id)
             .map(|(k, v)| (k.clone(), v))
             .collect()
     }
 
     pub fn get_by_port(&self, port_name: &str) -> Vec<(FdbKey, &FdbEntry)> {
-        self.entries.iter()
+        self.entries
+            .iter()
             .filter(|(_, v)| v.port_name == port_name)
             .map(|(k, v)| (k.clone(), v))
             .collect()
@@ -302,22 +293,19 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
     pub fn flush_by_port(&mut self, port: Option<&str>) -> Result<u32> {
         debug_log!("FdbOrch", port = ?port, "Flushing FDB entries by port");
 
-        let callbacks = self.callbacks.as_ref()
-            .ok_or_else(|| {
-                error_log!("FdbOrch", "Callbacks not configured");
-                FdbOrchError::NotInitialized
-            })?;
+        let callbacks = self.callbacks.as_ref().ok_or_else(|| {
+            error_log!("FdbOrch", "Callbacks not configured");
+            FdbOrchError::NotInitialized
+        })?;
 
         let count = callbacks.flush_entries_by_port(port).map_err(|e| {
             error_log!("FdbOrch", port = ?port, error = %e, "SAI flush_entries_by_port failed");
-            audit_log!(AuditRecord::new(
-                AuditCategory::SaiOperation,
-                "FdbOrch",
-                "flush_by_port"
-            )
-            .with_object_id(port.unwrap_or("all"))
-            .with_object_type("fdb_flush")
-            .with_error(e.to_string()));
+            audit_log!(
+                AuditRecord::new(AuditCategory::SaiOperation, "FdbOrch", "flush_by_port")
+                    .with_object_id(port.unwrap_or("all"))
+                    .with_object_type("fdb_flush")
+                    .with_error(e.to_string())
+            );
             e
         })?;
 
@@ -327,23 +315,27 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
             self.entries.clear();
         }
 
-        self.stats.flush_stats.port_flushes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.stats.flush_stats.total_entries_flushed.fetch_add(count, std::sync::atomic::Ordering::Relaxed);
+        self.stats
+            .flush_stats
+            .port_flushes
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.stats
+            .flush_stats
+            .total_entries_flushed
+            .fetch_add(count, std::sync::atomic::Ordering::Relaxed);
         callbacks.on_fdb_flush(port, None, count);
 
         info_log!("FdbOrch", port = ?port, entries_flushed = count, "FDB entries flushed by port");
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceDelete,
-            "FdbOrch",
-            "flush_by_port"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(port.unwrap_or("all"))
-        .with_object_type("fdb_flush")
-        .with_details(serde_json::json!({
-            "port": port,
-            "entries_flushed": count
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceDelete, "FdbOrch", "flush_by_port")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(port.unwrap_or("all"))
+                .with_object_type("fdb_flush")
+                .with_details(serde_json::json!({
+                    "port": port,
+                    "entries_flushed": count
+                }))
+        );
 
         Ok(count)
     }
@@ -351,22 +343,19 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
     pub fn flush_by_vlan(&mut self, vlan: Option<u16>) -> Result<u32> {
         debug_log!("FdbOrch", vlan = ?vlan, "Flushing FDB entries by VLAN");
 
-        let callbacks = self.callbacks.as_ref()
-            .ok_or_else(|| {
-                error_log!("FdbOrch", "Callbacks not configured");
-                FdbOrchError::NotInitialized
-            })?;
+        let callbacks = self.callbacks.as_ref().ok_or_else(|| {
+            error_log!("FdbOrch", "Callbacks not configured");
+            FdbOrchError::NotInitialized
+        })?;
 
         let count = callbacks.flush_entries_by_vlan(vlan).map_err(|e| {
             error_log!("FdbOrch", vlan = ?vlan, error = %e, "SAI flush_entries_by_vlan failed");
-            audit_log!(AuditRecord::new(
-                AuditCategory::SaiOperation,
-                "FdbOrch",
-                "flush_by_vlan"
-            )
-            .with_object_id(vlan.map(|v| v.to_string()).unwrap_or("all".to_string()))
-            .with_object_type("fdb_flush")
-            .with_error(e.to_string()));
+            audit_log!(
+                AuditRecord::new(AuditCategory::SaiOperation, "FdbOrch", "flush_by_vlan")
+                    .with_object_id(vlan.map(|v| v.to_string()).unwrap_or("all".to_string()))
+                    .with_object_type("fdb_flush")
+                    .with_error(e.to_string())
+            );
             e
         })?;
 
@@ -376,23 +365,27 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
             self.entries.clear();
         }
 
-        self.stats.flush_stats.vlan_flushes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.stats.flush_stats.total_entries_flushed.fetch_add(count, std::sync::atomic::Ordering::Relaxed);
+        self.stats
+            .flush_stats
+            .vlan_flushes
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.stats
+            .flush_stats
+            .total_entries_flushed
+            .fetch_add(count, std::sync::atomic::Ordering::Relaxed);
         callbacks.on_fdb_flush(None, vlan, count);
 
         info_log!("FdbOrch", vlan = ?vlan, entries_flushed = count, "FDB entries flushed by VLAN");
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceDelete,
-            "FdbOrch",
-            "flush_by_vlan"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(vlan.map(|v| v.to_string()).unwrap_or("all".to_string()))
-        .with_object_type("fdb_flush")
-        .with_details(serde_json::json!({
-            "vlan": vlan,
-            "entries_flushed": count
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceDelete, "FdbOrch", "flush_by_vlan")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(vlan.map(|v| v.to_string()).unwrap_or("all".to_string()))
+                .with_object_type("fdb_flush")
+                .with_details(serde_json::json!({
+                    "vlan": vlan,
+                    "entries_flushed": count
+                }))
+        );
 
         Ok(count)
     }
@@ -420,8 +413,8 @@ impl<C: FdbOrchCallbacks> FdbOrch<C> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::MacAddress;
+    use super::*;
 
     struct MockFdbCallbacks {
         add_called: std::sync::atomic::AtomicBool,
@@ -439,12 +432,14 @@ mod tests {
 
     impl FdbOrchCallbacks for MockFdbCallbacks {
         fn add_fdb_entry(&self, _entry: &FdbEntry) -> Result<()> {
-            self.add_called.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.add_called
+                .store(true, std::sync::atomic::Ordering::Relaxed);
             Ok(())
         }
 
         fn remove_fdb_entry(&self, _key: &FdbKey) -> Result<()> {
-            self.remove_called.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.remove_called
+                .store(true, std::sync::atomic::Ordering::Relaxed);
             Ok(())
         }
 

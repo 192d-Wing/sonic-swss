@@ -391,30 +391,21 @@ mod tests {
         let vrf_name = CString::new("Vrf1").unwrap();
 
         // Initial ref count
-        assert_eq!(
-            unsafe { rust_vrf_orch_get_ref_count(vrf_name.as_ptr()) },
-            0
-        );
+        assert_eq!(unsafe { rust_vrf_orch_get_ref_count(vrf_name.as_ptr()) }, 0);
 
         // Increase
         assert_eq!(
             unsafe { rust_vrf_orch_increase_ref_count(vrf_name.as_ptr()) },
             1
         );
-        assert_eq!(
-            unsafe { rust_vrf_orch_get_ref_count(vrf_name.as_ptr()) },
-            1
-        );
+        assert_eq!(unsafe { rust_vrf_orch_get_ref_count(vrf_name.as_ptr()) }, 1);
 
         // Decrease
         assert_eq!(
             unsafe { rust_vrf_orch_decrease_ref_count(vrf_name.as_ptr()) },
             0
         );
-        assert_eq!(
-            unsafe { rust_vrf_orch_get_ref_count(vrf_name.as_ptr()) },
-            0
-        );
+        assert_eq!(unsafe { rust_vrf_orch_get_ref_count(vrf_name.as_ptr()) }, 0);
 
         unregister_vrf_orch();
     }

@@ -1,7 +1,7 @@
 //! FFI exports for CounterCheckOrch.
 
-use std::cell::RefCell;
 use super::orch::{CounterCheckOrch, CounterCheckOrchConfig};
+use std::cell::RefCell;
 
 thread_local! {
     static COUNTERCHECK_ORCH: RefCell<Option<Box<CounterCheckOrch>>> = const { RefCell::new(None) };
@@ -13,7 +13,9 @@ pub extern "C" fn register_countercheck_orch() -> bool {
         if orch.borrow().is_some() {
             return false;
         }
-        *orch.borrow_mut() = Some(Box::new(CounterCheckOrch::new(CounterCheckOrchConfig::default())));
+        *orch.borrow_mut() = Some(Box::new(CounterCheckOrch::new(
+            CounterCheckOrchConfig::default(),
+        )));
         true
     })
 }

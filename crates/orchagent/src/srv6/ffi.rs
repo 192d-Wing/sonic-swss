@@ -1,7 +1,7 @@
 //! FFI exports for Srv6Orch.
 
-use std::cell::RefCell;
 use super::orch::{Srv6Orch, Srv6OrchConfig};
+use std::cell::RefCell;
 
 thread_local! {
     static SRV6_ORCH: RefCell<Option<Box<Srv6Orch>>> = const { RefCell::new(None) };

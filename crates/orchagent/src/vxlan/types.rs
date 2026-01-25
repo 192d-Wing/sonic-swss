@@ -67,10 +67,7 @@ pub struct VxlanVrfMapEntry {
 
 impl VxlanVrfMapEntry {
     pub fn new(key: VxlanVrfMapKey) -> Self {
-        Self {
-            key,
-            vrf_oid: 0,
-        }
+        Self { key, vrf_oid: 0 }
     }
 }
 

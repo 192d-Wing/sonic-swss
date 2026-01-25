@@ -1,12 +1,12 @@
 //! Tunnel decapsulation orchestration logic.
 
 use super::types::{TunnelDecapConfig, TunnelDecapEntry, TunnelTermType};
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
 use sonic_sai::types::RawSaiObjectId;
 use sonic_types::IpAddress;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
-use crate::audit_log;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum TunnelDecapOrchError {
@@ -98,12 +98,13 @@ impl TunnelDecapOrch {
             return Err(error);
         }
 
-        let callbacks = Arc::clone(
-            self.callbacks.as_ref()
-                .ok_or_else(|| TunnelDecapOrchError::InvalidConfig("No callbacks set".to_string()))?,
-        );
+        let callbacks =
+            Arc::clone(self.callbacks.as_ref().ok_or_else(|| {
+                TunnelDecapOrchError::InvalidConfig("No callbacks set".to_string())
+            })?);
 
-        let tunnel_id = callbacks.create_tunnel(&config)
+        let tunnel_id = callbacks
+            .create_tunnel(&config)
             .map_err(TunnelDecapOrchError::SaiError)?;
 
         let entry = TunnelDecapEntry::from_config(config.clone(), tunnel_id);
@@ -131,13 +132,17 @@ impl TunnelDecapOrch {
     }
 
     pub fn remove_tunnel(&mut self, tunnel_name: &str) -> Result<(), TunnelDecapOrchError> {
-        let entry = self.tunnels.get(tunnel_name)
+        let entry = self
+            .tunnels
+            .get(tunnel_name)
             .ok_or_else(|| TunnelDecapOrchError::TunnelNotFound(tunnel_name.to_string()))?;
 
         if !entry.term_entries.is_empty() {
-            let error = TunnelDecapOrchError::InvalidConfig(
-                format!("Tunnel {} has {} term entries, remove them first", tunnel_name, entry.term_entries.len())
-            );
+            let error = TunnelDecapOrchError::InvalidConfig(format!(
+                "Tunnel {} has {} term entries, remove them first",
+                tunnel_name,
+                entry.term_entries.len()
+            ));
             audit_log!(AuditRecord::new(
                 AuditCategory::ResourceDelete,
                 "TunnelDecapOrch",
@@ -152,10 +157,13 @@ impl TunnelDecapOrch {
 
         let entry = self.tunnels.remove(tunnel_name).unwrap();
 
-        let callbacks = self.callbacks.as_ref()
+        let callbacks = self
+            .callbacks
+            .as_ref()
             .ok_or_else(|| TunnelDecapOrchError::InvalidConfig("No callbacks set".to_string()))?;
 
-        callbacks.remove_tunnel(entry.tunnel_id)
+        callbacks
+            .remove_tunnel(entry.tunnel_id)
             .map_err(TunnelDecapOrchError::SaiError)?;
 
         self.stats.tunnels_removed += 1;
@@ -187,7 +195,9 @@ impl TunnelDecapOrch {
         src_ip: IpAddress,
         dst_ip: IpAddress,
     ) -> Result<(), TunnelDecapOrchError> {
-        let entry = self.tunnels.get_mut(tunnel_name)
+        let entry = self
+            .tunnels
+            .get_mut(tunnel_name)
             .ok_or_else(|| TunnelDecapOrchError::TunnelNotFound(tunnel_name.to_string()))?;
 
         if entry.term_entries.contains_key(&term_key) {
@@ -204,12 +214,13 @@ impl TunnelDecapOrch {
             return Err(error);
         }
 
-        let callbacks = Arc::clone(
-            self.callbacks.as_ref()
-                .ok_or_else(|| TunnelDecapOrchError::InvalidConfig("No callbacks set".to_string()))?,
-        );
+        let callbacks =
+            Arc::clone(self.callbacks.as_ref().ok_or_else(|| {
+                TunnelDecapOrchError::InvalidConfig("No callbacks set".to_string())
+            })?);
 
-        let term_entry_id = callbacks.create_tunnel_term_entry(entry.tunnel_id, term_type, src_ip, dst_ip)
+        let term_entry_id = callbacks
+            .create_tunnel_term_entry(entry.tunnel_id, term_type, src_ip, dst_ip)
             .map_err(TunnelDecapOrchError::SaiError)?;
 
         entry.term_entries.insert(term_key.clone(), term_entry_id);
@@ -238,17 +249,28 @@ impl TunnelDecapOrch {
         Ok(())
     }
 
-    pub fn remove_term_entry(&mut self, tunnel_name: &str, term_key: &str) -> Result<(), TunnelDecapOrchError> {
-        let entry = self.tunnels.get_mut(tunnel_name)
+    pub fn remove_term_entry(
+        &mut self,
+        tunnel_name: &str,
+        term_key: &str,
+    ) -> Result<(), TunnelDecapOrchError> {
+        let entry = self
+            .tunnels
+            .get_mut(tunnel_name)
             .ok_or_else(|| TunnelDecapOrchError::TunnelNotFound(tunnel_name.to_string()))?;
 
-        let term_entry_id = entry.term_entries.remove(term_key)
+        let term_entry_id = entry
+            .term_entries
+            .remove(term_key)
             .ok_or_else(|| TunnelDecapOrchError::TermEntryNotFound(term_key.to_string()))?;
 
-        let callbacks = self.callbacks.as_ref()
+        let callbacks = self
+            .callbacks
+            .as_ref()
             .ok_or_else(|| TunnelDecapOrchError::InvalidConfig("No callbacks set".to_string()))?;
 
-        callbacks.remove_tunnel_term_entry(term_entry_id)
+        callbacks
+            .remove_tunnel_term_entry(term_entry_id)
             .map_err(TunnelDecapOrchError::SaiError)?;
 
         self.stats.term_entries_removed += 1;
@@ -306,10 +328,7 @@ mod tests {
         let mut orch = TunnelDecapOrch::new(TunnelDecapOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config = TunnelDecapConfig::new(
-            "ipinip_tunnel".to_string(),
-            "IPINIP".to_string(),
-        );
+        let config = TunnelDecapConfig::new("ipinip_tunnel".to_string(), "IPINIP".to_string());
 
         assert!(orch.create_tunnel(config).is_ok());
         assert_eq!(orch.tunnel_count(), 1);
@@ -320,20 +339,19 @@ mod tests {
         let mut orch = TunnelDecapOrch::new(TunnelDecapOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config = TunnelDecapConfig::new(
-            "ipinip_tunnel".to_string(),
-            "IPINIP".to_string(),
-        );
+        let config = TunnelDecapConfig::new("ipinip_tunnel".to_string(), "IPINIP".to_string());
 
         orch.create_tunnel(config).unwrap();
 
-        assert!(orch.add_term_entry(
-            "ipinip_tunnel",
-            "term1".to_string(),
-            TunnelTermType::P2P,
-            IpAddress::from_str("10.0.0.1").unwrap(),
-            IpAddress::from_str("10.0.0.2").unwrap(),
-        ).is_ok());
+        assert!(orch
+            .add_term_entry(
+                "ipinip_tunnel",
+                "term1".to_string(),
+                TunnelTermType::P2P,
+                IpAddress::from_str("10.0.0.1").unwrap(),
+                IpAddress::from_str("10.0.0.2").unwrap(),
+            )
+            .is_ok());
 
         assert_eq!(orch.stats().term_entries_created, 1);
 
@@ -346,10 +364,7 @@ mod tests {
         let mut orch = TunnelDecapOrch::new(TunnelDecapOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config = TunnelDecapConfig::new(
-            "ipinip_tunnel".to_string(),
-            "IPINIP".to_string(),
-        );
+        let config = TunnelDecapConfig::new("ipinip_tunnel".to_string(), "IPINIP".to_string());
 
         orch.create_tunnel(config).unwrap();
 
@@ -359,7 +374,8 @@ mod tests {
             TunnelTermType::P2P,
             IpAddress::from_str("10.0.0.1").unwrap(),
             IpAddress::from_str("10.0.0.2").unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Should fail because term entries exist
         assert!(orch.remove_tunnel("ipinip_tunnel").is_err());
@@ -380,10 +396,7 @@ mod tests {
         let mut orch = TunnelDecapOrch::new(TunnelDecapOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config = TunnelDecapConfig::new(
-            "vxlan_tunnel".to_string(),
-            "VXLAN".to_string(),
-        );
+        let config = TunnelDecapConfig::new("vxlan_tunnel".to_string(), "VXLAN".to_string());
 
         assert!(orch.create_tunnel(config).is_ok());
         assert_eq!(orch.tunnel_count(), 1);
@@ -396,10 +409,7 @@ mod tests {
         let mut orch = TunnelDecapOrch::new(TunnelDecapOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config = TunnelDecapConfig::new(
-            "nvgre_tunnel".to_string(),
-            "NVGRE".to_string(),
-        );
+        let config = TunnelDecapConfig::new("nvgre_tunnel".to_string(), "NVGRE".to_string());
 
         assert!(orch.create_tunnel(config).is_ok());
         assert_eq!(orch.tunnel_count(), 1);
@@ -411,15 +421,9 @@ mod tests {
         let mut orch = TunnelDecapOrch::new(TunnelDecapOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config1 = TunnelDecapConfig::new(
-            "tunnel1".to_string(),
-            "IPINIP".to_string(),
-        );
+        let config1 = TunnelDecapConfig::new("tunnel1".to_string(), "IPINIP".to_string());
 
-        let config2 = TunnelDecapConfig::new(
-            "tunnel1".to_string(),
-            "IPINIP".to_string(),
-        );
+        let config2 = TunnelDecapConfig::new("tunnel1".to_string(), "IPINIP".to_string());
 
         assert!(orch.create_tunnel(config1).is_ok());
         let result = orch.create_tunnel(config2);
@@ -428,7 +432,7 @@ mod tests {
         match result {
             Err(TunnelDecapOrchError::TunnelExists(name)) => {
                 assert_eq!(name, "tunnel1");
-            },
+            }
             _ => panic!("Expected TunnelExists error"),
         }
     }
@@ -444,7 +448,7 @@ mod tests {
         match result {
             Err(TunnelDecapOrchError::TunnelNotFound(name)) => {
                 assert_eq!(name, "nonexistent");
-            },
+            }
             _ => panic!("Expected TunnelNotFound error"),
         }
     }
@@ -454,10 +458,7 @@ mod tests {
         let mut orch = TunnelDecapOrch::new(TunnelDecapOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config = TunnelDecapConfig::new(
-            "tunnel1".to_string(),
-            "IPINIP".to_string(),
-        );
+        let config = TunnelDecapConfig::new("tunnel1".to_string(), "IPINIP".to_string());
 
         orch.create_tunnel(config).unwrap();
         assert_eq!(orch.tunnel_count(), 1);
@@ -560,31 +561,37 @@ mod tests {
         orch.create_tunnel(config).unwrap();
 
         // Add first termination
-        assert!(orch.add_term_entry(
-            "tunnel1",
-            "term1".to_string(),
-            TunnelTermType::P2P,
-            IpAddress::from_str("10.0.0.1").unwrap(),
-            IpAddress::from_str("10.0.0.2").unwrap(),
-        ).is_ok());
+        assert!(orch
+            .add_term_entry(
+                "tunnel1",
+                "term1".to_string(),
+                TunnelTermType::P2P,
+                IpAddress::from_str("10.0.0.1").unwrap(),
+                IpAddress::from_str("10.0.0.2").unwrap(),
+            )
+            .is_ok());
 
         // Add second termination
-        assert!(orch.add_term_entry(
-            "tunnel1",
-            "term2".to_string(),
-            TunnelTermType::P2P,
-            IpAddress::from_str("10.0.0.3").unwrap(),
-            IpAddress::from_str("10.0.0.4").unwrap(),
-        ).is_ok());
+        assert!(orch
+            .add_term_entry(
+                "tunnel1",
+                "term2".to_string(),
+                TunnelTermType::P2P,
+                IpAddress::from_str("10.0.0.3").unwrap(),
+                IpAddress::from_str("10.0.0.4").unwrap(),
+            )
+            .is_ok());
 
         // Add third termination
-        assert!(orch.add_term_entry(
-            "tunnel1",
-            "term3".to_string(),
-            TunnelTermType::P2MP,
-            IpAddress::from_str("10.0.0.5").unwrap(),
-            IpAddress::from_str("10.0.0.0").unwrap(),
-        ).is_ok());
+        assert!(orch
+            .add_term_entry(
+                "tunnel1",
+                "term3".to_string(),
+                TunnelTermType::P2MP,
+                IpAddress::from_str("10.0.0.5").unwrap(),
+                IpAddress::from_str("10.0.0.0").unwrap(),
+            )
+            .is_ok());
 
         assert_eq!(orch.stats().term_entries_created, 3);
     }
@@ -690,7 +697,7 @@ mod tests {
         match result {
             Err(TunnelDecapOrchError::TunnelNotFound(name)) => {
                 assert_eq!(name, "nonexistent");
-            },
+            }
             _ => panic!("Expected TunnelNotFound error"),
         }
     }
@@ -704,13 +711,15 @@ mod tests {
         orch.create_tunnel(config).unwrap();
 
         // Add first term entry
-        assert!(orch.add_term_entry(
-            "tunnel1",
-            "term1".to_string(),
-            TunnelTermType::P2P,
-            IpAddress::from_str("10.0.0.1").unwrap(),
-            IpAddress::from_str("10.0.0.2").unwrap(),
-        ).is_ok());
+        assert!(orch
+            .add_term_entry(
+                "tunnel1",
+                "term1".to_string(),
+                TunnelTermType::P2P,
+                IpAddress::from_str("10.0.0.1").unwrap(),
+                IpAddress::from_str("10.0.0.2").unwrap(),
+            )
+            .is_ok());
 
         // Try to add duplicate
         let result = orch.add_term_entry(
@@ -725,7 +734,7 @@ mod tests {
         match result {
             Err(TunnelDecapOrchError::TermEntryExists(key)) => {
                 assert_eq!(key, "term1");
-            },
+            }
             _ => panic!("Expected TermEntryExists error"),
         }
     }
@@ -744,7 +753,7 @@ mod tests {
         match result {
             Err(TunnelDecapOrchError::TermEntryNotFound(key)) => {
                 assert_eq!(key, "nonexistent");
-            },
+            }
             _ => panic!("Expected TermEntryNotFound error"),
         }
     }
@@ -761,7 +770,7 @@ mod tests {
         match result {
             Err(TunnelDecapOrchError::InvalidConfig(msg)) => {
                 assert!(msg.contains("No callbacks set"));
-            },
+            }
             _ => panic!("Expected InvalidConfig error"),
         }
     }
@@ -800,7 +809,7 @@ mod tests {
         match result {
             Err(TunnelDecapOrchError::SaiError(msg)) => {
                 assert!(msg.contains("SAI tunnel creation failed"));
-            },
+            }
             _ => panic!("Expected SaiError"),
         }
         // Tunnel should not be created
@@ -833,7 +842,7 @@ mod tests {
         match result {
             Err(TunnelDecapOrchError::SaiError(msg)) => {
                 assert!(msg.contains("SAI term entry creation failed"));
-            },
+            }
             _ => panic!("Expected SaiError"),
         }
     }
@@ -852,10 +861,7 @@ mod tests {
 
         // Create three tunnels
         for i in 1..=3 {
-            let config = TunnelDecapConfig::new(
-                format!("tunnel{}", i),
-                "IPINIP".to_string(),
-            );
+            let config = TunnelDecapConfig::new(format!("tunnel{}", i), "IPINIP".to_string());
             orch.create_tunnel(config).unwrap();
         }
 
@@ -889,7 +895,8 @@ mod tests {
                 TunnelTermType::P2P,
                 IpAddress::from_str(&format!("10.0.0.{}", i)).unwrap(),
                 IpAddress::from_str(&format!("10.0.1.{}", i)).unwrap(),
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         assert_eq!(orch.stats().term_entries_created, 5);
@@ -920,7 +927,8 @@ mod tests {
             TunnelTermType::P2P,
             IpAddress::from_str("10.0.0.1").unwrap(),
             IpAddress::from_str("10.0.0.2").unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         orch.add_term_entry(
             "tunnel2",
@@ -928,7 +936,8 @@ mod tests {
             TunnelTermType::MP2MP,
             IpAddress::from_str("0.0.0.0").unwrap(),
             IpAddress::from_str("0.0.0.0").unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(orch.stats().tunnels_created, 2);
         assert_eq!(orch.stats().term_entries_created, 2);
@@ -993,7 +1002,7 @@ mod tests {
         match result {
             Err(TunnelDecapOrchError::TunnelNotFound(name)) => {
                 assert_eq!(name, "nonexistent");
-            },
+            }
             _ => panic!("Expected TunnelNotFound error"),
         }
     }
@@ -1014,7 +1023,8 @@ mod tests {
             TunnelTermType::P2P,
             IpAddress::from_str("10.0.0.1").unwrap(),
             IpAddress::from_str("10.0.0.2").unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         orch.add_term_entry(
             "workflow_tunnel",
@@ -1022,7 +1032,8 @@ mod tests {
             TunnelTermType::P2P,
             IpAddress::from_str("10.0.0.3").unwrap(),
             IpAddress::from_str("10.0.0.4").unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         orch.add_term_entry(
             "workflow_tunnel",
@@ -1030,7 +1041,8 @@ mod tests {
             TunnelTermType::P2MP,
             IpAddress::from_str("10.0.0.5").unwrap(),
             IpAddress::from_str("0.0.0.0").unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(orch.stats().term_entries_created, 3);
 
@@ -1061,10 +1073,7 @@ mod tests {
 
         // Add tunnels incrementally and verify count
         for i in 1..=10 {
-            let config = TunnelDecapConfig::new(
-                format!("tunnel{}", i),
-                "IPINIP".to_string(),
-            );
+            let config = TunnelDecapConfig::new(format!("tunnel{}", i), "IPINIP".to_string());
             orch.create_tunnel(config).unwrap();
             assert_eq!(orch.tunnel_count(), i);
         }

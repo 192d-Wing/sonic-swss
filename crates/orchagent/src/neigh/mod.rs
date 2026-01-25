@@ -15,4 +15,6 @@ mod types;
 
 pub use ffi::{register_neigh_orch, unregister_neigh_orch};
 pub use orch::{NeighOrch, NeighOrchCallbacks, NeighOrchConfig, NeighOrchError, NeighOrchStats};
-pub use types::{MacAddress, NeighborConfig, NeighborEntry, NeighborKey, NeighborStats, NeighborType};
+pub use types::{
+    MacAddress, NeighborConfig, NeighborEntry, NeighborKey, NeighborStats, NeighborType,
+};

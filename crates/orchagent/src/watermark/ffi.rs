@@ -332,7 +332,8 @@ mod tests {
         register_watermark_orch(orch);
 
         let group = CString::new("QUEUE_WATERMARK").unwrap();
-        let start_timer = unsafe { rust_watermark_orch_handle_flex_counter_status(group.as_ptr(), true) };
+        let start_timer =
+            unsafe { rust_watermark_orch_handle_flex_counter_status(group.as_ptr(), true) };
         assert!(start_timer);
         assert!(rust_watermark_orch_is_enabled());
         assert!(rust_watermark_orch_queue_enabled());

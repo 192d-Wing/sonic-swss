@@ -43,12 +43,18 @@ impl PortType {
 
     /// Returns true if this is a logical port type.
     pub const fn is_logical(&self) -> bool {
-        matches!(self, PortType::Vlan | PortType::Lag | PortType::Tunnel | PortType::Loopback)
+        matches!(
+            self,
+            PortType::Vlan | PortType::Lag | PortType::Tunnel | PortType::Loopback
+        )
     }
 
     /// Returns true if this is an internal/system port type.
     pub const fn is_internal(&self) -> bool {
-        matches!(self, PortType::Cpu | PortType::System | PortType::Recycle | PortType::Inband)
+        matches!(
+            self,
+            PortType::Cpu | PortType::System | PortType::Recycle | PortType::Inband
+        )
     }
 }
 
@@ -161,7 +167,10 @@ impl FromStr for AdminState {
         match s.to_lowercase().as_str() {
             "up" => Ok(AdminState::Up),
             "down" => Ok(AdminState::Down),
-            _ => Err(ParseError::InvalidPortType(format!("invalid admin state: {}", s))),
+            _ => Err(ParseError::InvalidPortType(format!(
+                "invalid admin state: {}",
+                s
+            ))),
         }
     }
 }
@@ -213,7 +222,10 @@ impl FromStr for OperState {
             "down" => Ok(OperState::Down),
             "unknown" => Ok(OperState::Unknown),
             "testing" => Ok(OperState::Testing),
-            _ => Err(ParseError::InvalidPortType(format!("invalid oper state: {}", s))),
+            _ => Err(ParseError::InvalidPortType(format!(
+                "invalid oper state: {}",
+                s
+            ))),
         }
     }
 }

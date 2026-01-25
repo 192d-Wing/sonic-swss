@@ -1,7 +1,10 @@
 //! Neighbor orchestration logic.
 
 use super::types::{NeighborEntry, NeighborKey, NeighborStats};
-use crate::{audit_log, audit::{AuditCategory, AuditOutcome, AuditRecord}};
+use crate::{
+    audit::{AuditCategory, AuditOutcome, AuditRecord},
+    audit_log,
+};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -97,13 +100,15 @@ impl NeighOrch {
             Some(e) => e,
             None => {
                 let err = NeighOrchError::NeighborNotFound(key.clone());
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "NeighOrch", "remove_neighbor")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(format!("{}/{}", key.interface, key.ip))
-                        .with_object_type("neighbor_entry")
-                        .with_error(err.to_string())
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "NeighOrch",
+                    "remove_neighbor"
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(format!("{}/{}", key.interface, key.ip))
+                .with_object_type("neighbor_entry")
+                .with_error(err.to_string()));
                 return Err(err);
             }
         };
@@ -117,20 +122,22 @@ impl NeighOrch {
 
         self.stats.stats.neighbors_removed = self.stats.stats.neighbors_removed.saturating_add(1);
 
-        audit_log!(
-            AuditRecord::new(AuditCategory::ResourceDelete, "NeighOrch", "remove_neighbor")
-                .with_outcome(AuditOutcome::Success)
-                .with_object_id(format!("{}/{}", key.interface, key.ip))
-                .with_object_type("neighbor_entry")
-                .with_details(serde_json::json!({
-                    "interface": key.interface,
-                    "ip_address": key.ip.to_string(),
-                    "mac_address": format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-                        entry.mac.as_bytes()[0], entry.mac.as_bytes()[1], entry.mac.as_bytes()[2],
-                        entry.mac.as_bytes()[3], entry.mac.as_bytes()[4], entry.mac.as_bytes()[5]),
-                    "ip_version": if entry.is_ipv4() { "ipv4" } else { "ipv6" },
-                }))
-        );
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "NeighOrch",
+            "remove_neighbor"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("{}/{}", key.interface, key.ip))
+        .with_object_type("neighbor_entry")
+        .with_details(serde_json::json!({
+            "interface": key.interface,
+            "ip_address": key.ip.to_string(),
+            "mac_address": format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                entry.mac.as_bytes()[0], entry.mac.as_bytes()[1], entry.mac.as_bytes()[2],
+                entry.mac.as_bytes()[3], entry.mac.as_bytes()[4], entry.mac.as_bytes()[5]),
+            "ip_version": if entry.is_ipv4() { "ipv4" } else { "ipv6" },
+        })));
 
         Ok(entry)
     }
@@ -140,33 +147,37 @@ impl NeighOrch {
 
         if !self.neighbors.contains_key(&key) {
             let err = NeighOrchError::NeighborNotFound(key.clone());
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceModify, "NeighOrch", "update_neighbor")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(format!("{}/{}", key.interface, key.ip))
-                    .with_object_type("neighbor_entry")
-                    .with_error(err.to_string())
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceModify,
+                "NeighOrch",
+                "update_neighbor"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(format!("{}/{}", key.interface, key.ip))
+            .with_object_type("neighbor_entry")
+            .with_error(err.to_string()));
             return Err(err);
         }
 
         self.stats.stats.neighbors_updated = self.stats.stats.neighbors_updated.saturating_add(1);
         self.neighbors.insert(key.clone(), entry.clone());
 
-        audit_log!(
-            AuditRecord::new(AuditCategory::ResourceModify, "NeighOrch", "update_neighbor")
-                .with_outcome(AuditOutcome::Success)
-                .with_object_id(format!("{}/{}", key.interface, key.ip))
-                .with_object_type("neighbor_entry")
-                .with_details(serde_json::json!({
-                    "interface": key.interface,
-                    "ip_address": key.ip.to_string(),
-                    "mac_address": format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-                        entry.mac.as_bytes()[0], entry.mac.as_bytes()[1], entry.mac.as_bytes()[2],
-                        entry.mac.as_bytes()[3], entry.mac.as_bytes()[4], entry.mac.as_bytes()[5]),
-                    "state_change": "mac_address_updated",
-                }))
-        );
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceModify,
+            "NeighOrch",
+            "update_neighbor"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(format!("{}/{}", key.interface, key.ip))
+        .with_object_type("neighbor_entry")
+        .with_details(serde_json::json!({
+            "interface": key.interface,
+            "ip_address": key.ip.to_string(),
+            "mac_address": format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                entry.mac.as_bytes()[0], entry.mac.as_bytes()[1], entry.mac.as_bytes()[2],
+                entry.mac.as_bytes()[3], entry.mac.as_bytes()[4], entry.mac.as_bytes()[5]),
+            "state_change": "mac_address_updated",
+        })));
 
         Ok(())
     }
@@ -179,7 +190,8 @@ impl NeighOrch {
     }
 
     pub fn clear_interface(&mut self, interface: &str) -> usize {
-        let keys_to_remove: Vec<_> = self.neighbors
+        let keys_to_remove: Vec<_> = self
+            .neighbors
             .keys()
             .filter(|key| key.interface == interface)
             .cloned()
@@ -204,8 +216,8 @@ impl NeighOrch {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::NeighborConfig;
+    use super::*;
 
     fn create_test_ipv4_neighbor(ip: &str, interface: &str, mac: &str) -> NeighborEntry {
         use super::super::types::MacAddress;
@@ -213,7 +225,7 @@ mod tests {
         let mac_addr = MacAddress::from_str(mac).unwrap();
         NeighborEntry::new(
             super::super::types::NeighborKey::new(interface.to_string(), ip_addr),
-            mac_addr
+            mac_addr,
         )
     }
 
@@ -223,7 +235,7 @@ mod tests {
         let mac_addr = MacAddress::from_str(mac).unwrap();
         NeighborEntry::new(
             super::super::types::NeighborKey::new(interface.to_string(), ip_addr),
-            mac_addr
+            mac_addr,
         )
     }
 
@@ -280,7 +292,10 @@ mod tests {
 
         let result = orch.remove_neighbor(&key);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), NeighOrchError::NeighborNotFound(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            NeighOrchError::NeighborNotFound(_)
+        ));
     }
 
     #[test]
@@ -300,9 +315,24 @@ mod tests {
     #[test]
     fn test_clear_interface() {
         let mut orch = NeighOrch::new(NeighOrchConfig::default());
-        orch.add_neighbor(create_test_ipv4_neighbor("10.0.0.1", "Ethernet0", "00:11:22:33:44:55")).unwrap();
-        orch.add_neighbor(create_test_ipv4_neighbor("10.0.0.2", "Ethernet0", "00:11:22:33:44:56")).unwrap();
-        orch.add_neighbor(create_test_ipv4_neighbor("10.0.0.3", "Ethernet4", "00:11:22:33:44:57")).unwrap();
+        orch.add_neighbor(create_test_ipv4_neighbor(
+            "10.0.0.1",
+            "Ethernet0",
+            "00:11:22:33:44:55",
+        ))
+        .unwrap();
+        orch.add_neighbor(create_test_ipv4_neighbor(
+            "10.0.0.2",
+            "Ethernet0",
+            "00:11:22:33:44:56",
+        ))
+        .unwrap();
+        orch.add_neighbor(create_test_ipv4_neighbor(
+            "10.0.0.3",
+            "Ethernet4",
+            "00:11:22:33:44:57",
+        ))
+        .unwrap();
 
         assert_eq!(orch.neighbor_count(), 3);
 
@@ -318,9 +348,24 @@ mod tests {
     #[test]
     fn test_get_neighbors_by_interface() {
         let mut orch = NeighOrch::new(NeighOrchConfig::default());
-        orch.add_neighbor(create_test_ipv4_neighbor("10.0.0.1", "Ethernet0", "00:11:22:33:44:55")).unwrap();
-        orch.add_neighbor(create_test_ipv4_neighbor("10.0.0.2", "Ethernet0", "00:11:22:33:44:56")).unwrap();
-        orch.add_neighbor(create_test_ipv4_neighbor("10.0.0.3", "Ethernet4", "00:11:22:33:44:57")).unwrap();
+        orch.add_neighbor(create_test_ipv4_neighbor(
+            "10.0.0.1",
+            "Ethernet0",
+            "00:11:22:33:44:55",
+        ))
+        .unwrap();
+        orch.add_neighbor(create_test_ipv4_neighbor(
+            "10.0.0.2",
+            "Ethernet0",
+            "00:11:22:33:44:56",
+        ))
+        .unwrap();
+        orch.add_neighbor(create_test_ipv4_neighbor(
+            "10.0.0.3",
+            "Ethernet4",
+            "00:11:22:33:44:57",
+        ))
+        .unwrap();
 
         let eth0_neighbors = orch.get_neighbors_by_interface("Ethernet0");
         assert_eq!(eth0_neighbors.len(), 2);
@@ -339,7 +384,10 @@ mod tests {
 
         let result = orch.update_neighbor(neighbor);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), NeighOrchError::NeighborNotFound(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            NeighOrchError::NeighborNotFound(_)
+        ));
     }
 
     #[test]
@@ -347,19 +395,44 @@ mod tests {
         let mut orch = NeighOrch::new(NeighOrchConfig::default());
         assert_eq!(orch.neighbor_count(), 0);
 
-        orch.add_neighbor(create_test_ipv4_neighbor("10.0.0.1", "Ethernet0", "00:11:22:33:44:55")).unwrap();
+        orch.add_neighbor(create_test_ipv4_neighbor(
+            "10.0.0.1",
+            "Ethernet0",
+            "00:11:22:33:44:55",
+        ))
+        .unwrap();
         assert_eq!(orch.neighbor_count(), 1);
 
-        orch.add_neighbor(create_test_ipv6_neighbor("fe80::1", "Ethernet0", "00:11:22:33:44:56")).unwrap();
+        orch.add_neighbor(create_test_ipv6_neighbor(
+            "fe80::1",
+            "Ethernet0",
+            "00:11:22:33:44:56",
+        ))
+        .unwrap();
         assert_eq!(orch.neighbor_count(), 2);
     }
 
     #[test]
     fn test_mixed_ipv4_ipv6_stats() {
         let mut orch = NeighOrch::new(NeighOrchConfig::default());
-        orch.add_neighbor(create_test_ipv4_neighbor("10.0.0.1", "Ethernet0", "00:11:22:33:44:55")).unwrap();
-        orch.add_neighbor(create_test_ipv4_neighbor("10.0.0.2", "Ethernet0", "00:11:22:33:44:56")).unwrap();
-        orch.add_neighbor(create_test_ipv6_neighbor("fe80::1", "Ethernet0", "00:11:22:33:44:57")).unwrap();
+        orch.add_neighbor(create_test_ipv4_neighbor(
+            "10.0.0.1",
+            "Ethernet0",
+            "00:11:22:33:44:55",
+        ))
+        .unwrap();
+        orch.add_neighbor(create_test_ipv4_neighbor(
+            "10.0.0.2",
+            "Ethernet0",
+            "00:11:22:33:44:56",
+        ))
+        .unwrap();
+        orch.add_neighbor(create_test_ipv6_neighbor(
+            "fe80::1",
+            "Ethernet0",
+            "00:11:22:33:44:57",
+        ))
+        .unwrap();
 
         assert_eq!(orch.stats().stats.ipv4_neighbors, 2);
         assert_eq!(orch.stats().stats.ipv6_neighbors, 1);

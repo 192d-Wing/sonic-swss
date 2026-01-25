@@ -1,9 +1,9 @@
 //! FFI exports for CoppOrch.
 
+use super::orch::{CoppOrch, CoppOrchCallbacks, CoppOrchConfig, Result};
+use super::types::{CoppTrapConfig, CoppTrapKey, RawSaiObjectId};
 use std::cell::RefCell;
 use std::sync::Arc;
-use super::orch::{CoppOrch, CoppOrchConfig, CoppOrchCallbacks, Result};
-use super::types::{CoppTrapKey, CoppTrapConfig, RawSaiObjectId};
 
 /// Stub callbacks that do nothing - used for FFI initialization
 struct StubCoppCallbacks;
@@ -39,8 +39,8 @@ pub extern "C" fn register_copp_orch() -> bool {
         if orch.borrow().is_some() {
             return false;
         }
-        let copp = CoppOrch::new(CoppOrchConfig::default())
-            .with_callbacks(Arc::new(StubCoppCallbacks));
+        let copp =
+            CoppOrch::new(CoppOrchConfig::default()).with_callbacks(Arc::new(StubCoppCallbacks));
         *orch.borrow_mut() = Some(Box::new(copp));
         true
     })

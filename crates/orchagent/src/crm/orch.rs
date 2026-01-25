@@ -5,13 +5,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::types::{
-    crm_acl_key, crm_acl_table_key, crm_dash_acl_group_key, crm_ext_table_key,
-    AclBindPoint, AclStage, CrmResourceCounter, CrmResourceEntry, CrmResourceStatus,
-    CrmResourceType, CrmThresholdField, CrmThresholdType, ThresholdCheck,
-    CRM_COUNTERS_TABLE_KEY, DEFAULT_HIGH_THRESHOLD, DEFAULT_LOW_THRESHOLD,
-    DEFAULT_POLLING_INTERVAL,
+    crm_acl_key, crm_acl_table_key, crm_dash_acl_group_key, crm_ext_table_key, AclBindPoint,
+    AclStage, CrmResourceCounter, CrmResourceEntry, CrmResourceStatus, CrmResourceType,
+    CrmThresholdField, CrmThresholdType, ThresholdCheck, CRM_COUNTERS_TABLE_KEY,
+    DEFAULT_HIGH_THRESHOLD, DEFAULT_LOW_THRESHOLD, DEFAULT_POLLING_INTERVAL,
 };
-use crate::{audit_log, audit::{AuditCategory, AuditOutcome, AuditRecord}};
+use crate::{
+    audit::{AuditCategory, AuditOutcome, AuditRecord},
+    audit_log,
+};
 
 /// CRM orchestrator error type.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,10 +58,7 @@ pub trait CrmOrchCallbacks: Send + Sync {
     );
 
     /// Queries available resources from SAI.
-    fn query_resource_availability(
-        &self,
-        resource_type: CrmResourceType,
-    ) -> Option<(u32, u32)>; // (used, available)
+    fn query_resource_availability(&self, resource_type: CrmResourceType) -> Option<(u32, u32)>; // (used, available)
 
     /// Queries ACL resource availability.
     fn query_acl_availability(
@@ -69,13 +68,7 @@ pub trait CrmOrchCallbacks: Send + Sync {
     ) -> Option<(u32, u32)>;
 
     /// Writes counters to COUNTERS_DB.
-    fn write_counters(
-        &self,
-        resource: &str,
-        key: &str,
-        used: u32,
-        available: u32,
-    );
+    fn write_counters(&self, resource: &str, key: &str, used: u32, available: u32);
 
     /// Returns true if this is a DPU (DASH) switch.
     fn is_dpu(&self) -> bool;
@@ -189,13 +182,16 @@ impl CrmOrch {
         self.config.polling_interval = interval;
         self.stats.config_updates += 1;
 
-        audit_log!(AuditRecord::new(AuditCategory::ConfigurationChange, "CrmOrch", "set_polling_interval")
-            .with_outcome(AuditOutcome::Success)
-            .with_object_id("crm_config")
-            .with_details(serde_json::json!({
-                "polling_interval_seconds": interval.as_secs(),
-            }))
-        );
+        audit_log!(AuditRecord::new(
+            AuditCategory::ConfigurationChange,
+            "CrmOrch",
+            "set_polling_interval"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id("crm_config")
+        .with_details(serde_json::json!({
+            "polling_interval_seconds": interval.as_secs(),
+        })));
     }
 
     /// Returns the statistics.
@@ -230,33 +226,34 @@ impl CrmOrch {
 
     /// Increments the used counter for a global resource.
     pub fn increment_used(&mut self, resource_type: CrmResourceType) -> Result<u32, CrmOrchError> {
-        let entry = self
-            .resources
-            .get_mut(&resource_type)
-            .ok_or_else(|| {
-                audit_log!(AuditRecord::new(AuditCategory::ResourceModify, "CrmOrch", "increment_used")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(resource_type.name())
-                    .with_details(serde_json::json!({
-                        "error": "Resource not found",
-                        "resource_type": resource_type.name(),
-                    }))
-                );
-                CrmOrchError::ResourceNotFound(resource_type)
-            })?;
+        let entry = self.resources.get_mut(&resource_type).ok_or_else(|| {
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceModify,
+                "CrmOrch",
+                "increment_used"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(resource_type.name())
+            .with_details(serde_json::json!({
+                "error": "Resource not found",
+                "resource_type": resource_type.name(),
+            })));
+            CrmOrchError::ResourceNotFound(resource_type)
+        })?;
 
         let counter = entry.get_or_create_counter(CRM_COUNTERS_TABLE_KEY);
         let new_used = counter.increment_used();
         self.stats.increments += 1;
 
-        audit_log!(AuditRecord::new(AuditCategory::ResourceModify, "CrmOrch", "increment_used")
-            .with_outcome(AuditOutcome::Success)
-            .with_object_id(resource_type.name())
-            .with_details(serde_json::json!({
-                "resource_type": resource_type.name(),
-                "used": new_used,
-                "available": counter.available,
-            }))
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceModify, "CrmOrch", "increment_used")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(resource_type.name())
+                .with_details(serde_json::json!({
+                    "resource_type": resource_type.name(),
+                    "used": new_used,
+                    "available": counter.available,
+                }))
         );
 
         Ok(new_used)
@@ -264,32 +261,35 @@ impl CrmOrch {
 
     /// Decrements the used counter for a global resource.
     pub fn decrement_used(&mut self, resource_type: CrmResourceType) -> Result<u32, CrmOrchError> {
-        let entry = self
-            .resources
-            .get_mut(&resource_type)
-            .ok_or_else(|| {
-                audit_log!(AuditRecord::new(AuditCategory::ResourceModify, "CrmOrch", "decrement_used")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(resource_type.name())
-                    .with_details(serde_json::json!({
-                        "error": "Resource not found",
-                        "resource_type": resource_type.name(),
-                    }))
-                );
-                CrmOrchError::ResourceNotFound(resource_type)
-            })?;
+        let entry = self.resources.get_mut(&resource_type).ok_or_else(|| {
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceModify,
+                "CrmOrch",
+                "decrement_used"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(resource_type.name())
+            .with_details(serde_json::json!({
+                "error": "Resource not found",
+                "resource_type": resource_type.name(),
+            })));
+            CrmOrchError::ResourceNotFound(resource_type)
+        })?;
 
         let counter = entry
             .get_counter_mut(CRM_COUNTERS_TABLE_KEY)
             .ok_or_else(|| {
-                audit_log!(AuditRecord::new(AuditCategory::ResourceModify, "CrmOrch", "decrement_used")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(resource_type.name())
-                    .with_details(serde_json::json!({
-                        "error": "Counter not found",
-                        "resource_type": resource_type.name(),
-                    }))
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceModify,
+                    "CrmOrch",
+                    "decrement_used"
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(resource_type.name())
+                .with_details(serde_json::json!({
+                    "error": "Counter not found",
+                    "resource_type": resource_type.name(),
+                })));
                 CrmOrchError::CounterNotFound(CRM_COUNTERS_TABLE_KEY.to_string())
             })?;
 
@@ -297,25 +297,31 @@ impl CrmOrch {
         counter
             .decrement_used()
             .ok_or_else(|| {
-                audit_log!(AuditRecord::new(AuditCategory::ResourceModify, "CrmOrch", "decrement_used")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(resource_type.name())
-                    .with_details(serde_json::json!({
-                        "error": "Counter underflow",
-                        "resource_type": resource_type.name(),
-                    }))
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceModify,
+                    "CrmOrch",
+                    "decrement_used"
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(resource_type.name())
+                .with_details(serde_json::json!({
+                    "error": "Counter underflow",
+                    "resource_type": resource_type.name(),
+                })));
                 CrmOrchError::InvalidThreshold("Counter underflow".to_string())
             })
             .map(|new_used| {
-                audit_log!(AuditRecord::new(AuditCategory::ResourceModify, "CrmOrch", "decrement_used")
-                    .with_outcome(AuditOutcome::Success)
-                    .with_object_id(resource_type.name())
-                    .with_details(serde_json::json!({
-                        "resource_type": resource_type.name(),
-                        "used": new_used,
-                    }))
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceModify,
+                    "CrmOrch",
+                    "decrement_used"
+                )
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(resource_type.name())
+                .with_details(serde_json::json!({
+                    "resource_type": resource_type.name(),
+                    "used": new_used,
+                })));
                 new_used
             })
     }
@@ -629,9 +635,8 @@ impl CrmOrch {
 
         match field_type {
             CrmThresholdField::Type => {
-                let threshold_type: CrmThresholdType = value
-                    .parse()
-                    .map_err(|e| CrmOrchError::ParseError(e))?;
+                let threshold_type: CrmThresholdType =
+                    value.parse().map_err(|e| CrmOrchError::ParseError(e))?;
                 self.set_threshold_type(resource_type, threshold_type)?;
             }
             CrmThresholdField::Low => {
@@ -690,16 +695,19 @@ impl CrmOrch {
                     // Don't overwrite used - it's tracked by increment/decrement
 
                     // Log successful query for critical resources
-                    audit_log!(AuditRecord::new(AuditCategory::SystemLifecycle, "CrmOrch", "query_resource_availability")
-                        .with_outcome(AuditOutcome::Success)
-                        .with_object_id(res_type.name())
-                        .with_details(serde_json::json!({
-                            "resource_type": res_type.name(),
-                            "used": used,
-                            "available": available,
-                            "utilization_percent": counter.utilization_percent(),
-                        }))
-                    );
+                    audit_log!(AuditRecord::new(
+                        AuditCategory::SystemLifecycle,
+                        "CrmOrch",
+                        "query_resource_availability"
+                    )
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_id(res_type.name())
+                    .with_details(serde_json::json!({
+                        "resource_type": res_type.name(),
+                        "used": used,
+                        "available": available,
+                        "utilization_percent": counter.utilization_percent(),
+                    })));
                 }
             }
         }
@@ -777,7 +785,10 @@ impl CrmOrch {
                 }
 
                 match counter.check_threshold(threshold_type, high, low) {
-                    ThresholdCheck::Exceeded { utilization, threshold } => {
+                    ThresholdCheck::Exceeded {
+                        utilization,
+                        threshold,
+                    } => {
                         self.stats.threshold_events += 1;
                         callbacks.publish_threshold_event(
                             res_type.name(),
@@ -788,7 +799,10 @@ impl CrmOrch {
                             true,
                         );
                     }
-                    ThresholdCheck::Recovered { utilization, threshold } => {
+                    ThresholdCheck::Recovered {
+                        utilization,
+                        threshold,
+                    } => {
                         callbacks.publish_threshold_event(
                             res_type.name(),
                             key,
@@ -830,7 +844,10 @@ mod tests {
     fn test_crm_orch_new() {
         let orch = CrmOrch::new(CrmOrchConfig::default());
         assert!(!orch.is_initialized());
-        assert_eq!(orch.polling_interval(), Duration::from_secs(DEFAULT_POLLING_INTERVAL));
+        assert_eq!(
+            orch.polling_interval(),
+            Duration::from_secs(DEFAULT_POLLING_INTERVAL)
+        );
 
         // Check that all standard resources are initialized
         for &res_type in CrmResourceType::standard_types() {
@@ -873,7 +890,11 @@ mod tests {
 
         // Increment ACL table
         let used = orch
-            .increment_acl_used(CrmResourceType::AclTable, AclStage::Ingress, AclBindPoint::Port)
+            .increment_acl_used(
+                CrmResourceType::AclTable,
+                AclStage::Ingress,
+                AclBindPoint::Port,
+            )
             .unwrap();
         assert_eq!(used, 1);
 
@@ -995,8 +1016,11 @@ mod tests {
         let mut orch = CrmOrch::new(CrmOrchConfig::default());
 
         // Non-ACL resource for ACL operation
-        let result =
-            orch.increment_acl_used(CrmResourceType::Ipv4Route, AclStage::Ingress, AclBindPoint::Port);
+        let result = orch.increment_acl_used(
+            CrmResourceType::Ipv4Route,
+            AclStage::Ingress,
+            AclBindPoint::Port,
+        );
         assert!(result.is_err());
 
         // Non-per-table resource for per-table operation
@@ -1071,7 +1095,10 @@ mod tests {
         let mut orch = CrmOrch::new(CrmOrchConfig::default());
 
         for i in 1..=10 {
-            assert_eq!(orch.increment_used(CrmResourceType::Ipv4Neighbor).unwrap(), i);
+            assert_eq!(
+                orch.increment_used(CrmResourceType::Ipv4Neighbor).unwrap(),
+                i
+            );
         }
         assert_eq!(orch.get_used(CrmResourceType::Ipv4Neighbor), Some(10));
     }
@@ -1081,12 +1108,18 @@ mod tests {
         let mut orch = CrmOrch::new(CrmOrchConfig::default());
 
         for i in 1..=5 {
-            assert_eq!(orch.increment_used(CrmResourceType::Ipv6Neighbor).unwrap(), i);
+            assert_eq!(
+                orch.increment_used(CrmResourceType::Ipv6Neighbor).unwrap(),
+                i
+            );
         }
         assert_eq!(orch.get_used(CrmResourceType::Ipv6Neighbor), Some(5));
 
         for i in (0..5).rev() {
-            assert_eq!(orch.decrement_used(CrmResourceType::Ipv6Neighbor).unwrap(), i);
+            assert_eq!(
+                orch.decrement_used(CrmResourceType::Ipv6Neighbor).unwrap(),
+                i
+            );
         }
     }
 
@@ -1094,8 +1127,14 @@ mod tests {
     fn test_nexthop_group_tracking() {
         let mut orch = CrmOrch::new(CrmOrchConfig::default());
 
-        assert_eq!(orch.increment_used(CrmResourceType::NexthopGroup).unwrap(), 1);
-        assert_eq!(orch.increment_used(CrmResourceType::NexthopGroup).unwrap(), 2);
+        assert_eq!(
+            orch.increment_used(CrmResourceType::NexthopGroup).unwrap(),
+            1
+        );
+        assert_eq!(
+            orch.increment_used(CrmResourceType::NexthopGroup).unwrap(),
+            2
+        );
         assert_eq!(orch.get_used(CrmResourceType::NexthopGroup), Some(2));
     }
 
@@ -1105,13 +1144,25 @@ mod tests {
 
         // Add multiple members
         for i in 1..=20 {
-            assert_eq!(orch.increment_used(CrmResourceType::NexthopGroupMember).unwrap(), i);
+            assert_eq!(
+                orch.increment_used(CrmResourceType::NexthopGroupMember)
+                    .unwrap(),
+                i
+            );
         }
         assert_eq!(orch.get_used(CrmResourceType::NexthopGroupMember), Some(20));
 
         // Remove some members
-        assert_eq!(orch.decrement_used(CrmResourceType::NexthopGroupMember).unwrap(), 19);
-        assert_eq!(orch.decrement_used(CrmResourceType::NexthopGroupMember).unwrap(), 18);
+        assert_eq!(
+            orch.decrement_used(CrmResourceType::NexthopGroupMember)
+                .unwrap(),
+            19
+        );
+        assert_eq!(
+            orch.decrement_used(CrmResourceType::NexthopGroupMember)
+                .unwrap(),
+            18
+        );
     }
 
     #[test]
@@ -1119,35 +1170,43 @@ mod tests {
         let mut orch = CrmOrch::new(CrmOrchConfig::default());
 
         // Ingress + Port
-        let used = orch.increment_acl_used(
-            CrmResourceType::AclTable,
-            AclStage::Ingress,
-            AclBindPoint::Port
-        ).unwrap();
+        let used = orch
+            .increment_acl_used(
+                CrmResourceType::AclTable,
+                AclStage::Ingress,
+                AclBindPoint::Port,
+            )
+            .unwrap();
         assert_eq!(used, 1);
 
         // Egress + Port (different counter)
-        let used = orch.increment_acl_used(
-            CrmResourceType::AclTable,
-            AclStage::Egress,
-            AclBindPoint::Port
-        ).unwrap();
+        let used = orch
+            .increment_acl_used(
+                CrmResourceType::AclTable,
+                AclStage::Egress,
+                AclBindPoint::Port,
+            )
+            .unwrap();
         assert_eq!(used, 1);
 
         // Ingress + Vlan (different counter)
-        let used = orch.increment_acl_used(
-            CrmResourceType::AclTable,
-            AclStage::Ingress,
-            AclBindPoint::Vlan
-        ).unwrap();
+        let used = orch
+            .increment_acl_used(
+                CrmResourceType::AclTable,
+                AclStage::Ingress,
+                AclBindPoint::Vlan,
+            )
+            .unwrap();
         assert_eq!(used, 1);
 
         // Increment same counter again
-        let used = orch.increment_acl_used(
-            CrmResourceType::AclTable,
-            AclStage::Ingress,
-            AclBindPoint::Port
-        ).unwrap();
+        let used = orch
+            .increment_acl_used(
+                CrmResourceType::AclTable,
+                AclStage::Ingress,
+                AclBindPoint::Port,
+            )
+            .unwrap();
         assert_eq!(used, 2);
     }
 
@@ -1159,13 +1218,33 @@ mod tests {
         let table_id_2 = 0x2000;
 
         // Add entries to table 1
-        assert_eq!(orch.increment_acl_table_used(CrmResourceType::AclEntry, table_id_1).unwrap(), 1);
-        assert_eq!(orch.increment_acl_table_used(CrmResourceType::AclEntry, table_id_1).unwrap(), 2);
-        assert_eq!(orch.increment_acl_table_used(CrmResourceType::AclEntry, table_id_1).unwrap(), 3);
+        assert_eq!(
+            orch.increment_acl_table_used(CrmResourceType::AclEntry, table_id_1)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            orch.increment_acl_table_used(CrmResourceType::AclEntry, table_id_1)
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            orch.increment_acl_table_used(CrmResourceType::AclEntry, table_id_1)
+                .unwrap(),
+            3
+        );
 
         // Add entries to table 2
-        assert_eq!(orch.increment_acl_table_used(CrmResourceType::AclEntry, table_id_2).unwrap(), 1);
-        assert_eq!(orch.increment_acl_table_used(CrmResourceType::AclEntry, table_id_2).unwrap(), 2);
+        assert_eq!(
+            orch.increment_acl_table_used(CrmResourceType::AclEntry, table_id_2)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            orch.increment_acl_table_used(CrmResourceType::AclEntry, table_id_2)
+                .unwrap(),
+            2
+        );
 
         // Verify separate tracking
         let entry = orch.get_resource(CrmResourceType::AclEntry).unwrap();
@@ -1218,7 +1297,8 @@ mod tests {
     fn test_set_threshold_type_percentage() {
         let mut orch = CrmOrch::new(CrmOrchConfig::default());
 
-        orch.set_threshold_type(CrmResourceType::Ipv4Route, CrmThresholdType::Percentage).unwrap();
+        orch.set_threshold_type(CrmResourceType::Ipv4Route, CrmThresholdType::Percentage)
+            .unwrap();
         let entry = orch.get_resource(CrmResourceType::Ipv4Route).unwrap();
         assert_eq!(entry.threshold_type, CrmThresholdType::Percentage);
     }
@@ -1227,7 +1307,8 @@ mod tests {
     fn test_set_threshold_type_used() {
         let mut orch = CrmOrch::new(CrmOrchConfig::default());
 
-        orch.set_threshold_type(CrmResourceType::Ipv6Neighbor, CrmThresholdType::Used).unwrap();
+        orch.set_threshold_type(CrmResourceType::Ipv6Neighbor, CrmThresholdType::Used)
+            .unwrap();
         let entry = orch.get_resource(CrmResourceType::Ipv6Neighbor).unwrap();
         assert_eq!(entry.threshold_type, CrmThresholdType::Used);
     }
@@ -1236,7 +1317,8 @@ mod tests {
     fn test_set_threshold_type_free() {
         let mut orch = CrmOrch::new(CrmOrchConfig::default());
 
-        orch.set_threshold_type(CrmResourceType::FdbEntry, CrmThresholdType::Free).unwrap();
+        orch.set_threshold_type(CrmResourceType::FdbEntry, CrmThresholdType::Free)
+            .unwrap();
         let entry = orch.get_resource(CrmResourceType::FdbEntry).unwrap();
         assert_eq!(entry.threshold_type, CrmThresholdType::Free);
     }
@@ -1245,8 +1327,10 @@ mod tests {
     fn test_set_high_low_thresholds() {
         let mut orch = CrmOrch::new(CrmOrchConfig::default());
 
-        orch.set_high_threshold(CrmResourceType::Ipv4Route, 95).unwrap();
-        orch.set_low_threshold(CrmResourceType::Ipv4Route, 60).unwrap();
+        orch.set_high_threshold(CrmResourceType::Ipv4Route, 95)
+            .unwrap();
+        orch.set_low_threshold(CrmResourceType::Ipv4Route, 60)
+            .unwrap();
 
         let entry = orch.get_resource(CrmResourceType::Ipv4Route).unwrap();
         assert_eq!(entry.high_threshold, 95);
@@ -1258,14 +1342,20 @@ mod tests {
         let mut orch = CrmOrch::new(CrmOrchConfig::default());
 
         // Configure IPv4 routes
-        orch.set_threshold_type(CrmResourceType::Ipv4Route, CrmThresholdType::Percentage).unwrap();
-        orch.set_high_threshold(CrmResourceType::Ipv4Route, 90).unwrap();
-        orch.set_low_threshold(CrmResourceType::Ipv4Route, 70).unwrap();
+        orch.set_threshold_type(CrmResourceType::Ipv4Route, CrmThresholdType::Percentage)
+            .unwrap();
+        orch.set_high_threshold(CrmResourceType::Ipv4Route, 90)
+            .unwrap();
+        orch.set_low_threshold(CrmResourceType::Ipv4Route, 70)
+            .unwrap();
 
         // Configure IPv6 neighbors
-        orch.set_threshold_type(CrmResourceType::Ipv6Neighbor, CrmThresholdType::Used).unwrap();
-        orch.set_high_threshold(CrmResourceType::Ipv6Neighbor, 1000).unwrap();
-        orch.set_low_threshold(CrmResourceType::Ipv6Neighbor, 500).unwrap();
+        orch.set_threshold_type(CrmResourceType::Ipv6Neighbor, CrmThresholdType::Used)
+            .unwrap();
+        orch.set_high_threshold(CrmResourceType::Ipv6Neighbor, 1000)
+            .unwrap();
+        orch.set_low_threshold(CrmResourceType::Ipv6Neighbor, 500)
+            .unwrap();
 
         // Verify independent configuration
         let ipv4_entry = orch.get_resource(CrmResourceType::Ipv4Route).unwrap();
@@ -1282,9 +1372,12 @@ mod tests {
         let mut orch = CrmOrch::new(CrmOrchConfig::default());
         let initial_updates = orch.stats().config_updates;
 
-        orch.set_threshold_type(CrmResourceType::Ipv4Route, CrmThresholdType::Used).unwrap();
-        orch.set_high_threshold(CrmResourceType::Ipv4Route, 100).unwrap();
-        orch.set_low_threshold(CrmResourceType::Ipv4Route, 50).unwrap();
+        orch.set_threshold_type(CrmResourceType::Ipv4Route, CrmThresholdType::Used)
+            .unwrap();
+        orch.set_high_threshold(CrmResourceType::Ipv4Route, 100)
+            .unwrap();
+        orch.set_low_threshold(CrmResourceType::Ipv4Route, 50)
+            .unwrap();
 
         assert_eq!(orch.stats().config_updates, initial_updates + 3);
     }
@@ -1318,7 +1411,10 @@ mod tests {
     #[test]
     fn test_default_polling_interval() {
         let orch = CrmOrch::new(CrmOrchConfig::default());
-        assert_eq!(orch.polling_interval(), Duration::from_secs(DEFAULT_POLLING_INTERVAL));
+        assert_eq!(
+            orch.polling_interval(),
+            Duration::from_secs(DEFAULT_POLLING_INTERVAL)
+        );
         assert_eq!(orch.polling_interval(), Duration::from_secs(300)); // 5 minutes
     }
 
@@ -1389,7 +1485,9 @@ mod tests {
     fn test_usage_percentage_at_limits() {
         let mut orch = CrmOrch::new(CrmOrchConfig::default());
 
-        let entry = orch.get_resource_mut(CrmResourceType::Ipv4Neighbor).unwrap();
+        let entry = orch
+            .get_resource_mut(CrmResourceType::Ipv4Neighbor)
+            .unwrap();
         let counter = entry.get_or_create_counter(CRM_COUNTERS_TABLE_KEY);
 
         // 0% usage
@@ -1435,7 +1533,13 @@ mod tests {
 
         // Check with percentage threshold
         let result = counter.check_threshold(CrmThresholdType::Percentage, 85, 70);
-        assert!(matches!(result, ThresholdCheck::Exceeded { utilization: 90, threshold: 85 }));
+        assert!(matches!(
+            result,
+            ThresholdCheck::Exceeded {
+                utilization: 90,
+                threshold: 85
+            }
+        ));
         assert_eq!(counter.exceeded_log_count, 1);
     }
 
@@ -1453,7 +1557,13 @@ mod tests {
         counter.used = 60;
         counter.available = 40;
         let result = counter.check_threshold(CrmThresholdType::Percentage, 85, 70);
-        assert!(matches!(result, ThresholdCheck::Recovered { utilization: 60, threshold: 70 }));
+        assert!(matches!(
+            result,
+            ThresholdCheck::Recovered {
+                utilization: 60,
+                threshold: 70
+            }
+        ));
         assert_eq!(counter.exceeded_log_count, 0);
     }
 
@@ -1478,14 +1588,24 @@ mod tests {
         counter.available = 12;
 
         // All should report exceeded
-        let ipv4_counter = orch.get_resource(CrmResourceType::Ipv4Route).unwrap()
-            .get_counter(CRM_COUNTERS_TABLE_KEY).unwrap();
-        let result = ipv4_counter.clone().check_threshold(CrmThresholdType::Percentage, 85, 70);
+        let ipv4_counter = orch
+            .get_resource(CrmResourceType::Ipv4Route)
+            .unwrap()
+            .get_counter(CRM_COUNTERS_TABLE_KEY)
+            .unwrap();
+        let result = ipv4_counter
+            .clone()
+            .check_threshold(CrmThresholdType::Percentage, 85, 70);
         assert!(matches!(result, ThresholdCheck::Exceeded { .. }));
 
-        let ipv6_counter = orch.get_resource(CrmResourceType::Ipv6Route).unwrap()
-            .get_counter(CRM_COUNTERS_TABLE_KEY).unwrap();
-        let result = ipv6_counter.clone().check_threshold(CrmThresholdType::Percentage, 85, 70);
+        let ipv6_counter = orch
+            .get_resource(CrmResourceType::Ipv6Route)
+            .unwrap()
+            .get_counter(CRM_COUNTERS_TABLE_KEY)
+            .unwrap();
+        let result = ipv6_counter
+            .clone()
+            .check_threshold(CrmThresholdType::Percentage, 85, 70);
         assert!(matches!(result, ThresholdCheck::Exceeded { .. }));
     }
 
@@ -1521,12 +1641,24 @@ mod tests {
 
         // Threshold based on used count
         let result = counter.check_threshold(CrmThresholdType::Used, 900, 700);
-        assert!(matches!(result, ThresholdCheck::Exceeded { utilization: 1000, threshold: 900 }));
+        assert!(matches!(
+            result,
+            ThresholdCheck::Exceeded {
+                utilization: 1000,
+                threshold: 900
+            }
+        ));
 
         // Recovery
         counter.used = 650;
         let result = counter.check_threshold(CrmThresholdType::Used, 900, 700);
-        assert!(matches!(result, ThresholdCheck::Recovered { utilization: 650, threshold: 700 }));
+        assert!(matches!(
+            result,
+            ThresholdCheck::Recovered {
+                utilization: 650,
+                threshold: 700
+            }
+        ));
     }
 
     #[test]
@@ -1538,12 +1670,24 @@ mod tests {
         // Threshold based on free count (high free triggers exceeded)
         // When available >= high (150 >= 100), it's "exceeded"
         let result = counter.check_threshold(CrmThresholdType::Free, 100, 50);
-        assert!(matches!(result, ThresholdCheck::Exceeded { utilization: 150, threshold: 100 }));
+        assert!(matches!(
+            result,
+            ThresholdCheck::Exceeded {
+                utilization: 150,
+                threshold: 100
+            }
+        ));
 
         // Recovery (less free)
         counter.available = 40;
         let result = counter.check_threshold(CrmThresholdType::Free, 100, 50);
-        assert!(matches!(result, ThresholdCheck::Recovered { utilization: 40, threshold: 50 }));
+        assert!(matches!(
+            result,
+            ThresholdCheck::Recovered {
+                utilization: 40,
+                threshold: 50
+            }
+        ));
     }
 
     // ========== Statistics Tests ==========
@@ -1573,9 +1717,12 @@ mod tests {
         let initial = orch.stats().config_updates;
 
         orch.set_polling_interval(Duration::from_secs(60));
-        orch.set_threshold_type(CrmResourceType::Ipv4Route, CrmThresholdType::Used).unwrap();
-        orch.set_high_threshold(CrmResourceType::Ipv4Route, 100).unwrap();
-        orch.set_low_threshold(CrmResourceType::Ipv4Route, 50).unwrap();
+        orch.set_threshold_type(CrmResourceType::Ipv4Route, CrmThresholdType::Used)
+            .unwrap();
+        orch.set_high_threshold(CrmResourceType::Ipv4Route, 100)
+            .unwrap();
+        orch.set_low_threshold(CrmResourceType::Ipv4Route, 50)
+            .unwrap();
 
         assert_eq!(orch.stats().config_updates, initial + 4);
     }
@@ -1601,12 +1748,28 @@ mod tests {
         let initial_inc = orch.stats().increments;
         let initial_dec = orch.stats().decrements;
 
-        orch.increment_acl_used(CrmResourceType::AclTable, AclStage::Ingress, AclBindPoint::Port).unwrap();
-        orch.increment_acl_used(CrmResourceType::AclTable, AclStage::Egress, AclBindPoint::Vlan).unwrap();
+        orch.increment_acl_used(
+            CrmResourceType::AclTable,
+            AclStage::Ingress,
+            AclBindPoint::Port,
+        )
+        .unwrap();
+        orch.increment_acl_used(
+            CrmResourceType::AclTable,
+            AclStage::Egress,
+            AclBindPoint::Vlan,
+        )
+        .unwrap();
 
         assert_eq!(orch.stats().increments, initial_inc + 2);
 
-        orch.decrement_acl_used(CrmResourceType::AclTable, AclStage::Ingress, AclBindPoint::Port, None).unwrap();
+        orch.decrement_acl_used(
+            CrmResourceType::AclTable,
+            AclStage::Ingress,
+            AclBindPoint::Port,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(orch.stats().decrements, initial_dec + 1);
     }
@@ -1621,10 +1784,13 @@ mod tests {
         let result = orch.increment_acl_used(
             CrmResourceType::Ipv4Route,
             AclStage::Ingress,
-            AclBindPoint::Port
+            AclBindPoint::Port,
         );
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), CrmOrchError::InvalidThreshold(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            CrmOrchError::InvalidThreshold(_)
+        ));
     }
 
     #[test]
@@ -1634,7 +1800,10 @@ mod tests {
         // Try to use non-per-table resource for per-table operation
         let result = orch.increment_acl_table_used(CrmResourceType::AclTable, 0x1234);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), CrmOrchError::InvalidThreshold(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            CrmOrchError::InvalidThreshold(_)
+        ));
     }
 
     #[test]
@@ -1646,10 +1815,13 @@ mod tests {
             CrmResourceType::AclTable,
             AclStage::Ingress,
             AclBindPoint::Port,
-            None
+            None,
         );
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), CrmOrchError::CounterNotFound(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            CrmOrchError::CounterNotFound(_)
+        ));
     }
 
     #[test]
@@ -1659,7 +1831,10 @@ mod tests {
         // Try to decrement below zero - should get InvalidThreshold error
         let result = orch.decrement_used(CrmResourceType::Ipv4Route);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), CrmOrchError::InvalidThreshold(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            CrmOrchError::InvalidThreshold(_)
+        ));
     }
 
     #[test]
@@ -1703,7 +1878,13 @@ mod tests {
         assert_eq!(counter.utilization_percent(), 100);
 
         let result = counter.check_threshold(CrmThresholdType::Percentage, 85, 70);
-        assert!(matches!(result, ThresholdCheck::Exceeded { utilization: 100, .. }));
+        assert!(matches!(
+            result,
+            ThresholdCheck::Exceeded {
+                utilization: 100,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -1777,28 +1958,52 @@ mod tests {
         let table_id = 0x5678;
 
         // Add ACL table
-        orch.increment_acl_used(CrmResourceType::AclTable, AclStage::Ingress, AclBindPoint::Port).unwrap();
+        orch.increment_acl_used(
+            CrmResourceType::AclTable,
+            AclStage::Ingress,
+            AclBindPoint::Port,
+        )
+        .unwrap();
 
         // Add entries for this table
-        orch.increment_acl_table_used(CrmResourceType::AclEntry, table_id).unwrap();
-        orch.increment_acl_table_used(CrmResourceType::AclCounter, table_id).unwrap();
+        orch.increment_acl_table_used(CrmResourceType::AclEntry, table_id)
+            .unwrap();
+        orch.increment_acl_table_used(CrmResourceType::AclCounter, table_id)
+            .unwrap();
 
         // Verify counters exist
         let table_key = crm_acl_table_key(table_id);
-        assert!(orch.get_resource(CrmResourceType::AclEntry).unwrap().get_counter(&table_key).is_some());
-        assert!(orch.get_resource(CrmResourceType::AclCounter).unwrap().get_counter(&table_key).is_some());
+        assert!(orch
+            .get_resource(CrmResourceType::AclEntry)
+            .unwrap()
+            .get_counter(&table_key)
+            .is_some());
+        assert!(orch
+            .get_resource(CrmResourceType::AclCounter)
+            .unwrap()
+            .get_counter(&table_key)
+            .is_some());
 
         // Delete the table (should clean up entry and counter)
         orch.decrement_acl_used(
             CrmResourceType::AclTable,
             AclStage::Ingress,
             AclBindPoint::Port,
-            Some(table_id)
-        ).unwrap();
+            Some(table_id),
+        )
+        .unwrap();
 
         // Verify cleanup
-        assert!(orch.get_resource(CrmResourceType::AclEntry).unwrap().get_counter(&table_key).is_none());
-        assert!(orch.get_resource(CrmResourceType::AclCounter).unwrap().get_counter(&table_key).is_none());
+        assert!(orch
+            .get_resource(CrmResourceType::AclEntry)
+            .unwrap()
+            .get_counter(&table_key)
+            .is_none());
+        assert!(orch
+            .get_resource(CrmResourceType::AclCounter)
+            .unwrap()
+            .get_counter(&table_key)
+            .is_none());
     }
 
     #[test]
@@ -1807,18 +2012,32 @@ mod tests {
         let group_id = 0xabcd;
 
         // Add DASH ACL group
-        orch.increment_dash_acl_used(CrmResourceType::DashAclGroup, group_id).unwrap();
+        orch.increment_dash_acl_used(CrmResourceType::DashAclGroup, group_id)
+            .unwrap();
 
         // Verify rule counter was created
         let key = crm_dash_acl_group_key(group_id);
-        assert!(orch.get_resource(CrmResourceType::DashAclRule).unwrap().get_counter(&key).is_some());
+        assert!(orch
+            .get_resource(CrmResourceType::DashAclRule)
+            .unwrap()
+            .get_counter(&key)
+            .is_some());
 
         // Delete the group
-        orch.decrement_dash_acl_used(CrmResourceType::DashAclGroup, group_id).unwrap();
+        orch.decrement_dash_acl_used(CrmResourceType::DashAclGroup, group_id)
+            .unwrap();
 
         // Verify cleanup
-        assert!(orch.get_resource(CrmResourceType::DashAclGroup).unwrap().get_counter(&key).is_none());
-        assert!(orch.get_resource(CrmResourceType::DashAclRule).unwrap().get_counter(&key).is_none());
+        assert!(orch
+            .get_resource(CrmResourceType::DashAclGroup)
+            .unwrap()
+            .get_counter(&key)
+            .is_none());
+        assert!(orch
+            .get_resource(CrmResourceType::DashAclRule)
+            .unwrap()
+            .get_counter(&key)
+            .is_none());
     }
 
     #[test]
@@ -1859,8 +2078,11 @@ mod tests {
 
         // Verify all standard resource types are present
         for &res_type in CrmResourceType::standard_types() {
-            assert!(orch.get_resource(res_type).is_some(),
-                "Resource {} should be initialized", res_type);
+            assert!(
+                orch.get_resource(res_type).is_some(),
+                "Resource {} should be initialized",
+                res_type
+            );
         }
     }
 
@@ -1870,8 +2092,11 @@ mod tests {
 
         // Verify all DASH resource types are present
         for &res_type in CrmResourceType::dash_types() {
-            assert!(orch.get_resource(res_type).is_some(),
-                "DASH resource {} should be initialized", res_type);
+            assert!(
+                orch.get_resource(res_type).is_some(),
+                "DASH resource {} should be initialized",
+                res_type
+            );
         }
     }
 }

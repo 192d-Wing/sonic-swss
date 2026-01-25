@@ -1,9 +1,9 @@
 //! FFI exports for MplsRouteOrch.
 
+use super::orch::{MplsRouteOrch, MplsRouteOrchCallbacks, MplsRouteOrchConfig, Result};
+use super::types::{MplsRouteConfig, RawSaiObjectId};
 use std::cell::RefCell;
 use std::sync::Arc;
-use super::orch::{MplsRouteOrch, MplsRouteOrchConfig, MplsRouteOrchCallbacks, Result};
-use super::types::{MplsRouteConfig, RawSaiObjectId};
 
 /// Default FFI stub callbacks that do nothing
 pub struct FfiMplsRouteCallbacks;
@@ -17,7 +17,12 @@ impl MplsRouteOrchCallbacks for FfiMplsRouteCallbacks {
         Ok(())
     }
 
-    fn update_mpls_route(&self, _label: u32, _route_oid: RawSaiObjectId, _config: &MplsRouteConfig) -> Result<()> {
+    fn update_mpls_route(
+        &self,
+        _label: u32,
+        _route_oid: RawSaiObjectId,
+        _config: &MplsRouteConfig,
+    ) -> Result<()> {
         Ok(())
     }
 
@@ -45,8 +50,7 @@ pub extern "C" fn register_mplsroute_orch() -> bool {
         }
         let callbacks = Arc::new(FfiMplsRouteCallbacks);
         *orch.borrow_mut() = Some(Box::new(
-            MplsRouteOrch::new(MplsRouteOrchConfig::default())
-                .with_callbacks(callbacks)
+            MplsRouteOrch::new(MplsRouteOrchConfig::default()).with_callbacks(callbacks),
         ));
         true
     })

@@ -1,8 +1,8 @@
 //! FFI exports for TunnelDecapOrch.
 
+use super::orch::{TunnelDecapOrch, TunnelDecapOrchConfig};
 use std::cell::RefCell;
 use std::ffi::{c_char, CStr};
-use super::orch::{TunnelDecapOrch, TunnelDecapOrchConfig};
 
 thread_local! {
     static TUNNEL_DECAP_ORCH: RefCell<Option<Box<TunnelDecapOrch>>> = const { RefCell::new(None) };
@@ -14,7 +14,9 @@ pub extern "C" fn register_tunnel_decap_orch() -> bool {
         if orch.borrow().is_some() {
             return false;
         }
-        *orch.borrow_mut() = Some(Box::new(TunnelDecapOrch::new(TunnelDecapOrchConfig::default())));
+        *orch.borrow_mut() = Some(Box::new(TunnelDecapOrch::new(
+            TunnelDecapOrchConfig::default(),
+        )));
         true
     })
 }

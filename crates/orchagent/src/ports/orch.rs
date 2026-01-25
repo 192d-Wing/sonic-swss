@@ -25,9 +25,8 @@ use super::config::{PortConfig, PortConfigError};
 use super::port::{Port, PortAdminState, PortOperState, PortType};
 use super::queue::{PriorityGroupInfo, QueueInfo, SchedulerGroupInfo};
 use super::types::{
-    GearboxPortTable, LagInfo, LagTable, PortInitState, PortSupportedSpeeds,
-    PortTable, PortsOrchStats, SystemPortTable, VlanInfo, VlanMemberInfo,
-    VlanTable, VlanTaggingMode,
+    GearboxPortTable, LagInfo, LagTable, PortInitState, PortSupportedSpeeds, PortTable,
+    PortsOrchStats, SystemPortTable, VlanInfo, VlanMemberInfo, VlanTable, VlanTaggingMode,
 };
 use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
 use crate::audit_log;
@@ -396,26 +395,30 @@ impl PortsOrch {
                     .insert(alias.clone(), PortInitState::ConfigDone);
             }
 
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceModify, "PortsOrch", "configure_port")
-                    .with_outcome(AuditOutcome::Success)
-                    .with_object_id(&alias)
-                    .with_object_type("port")
-                    .with_details(serde_json::json!({
-                        "init_state": "ConfigReceived"
-                    }))
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceModify,
+                "PortsOrch",
+                "configure_port"
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(&alias)
+            .with_object_type("port")
+            .with_details(serde_json::json!({
+                "init_state": "ConfigReceived"
+            })));
 
             Ok(TaskStatus::Success)
         } else {
             // Port doesn't exist yet, store as pending
             self.pending_port_configs.insert(alias.clone(), config);
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceModify, "PortsOrch", "configure_port")
-                    .with_outcome(AuditOutcome::InProgress)
-                    .with_object_id(&alias)
-                    .with_object_type("port")
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceModify,
+                "PortsOrch",
+                "configure_port"
+            )
+            .with_outcome(AuditOutcome::InProgress)
+            .with_object_id(&alias)
+            .with_object_type("port"));
             Ok(TaskStatus::NeedRetry)
         }
     }
@@ -529,7 +532,9 @@ impl PortsOrch {
         }
 
         if self.lags.len() >= self.config.max_lags {
-            return Err(PortsOrchError::ResourceExhausted("Max LAGs reached".to_string()));
+            return Err(PortsOrchError::ResourceExhausted(
+                "Max LAGs reached".to_string(),
+            ));
         }
 
         let lag = LagInfo::new(lag_id, alias);
@@ -578,30 +583,31 @@ impl PortsOrch {
     pub fn add_lag_member(&mut self, lag_alias: &str, member_alias: &str) -> Result<()> {
         // Verify member port exists
         if !self.ports.contains_key(&member_alias.to_string()) {
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceCreate, "PortsOrch", "add_lag_member")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(member_alias)
-                    .with_object_type("port")
-                    .with_error(&format!("Port not found: {}", member_alias))
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "PortsOrch",
+                "add_lag_member"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(member_alias)
+            .with_object_type("port")
+            .with_error(&format!("Port not found: {}", member_alias)));
             return Err(PortsOrchError::PortNotFound(member_alias.to_string()));
         }
 
         // Get LAG and add member
-        let lag = self
-            .lags
-            .get_mut(&lag_alias.to_string())
-            .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceCreate, "PortsOrch", "add_lag_member")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(lag_alias)
-                        .with_object_type("lag")
-                        .with_error(&format!("LAG not found: {}", lag_alias))
-                );
-                PortsOrchError::LagNotFound(lag_alias.to_string())
-            })?;
+        let lag = self.lags.get_mut(&lag_alias.to_string()).ok_or_else(|| {
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "PortsOrch",
+                "add_lag_member"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(lag_alias)
+            .with_object_type("lag")
+            .with_error(&format!("LAG not found: {}", lag_alias)));
+            PortsOrchError::LagNotFound(lag_alias.to_string())
+        })?;
         lag.add_member(member_alias);
 
         // Update member port
@@ -641,19 +647,18 @@ impl PortsOrch {
     /// Removes a member from a LAG.
     pub fn remove_lag_member(&mut self, lag_alias: &str, member_alias: &str) -> Result<()> {
         // Get LAG and remove member
-        let lag = self
-            .lags
-            .get_mut(&lag_alias.to_string())
-            .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "PortsOrch", "remove_lag_member")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(lag_alias)
-                        .with_object_type("lag")
-                        .with_error(&format!("LAG not found: {}", lag_alias))
-                );
-                PortsOrchError::LagNotFound(lag_alias.to_string())
-            })?;
+        let lag = self.lags.get_mut(&lag_alias.to_string()).ok_or_else(|| {
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "PortsOrch",
+                "remove_lag_member"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(lag_alias)
+            .with_object_type("lag")
+            .with_error(&format!("LAG not found: {}", lag_alias)));
+            PortsOrchError::LagNotFound(lag_alias.to_string())
+        })?;
         lag.remove_member(member_alias);
 
         // Update member port
@@ -661,13 +666,15 @@ impl PortsOrch {
             .ports
             .get_mut(&member_alias.to_string())
             .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "PortsOrch", "remove_lag_member")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(member_alias)
-                        .with_object_type("port")
-                        .with_error(&format!("Port not found: {}", member_alias))
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "PortsOrch",
+                    "remove_lag_member"
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(member_alias)
+                .with_object_type("port")
+                .with_error(&format!("Port not found: {}", member_alias)));
                 PortsOrchError::PortNotFound(member_alias.to_string())
             })?;
         port.lag_id = None;
@@ -676,15 +683,17 @@ impl PortsOrch {
         // Remove mapping
         self.lag_member_to_lag.remove(member_alias);
 
-        audit_log!(
-            AuditRecord::new(AuditCategory::ResourceDelete, "PortsOrch", "remove_lag_member")
-                .with_outcome(AuditOutcome::Success)
-                .with_object_id(member_alias)
-                .with_object_type("lag_member")
-                .with_details(serde_json::json!({
-                    "lag_alias": lag_alias
-                }))
-        );
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "PortsOrch",
+            "remove_lag_member"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(member_alias)
+        .with_object_type("lag_member")
+        .with_details(serde_json::json!({
+            "lag_alias": lag_alias
+        })));
 
         Ok(())
     }
@@ -731,7 +740,9 @@ impl PortsOrch {
         }
 
         if self.vlans.len() >= self.config.max_vlans {
-            return Err(PortsOrchError::ResourceExhausted("Max VLANs reached".to_string()));
+            return Err(PortsOrchError::ResourceExhausted(
+                "Max VLANs reached".to_string(),
+            ));
         }
 
         if vlan_id == 0 || vlan_id > 4094 {
@@ -788,30 +799,31 @@ impl PortsOrch {
     ) -> Result<()> {
         // Verify port exists
         if !self.ports.contains_key(&port_alias.to_string()) {
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceCreate, "PortsOrch", "add_vlan_member")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(port_alias)
-                    .with_object_type("port")
-                    .with_error(&format!("Port not found: {}", port_alias))
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "PortsOrch",
+                "add_vlan_member"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(port_alias)
+            .with_object_type("port")
+            .with_error(&format!("Port not found: {}", port_alias)));
             return Err(PortsOrchError::PortNotFound(port_alias.to_string()));
         }
 
         // Get VLAN and add member
-        let vlan = self
-            .vlans
-            .get_mut(&vlan_alias.to_string())
-            .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceCreate, "PortsOrch", "add_vlan_member")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(vlan_alias)
-                        .with_object_type("vlan")
-                        .with_error(&format!("VLAN not found: {}", vlan_alias))
-                );
-                PortsOrchError::VlanNotFound(vlan_alias.to_string())
-            })?;
+        let vlan = self.vlans.get_mut(&vlan_alias.to_string()).ok_or_else(|| {
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "PortsOrch",
+                "add_vlan_member"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(vlan_alias)
+            .with_object_type("vlan")
+            .with_error(&format!("VLAN not found: {}", vlan_alias)));
+            PortsOrchError::VlanNotFound(vlan_alias.to_string())
+        })?;
 
         let member_info = VlanMemberInfo {
             vlan_member_id,
@@ -828,67 +840,69 @@ impl PortsOrch {
             .ok_or_else(|| PortsOrchError::PortNotFound(port_alias.to_string()))?;
         port.add_vlan_member(vlan_id);
 
-        audit_log!(
-            AuditRecord::new(AuditCategory::ResourceCreate, "PortsOrch", "add_vlan_member")
-                .with_outcome(AuditOutcome::Success)
-                .with_object_id(port_alias)
-                .with_object_type("vlan_member")
-                .with_details(serde_json::json!({
-                    "vlan_alias": vlan_alias,
-                    "vlan_id": vlan_id,
-                    "vlan_member_id": format!("0x{:x}", vlan_member_id),
-                    "bridge_port_id": format!("0x{:x}", bridge_port_id),
-                    "tagging_mode": format!("{:?}", tagging_mode)
-                }))
-        );
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceCreate,
+            "PortsOrch",
+            "add_vlan_member"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(port_alias)
+        .with_object_type("vlan_member")
+        .with_details(serde_json::json!({
+            "vlan_alias": vlan_alias,
+            "vlan_id": vlan_id,
+            "vlan_member_id": format!("0x{:x}", vlan_member_id),
+            "bridge_port_id": format!("0x{:x}", bridge_port_id),
+            "tagging_mode": format!("{:?}", tagging_mode)
+        })));
 
         Ok(())
     }
 
     /// Removes a member from a VLAN.
     pub fn remove_vlan_member(&mut self, vlan_alias: &str, port_alias: &str) -> Result<()> {
-        let vlan = self
-            .vlans
-            .get_mut(&vlan_alias.to_string())
-            .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "PortsOrch", "remove_vlan_member")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(vlan_alias)
-                        .with_object_type("vlan")
-                        .with_error(&format!("VLAN not found: {}", vlan_alias))
-                );
-                PortsOrchError::VlanNotFound(vlan_alias.to_string())
-            })?;
+        let vlan = self.vlans.get_mut(&vlan_alias.to_string()).ok_or_else(|| {
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "PortsOrch",
+                "remove_vlan_member"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(vlan_alias)
+            .with_object_type("vlan")
+            .with_error(&format!("VLAN not found: {}", vlan_alias)));
+            PortsOrchError::VlanNotFound(vlan_alias.to_string())
+        })?;
 
         vlan.remove_member(port_alias);
         let vlan_id = vlan.vlan_number;
 
-        let port = self
-            .ports
-            .get_mut(&port_alias.to_string())
-            .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "PortsOrch", "remove_vlan_member")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(port_alias)
-                        .with_object_type("port")
-                        .with_error(&format!("Port not found: {}", port_alias))
-                );
-                PortsOrchError::PortNotFound(port_alias.to_string())
-            })?;
+        let port = self.ports.get_mut(&port_alias.to_string()).ok_or_else(|| {
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "PortsOrch",
+                "remove_vlan_member"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(port_alias)
+            .with_object_type("port")
+            .with_error(&format!("Port not found: {}", port_alias)));
+            PortsOrchError::PortNotFound(port_alias.to_string())
+        })?;
         port.remove_vlan_member(vlan_id);
 
-        audit_log!(
-            AuditRecord::new(AuditCategory::ResourceDelete, "PortsOrch", "remove_vlan_member")
-                .with_outcome(AuditOutcome::Success)
-                .with_object_id(port_alias)
-                .with_object_type("vlan_member")
-                .with_details(serde_json::json!({
-                    "vlan_alias": vlan_alias,
-                    "vlan_id": vlan_id
-                }))
-        );
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "PortsOrch",
+            "remove_vlan_member"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(port_alias)
+        .with_object_type("vlan_member")
+        .with_details(serde_json::json!({
+            "vlan_alias": vlan_alias,
+            "vlan_id": vlan_id
+        })));
 
         Ok(())
     }
@@ -1078,8 +1092,7 @@ mod tests {
         orch.add_port_from_hardware("Ethernet0".to_string(), 0x1234, vec![0])
             .unwrap();
 
-        let result =
-            orch.add_port_from_hardware("Ethernet0".to_string(), 0x5678, vec![1]);
+        let result = orch.add_port_from_hardware("Ethernet0".to_string(), 0x5678, vec![1]);
         assert!(matches!(result, Err(PortsOrchError::PortAlreadyExists(_))));
     }
 
@@ -1332,21 +1345,30 @@ mod tests {
         config.alias = Some("Ethernet0".to_string());
         config.fec = Some(PortFecMode::Rs);
         orch.configure_port(config).unwrap();
-        assert_eq!(orch.get_port("Ethernet0").unwrap().fec_mode, PortFecMode::Rs);
+        assert_eq!(
+            orch.get_port("Ethernet0").unwrap().fec_mode,
+            PortFecMode::Rs
+        );
 
         // Test FC FEC
         let mut config = PortConfig::new();
         config.alias = Some("Ethernet0".to_string());
         config.fec = Some(PortFecMode::Fc);
         orch.configure_port(config).unwrap();
-        assert_eq!(orch.get_port("Ethernet0").unwrap().fec_mode, PortFecMode::Fc);
+        assert_eq!(
+            orch.get_port("Ethernet0").unwrap().fec_mode,
+            PortFecMode::Fc
+        );
 
         // Test None FEC
         let mut config = PortConfig::new();
         config.alias = Some("Ethernet0".to_string());
         config.fec = Some(PortFecMode::None);
         orch.configure_port(config).unwrap();
-        assert_eq!(orch.get_port("Ethernet0").unwrap().fec_mode, PortFecMode::None);
+        assert_eq!(
+            orch.get_port("Ethernet0").unwrap().fec_mode,
+            PortFecMode::None
+        );
     }
 
     #[test]
@@ -1628,7 +1650,8 @@ mod tests {
         orch.add_lag_member("PortChannel0001", "Ethernet0").unwrap();
         orch.add_lag_member("PortChannel0001", "Ethernet4").unwrap();
         orch.add_lag_member("PortChannel0002", "Ethernet8").unwrap();
-        orch.add_lag_member("PortChannel0002", "Ethernet12").unwrap();
+        orch.add_lag_member("PortChannel0002", "Ethernet12")
+            .unwrap();
 
         assert_eq!(orch.lag_count(), 2);
         assert_eq!(orch.get_lag("PortChannel0001").unwrap().member_count(), 2);
@@ -1909,8 +1932,14 @@ mod tests {
         let queues = orch.get_port_queues("Ethernet0").unwrap();
         assert_eq!(queues.len(), 10);
 
-        let unicast_count = queues.iter().filter(|q| q.queue_type == QueueType::Unicast).count();
-        let multicast_count = queues.iter().filter(|q| q.queue_type == QueueType::Multicast).count();
+        let unicast_count = queues
+            .iter()
+            .filter(|q| q.queue_type == QueueType::Unicast)
+            .count();
+        let multicast_count = queues
+            .iter()
+            .filter(|q| q.queue_type == QueueType::Multicast)
+            .count();
 
         assert_eq!(unicast_count, 8);
         assert_eq!(multicast_count, 2);

@@ -3,10 +3,10 @@
 //! These bindings allow Rust Orch modules to access functionality
 //! that still lives in C++ during the migration period.
 
-use std::ffi::{c_char, CStr};
+use sonic_sai::PortOid;
 #[cfg(feature = "cpp-link")]
 use std::ffi::CString;
-use sonic_sai::PortOid;
+use std::ffi::{c_char, CStr};
 use thiserror::Error;
 
 /// Error type for FFI operations.

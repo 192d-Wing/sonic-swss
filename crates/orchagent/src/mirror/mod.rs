@@ -13,5 +13,7 @@ mod orch;
 pub mod types;
 
 pub use ffi::{register_mirror_orch, unregister_mirror_orch};
-pub use orch::{MirrorOrch, MirrorOrchCallbacks, MirrorOrchConfig, MirrorOrchError, MirrorOrchStats};
+pub use orch::{
+    MirrorOrch, MirrorOrchCallbacks, MirrorOrchConfig, MirrorOrchError, MirrorOrchStats,
+};
 pub use types::{MirrorDirection, MirrorEntry, MirrorSessionConfig, MirrorSessionType};

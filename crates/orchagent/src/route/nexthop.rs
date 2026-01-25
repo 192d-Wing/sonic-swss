@@ -263,11 +263,9 @@ impl FromStr for NextHopKey {
         if let Some((ip_part, rest)) = s.split_once('@') {
             // Parse VNI: ip@alias|vni
             if let Some((alias, vni_str)) = rest.split_once('|') {
-                let ip = ip_part
-                    .parse()
-                    .map_err(|_| ParseNextHopKeyError {
-                        message: format!("Invalid IP address: {}", ip_part),
-                    })?;
+                let ip = ip_part.parse().map_err(|_| ParseNextHopKeyError {
+                    message: format!("Invalid IP address: {}", ip_part),
+                })?;
                 let vni = vni_str.parse().map_err(|_| ParseNextHopKeyError {
                     message: format!("Invalid VNI: {}", vni_str),
                 })?;
@@ -276,11 +274,9 @@ impl FromStr for NextHopKey {
 
             // Parse label: ip@alias+label
             if let Some((alias, label_str)) = rest.split_once('+') {
-                let ip = ip_part
-                    .parse()
-                    .map_err(|_| ParseNextHopKeyError {
-                        message: format!("Invalid IP address: {}", ip_part),
-                    })?;
+                let ip = ip_part.parse().map_err(|_| ParseNextHopKeyError {
+                    message: format!("Invalid IP address: {}", ip_part),
+                })?;
                 let label = label_str.parse().map_err(|_| ParseNextHopKeyError {
                     message: format!("Invalid label: {}", label_str),
                 })?;
@@ -288,11 +284,9 @@ impl FromStr for NextHopKey {
             }
 
             // Standard: ip@alias
-            let ip = ip_part
-                .parse()
-                .map_err(|_| ParseNextHopKeyError {
-                    message: format!("Invalid IP address: {}", ip_part),
-                })?;
+            let ip = ip_part.parse().map_err(|_| ParseNextHopKeyError {
+                message: format!("Invalid IP address: {}", ip_part),
+            })?;
             return Ok(Self::new(ip, rest));
         }
 
@@ -312,7 +306,10 @@ mod tests {
             IpAddress::V4(Ipv4Addr::new(192, 168, 1, 1).into()),
             "Ethernet0",
         );
-        assert_eq!(nh.ip_address(), &IpAddress::V4(Ipv4Addr::new(192, 168, 1, 1).into()));
+        assert_eq!(
+            nh.ip_address(),
+            &IpAddress::V4(Ipv4Addr::new(192, 168, 1, 1).into())
+        );
         assert_eq!(nh.alias(), "Ethernet0");
         assert!(!nh.is_interface_nexthop());
         assert!(!nh.is_overlay());
@@ -327,11 +324,8 @@ mod tests {
 
     #[test]
     fn test_nexthop_key_vxlan() {
-        let nh = NextHopKey::new(
-            IpAddress::V4(Ipv4Addr::new(10, 0, 0, 1).into()),
-            "Vxlan1",
-        )
-        .with_vni(1000);
+        let nh = NextHopKey::new(IpAddress::V4(Ipv4Addr::new(10, 0, 0, 1).into()), "Vxlan1")
+            .with_vni(1000);
         assert!(nh.is_overlay());
         assert_eq!(nh.vni(), 1000);
     }
@@ -365,7 +359,10 @@ mod tests {
     #[test]
     fn test_nexthop_key_parse() {
         let nh: NextHopKey = "192.168.1.1@Ethernet0".parse().unwrap();
-        assert_eq!(nh.ip_address(), &IpAddress::V4(Ipv4Addr::new(192, 168, 1, 1).into()));
+        assert_eq!(
+            nh.ip_address(),
+            &IpAddress::V4(Ipv4Addr::new(192, 168, 1, 1).into())
+        );
         assert_eq!(nh.alias(), "Ethernet0");
 
         let nh_vni: NextHopKey = "10.0.0.1@Vxlan1|1000".parse().unwrap();

@@ -16,6 +16,6 @@ mod types;
 pub use ffi::{register_vnet_orch, unregister_vnet_orch};
 pub use orch::{VnetOrch, VnetOrchCallbacks, VnetOrchConfig, VnetOrchError, VnetOrchStats};
 pub use types::{
-    Vni, VnetBridgePortEntry, VnetBridgePortKey, VnetConfig, VnetEntry,
-    VnetKey, VnetRouteConfig, VnetRouteEntry, VnetRouteKey, VnetRouteType, VnetStats,
+    VnetBridgePortEntry, VnetBridgePortKey, VnetConfig, VnetEntry, VnetKey, VnetRouteConfig,
+    VnetRouteEntry, VnetRouteKey, VnetRouteType, VnetStats, Vni,
 };

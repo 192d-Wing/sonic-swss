@@ -23,4 +23,6 @@ pub mod types;
 
 pub use ffi::{register_icmp_orch, unregister_icmp_orch};
 pub use orch::{IcmpOrch, IcmpOrchCallbacks, IcmpOrchConfig, IcmpOrchError, IcmpOrchStats, Result};
-pub use types::{IcmpEchoEntry, IcmpEchoKey, IcmpMode, IcmpStats, IcmpRedirectConfig, NeighborDiscoveryConfig};
+pub use types::{
+    IcmpEchoEntry, IcmpEchoKey, IcmpMode, IcmpRedirectConfig, IcmpStats, NeighborDiscoveryConfig,
+};

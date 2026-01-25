@@ -1,7 +1,7 @@
 //! FFI exports for PbhOrch.
 
-use std::cell::RefCell;
 use super::orch::{PbhOrch, PbhOrchConfig};
+use std::cell::RefCell;
 
 thread_local! {
     static PBH_ORCH: RefCell<Option<Box<PbhOrch>>> = const { RefCell::new(None) };

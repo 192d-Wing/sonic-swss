@@ -24,7 +24,10 @@ mod orch;
 mod types;
 
 pub use ffi::{register_tunnel_decap_orch, unregister_tunnel_decap_orch};
-pub use orch::{TunnelDecapOrch, TunnelDecapOrchCallbacks, TunnelDecapOrchConfig, TunnelDecapOrchError, TunnelDecapOrchStats};
+pub use orch::{
+    TunnelDecapOrch, TunnelDecapOrchCallbacks, TunnelDecapOrchConfig, TunnelDecapOrchError,
+    TunnelDecapOrchStats,
+};
 pub use types::{
     EcnMode, NexthopTunnel, SubnetType, TunnelConfig, TunnelDecapConfig, TunnelDecapEntry,
     TunnelEntry, TunnelMode, TunnelTermEntry, TunnelTermType,

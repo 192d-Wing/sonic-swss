@@ -1,9 +1,9 @@
 //! FFI exports for DtelOrch.
 
-use std::cell::RefCell;
-use sonic_sai::types::RawSaiObjectId;
 use super::orch::{DtelOrch, DtelOrchCallbacks, DtelOrchConfig, Result};
 use super::types::{DtelEventType, IntSessionConfig};
+use sonic_sai::types::RawSaiObjectId;
+use std::cell::RefCell;
 
 /// FFI stub callbacks that do nothing (for C++ interop).
 struct FfiDtelCallbacks;

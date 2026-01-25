@@ -1,9 +1,9 @@
 //! ZMQ orchestration logic.
 
 use super::types::{ZmqEndpoint, ZmqStats};
-use std::collections::HashMap;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
 use crate::audit_log;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ZmqOrchError {
@@ -43,38 +43,38 @@ impl ZmqOrch {
     }
 
     /// Publishes an event to the ZMQ endpoint.
-    pub fn publish_event(&mut self, event_type: &str, event_data: &str) -> Result<(), ZmqOrchError> {
+    pub fn publish_event(
+        &mut self,
+        event_type: &str,
+        event_data: &str,
+    ) -> Result<(), ZmqOrchError> {
         if self.config.endpoint.is_none() {
             let error = ZmqOrchError::ConnectionFailed("No ZMQ endpoint configured".to_string());
-            audit_log!(AuditRecord::new(
-                AuditCategory::AdminAction,
-                "ZmqOrch",
-                "publish_event"
-            )
-            .with_outcome(AuditOutcome::Failure)
-            .with_object_id(event_type.to_string())
-            .with_object_type("zmq_event")
-            .with_error(error.to_string()));
+            audit_log!(
+                AuditRecord::new(AuditCategory::AdminAction, "ZmqOrch", "publish_event")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(event_type.to_string())
+                    .with_object_type("zmq_event")
+                    .with_error(error.to_string())
+            );
             return Err(error);
         }
 
         self.stats.stats.messages_sent += 1;
 
-        audit_log!(AuditRecord::new(
-            AuditCategory::AdminAction,
-            "ZmqOrch",
-            "publish_event"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(event_type.to_string())
-        .with_object_type("zmq_event")
-        .with_details(serde_json::json!({
-            "event_type": event_type,
-            "endpoint": self.config.endpoint,
-            "stats": {
-                "messages_sent": self.stats.stats.messages_sent
-            }
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::AdminAction, "ZmqOrch", "publish_event")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(event_type.to_string())
+                .with_object_type("zmq_event")
+                .with_details(serde_json::json!({
+                    "event_type": event_type,
+                    "endpoint": self.config.endpoint,
+                    "stats": {
+                        "messages_sent": self.stats.stats.messages_sent
+                    }
+                }))
+        );
 
         Ok(())
     }
@@ -83,32 +83,28 @@ impl ZmqOrch {
     pub fn subscribe_events(&mut self) -> Result<(), ZmqOrchError> {
         if self.config.endpoint.is_none() {
             let error = ZmqOrchError::ConnectionFailed("No ZMQ endpoint configured".to_string());
-            audit_log!(AuditRecord::new(
-                AuditCategory::AdminAction,
-                "ZmqOrch",
-                "subscribe_events"
-            )
-            .with_outcome(AuditOutcome::Failure)
-            .with_object_id("zmq_subscription".to_string())
-            .with_object_type("zmq_subscription")
-            .with_error(error.to_string()));
+            audit_log!(
+                AuditRecord::new(AuditCategory::AdminAction, "ZmqOrch", "subscribe_events")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id("zmq_subscription".to_string())
+                    .with_object_type("zmq_subscription")
+                    .with_error(error.to_string())
+            );
             return Err(error);
         }
 
-        audit_log!(AuditRecord::new(
-            AuditCategory::AdminAction,
-            "ZmqOrch",
-            "subscribe_events"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id("zmq_subscription".to_string())
-        .with_object_type("zmq_subscription")
-        .with_details(serde_json::json!({
-            "endpoint": self.config.endpoint,
-            "stats": {
-                "messages_received": self.stats.stats.messages_received
-            }
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::AdminAction, "ZmqOrch", "subscribe_events")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id("zmq_subscription".to_string())
+                .with_object_type("zmq_subscription")
+                .with_details(serde_json::json!({
+                    "endpoint": self.config.endpoint,
+                    "stats": {
+                        "messages_received": self.stats.stats.messages_received
+                    }
+                }))
+        );
 
         Ok(())
     }
@@ -116,8 +112,8 @@ impl ZmqOrch {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::ZmqMessage;
+    use super::*;
 
     #[test]
     fn test_zmq_orch_new() {
@@ -147,7 +143,10 @@ mod tests {
         };
         let orch = ZmqOrch::new(config);
 
-        assert_eq!(orch.config.endpoint, Some("tcp://127.0.0.1:5555".to_string()));
+        assert_eq!(
+            orch.config.endpoint,
+            Some("tcp://127.0.0.1:5555".to_string())
+        );
     }
 
     #[test]
@@ -357,7 +356,10 @@ mod tests {
         let stats2 = stats1.clone();
 
         assert_eq!(stats1.stats.messages_sent, stats2.stats.messages_sent);
-        assert_eq!(stats1.stats.messages_received, stats2.stats.messages_received);
+        assert_eq!(
+            stats1.stats.messages_received,
+            stats2.stats.messages_received
+        );
         assert_eq!(stats1.stats.errors, stats2.stats.errors);
     }
 
@@ -560,7 +562,10 @@ mod tests {
         };
         let orch = ZmqOrch::new(config);
 
-        assert_eq!(orch.config.endpoint, Some("tcp://127.0.0.1:5555".to_string()));
+        assert_eq!(
+            orch.config.endpoint,
+            Some("tcp://127.0.0.1:5555".to_string())
+        );
         assert_eq!(orch.stats.stats.messages_sent, 0);
     }
 

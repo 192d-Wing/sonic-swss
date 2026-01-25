@@ -1,8 +1,8 @@
 //! FFI exports for MirrorOrch.
 
-use std::cell::RefCell;
 use super::orch::{MirrorOrch, MirrorOrchCallbacks, MirrorOrchConfig, Result};
 use super::types::{MirrorSessionConfig, MirrorSessionType, RawSaiObjectId};
+use std::cell::RefCell;
 
 /// FFI stub callbacks that do nothing (for C++ interop).
 struct FfiMirrorCallbacks;
@@ -16,11 +16,18 @@ impl MirrorOrchCallbacks for FfiMirrorCallbacks {
         Ok(())
     }
 
-    fn update_mirror_session(&self, _session_id: RawSaiObjectId, _config: &MirrorSessionConfig) -> Result<()> {
+    fn update_mirror_session(
+        &self,
+        _session_id: RawSaiObjectId,
+        _config: &MirrorSessionConfig,
+    ) -> Result<()> {
         Ok(())
     }
 
-    fn get_mirror_sessions_by_type(&self, _session_type: MirrorSessionType) -> Result<Vec<RawSaiObjectId>> {
+    fn get_mirror_sessions_by_type(
+        &self,
+        _session_type: MirrorSessionType,
+    ) -> Result<Vec<RawSaiObjectId>> {
         Ok(vec![])
     }
 

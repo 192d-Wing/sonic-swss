@@ -12,5 +12,8 @@ mod orch;
 mod types;
 
 pub use ffi::{register_countercheck_orch, unregister_countercheck_orch};
-pub use orch::{CounterCheckOrch, CounterCheckOrchCallbacks, CounterCheckOrchConfig, CounterCheckOrchError, CounterCheckOrchStats};
+pub use orch::{
+    CounterCheckOrch, CounterCheckOrchCallbacks, CounterCheckOrchConfig, CounterCheckOrchError,
+    CounterCheckOrchStats,
+};
 pub use types::{CounterCheckConfig, CounterCheckEntry, CounterCheckKey, CounterCheckStats};

@@ -250,7 +250,12 @@ impl Consumer {
             .iter()
             .flat_map(|(key, queue)| {
                 queue.iter().map(move |e| {
-                    format!("{}: {} {:?}", key, if e.op.is_set() { "SET" } else { "DEL" }, e.fvs)
+                    format!(
+                        "{}: {} {:?}",
+                        key,
+                        if e.op.is_set() { "SET" } else { "DEL" },
+                        e.fvs
+                    )
                 })
             })
             .collect()
@@ -283,9 +288,10 @@ mod tests {
         assert_eq!(consumer.table_name(), "PORT_TABLE");
         assert!(!consumer.has_pending());
 
-        consumer.add_to_sync(vec![
-            KeyOpFieldsValues::set("Ethernet0", vec![("speed".to_string(), "100000".to_string())]),
-        ]);
+        consumer.add_to_sync(vec![KeyOpFieldsValues::set(
+            "Ethernet0",
+            vec![("speed".to_string(), "100000".to_string())],
+        )]);
 
         assert!(consumer.has_pending());
         assert_eq!(consumer.pending_count(), 1);
@@ -306,8 +312,8 @@ mod tests {
         consumer.add_to_sync(vec![KeyOpFieldsValues::set(
             "Ethernet0",
             vec![
-                ("speed".to_string(), "40000".to_string()),  // Override
-                ("mtu".to_string(), "9000".to_string()),      // New field
+                ("speed".to_string(), "40000".to_string()), // Override
+                ("mtu".to_string(), "9000".to_string()),    // New field
             ],
         )]);
 

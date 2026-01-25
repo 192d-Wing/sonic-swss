@@ -16,7 +16,6 @@ mod types;
 pub use ffi::{register_srv6_orch, unregister_srv6_orch};
 pub use orch::{Srv6Orch, Srv6OrchCallbacks, Srv6OrchConfig, Srv6OrchError, Srv6OrchStats};
 pub use types::{
-    Srv6EncapMode, Srv6EndpointBehavior, Srv6LocalSidConfig, Srv6LocalSidEntry,
-    Srv6NextHopConfig, Srv6NextHopEntry, Srv6Sid, Srv6SidListConfig,
-    Srv6SidListEntry, Srv6Stats,
+    Srv6EncapMode, Srv6EndpointBehavior, Srv6LocalSidConfig, Srv6LocalSidEntry, Srv6NextHopConfig,
+    Srv6NextHopEntry, Srv6Sid, Srv6SidListConfig, Srv6SidListEntry, Srv6Stats,
 };

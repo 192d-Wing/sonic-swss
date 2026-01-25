@@ -14,8 +14,10 @@ mod orch;
 mod types;
 
 pub use ffi::{register_macsec_orch, unregister_macsec_orch};
-pub use orch::{MacsecOrch, MacsecOrchCallbacks, MacsecOrchConfig, MacsecOrchError, MacsecOrchStats};
+pub use orch::{
+    MacsecOrch, MacsecOrchCallbacks, MacsecOrchConfig, MacsecOrchError, MacsecOrchStats,
+};
 pub use types::{
-    MacsecCipherSuite, MacsecDirection, MacsecFlowEntry, MacsecPort,
-    MacsecSa, MacsecSc, MacsecStats, Sci,
+    MacsecCipherSuite, MacsecDirection, MacsecFlowEntry, MacsecPort, MacsecSa, MacsecSc,
+    MacsecStats, Sci,
 };

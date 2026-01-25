@@ -22,4 +22,7 @@ mod types;
 
 pub use ffi::{register_pfcwd_orch, unregister_pfcwd_orch};
 pub use orch::{PfcWdOrch, PfcWdOrchCallbacks, PfcWdOrchConfig, PfcWdOrchError, PfcWdOrchStats};
-pub use types::{DetectionTime, PfcWdAction, PfcWdConfig, PfcWdEntry, PfcWdHwStats, PfcWdQueueEntry, PfcWdStats, RestorationTime};
+pub use types::{
+    DetectionTime, PfcWdAction, PfcWdConfig, PfcWdEntry, PfcWdHwStats, PfcWdQueueEntry, PfcWdStats,
+    RestorationTime,
+};

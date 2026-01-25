@@ -1,7 +1,7 @@
 //! FFI exports for VnetOrch.
 
-use std::cell::RefCell;
 use super::orch::{VnetOrch, VnetOrchConfig};
+use std::cell::RefCell;
 
 thread_local! {
     static VNET_ORCH: RefCell<Option<Box<VnetOrch>>> = const { RefCell::new(None) };

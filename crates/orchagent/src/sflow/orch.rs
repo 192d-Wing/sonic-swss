@@ -48,13 +48,21 @@ pub trait SflowOrchCallbacks: Send + Sync {
     fn remove_samplepacket_session(&self, session_id: RawSaiObjectId) -> Result<(), String>;
 
     /// Enables ingress sampling on a port.
-    fn enable_port_ingress_sample(&self, port_id: RawSaiObjectId, session_id: RawSaiObjectId) -> Result<(), String>;
+    fn enable_port_ingress_sample(
+        &self,
+        port_id: RawSaiObjectId,
+        session_id: RawSaiObjectId,
+    ) -> Result<(), String>;
 
     /// Disables ingress sampling on a port.
     fn disable_port_ingress_sample(&self, port_id: RawSaiObjectId) -> Result<(), String>;
 
     /// Enables egress sampling on a port.
-    fn enable_port_egress_sample(&self, port_id: RawSaiObjectId, session_id: RawSaiObjectId) -> Result<(), String>;
+    fn enable_port_egress_sample(
+        &self,
+        port_id: RawSaiObjectId,
+        session_id: RawSaiObjectId,
+    ) -> Result<(), String>;
 
     /// Disables egress sampling on a port.
     fn disable_port_egress_sample(&self, port_id: RawSaiObjectId) -> Result<(), String>;
@@ -204,18 +212,18 @@ impl SflowOrch {
             return Ok(()); // Already exists
         }
 
-        let session_id = callbacks
-            .create_samplepacket_session(rate)
-            .map_err(|e| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceCreate, "SflowOrch", "create_session")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(&format!("rate_{}", rate))
-                        .with_object_type("sflow_session")
-                        .with_error(&e)
-                );
-                SflowOrchError::SaiError(e)
-            })?;
+        let session_id = callbacks.create_samplepacket_session(rate).map_err(|e| {
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "SflowOrch",
+                "create_session"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&format!("rate_{}", rate))
+            .with_object_type("sflow_session")
+            .with_error(&e));
+            SflowOrchError::SaiError(e)
+        })?;
 
         let session = SflowSession::new(session_id, rate);
         self.sessions.insert(rate, session);
@@ -243,43 +251,46 @@ impl SflowOrch {
             .as_ref()
             .ok_or_else(|| SflowOrchError::InvalidConfig("No callbacks set".to_string()))?;
 
-        let session = self
-            .sessions
-            .remove(&rate)
-            .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "SflowOrch", "destroy_session")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(&format!("rate_{}", rate))
-                        .with_object_type("sflow_session")
-                        .with_error(&format!("Session not found for rate {}", rate))
-                );
-                SflowOrchError::InvalidConfig(format!("Session not found for rate {}", rate))
-            })?;
+        let session = self.sessions.remove(&rate).ok_or_else(|| {
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "SflowOrch",
+                "destroy_session"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(&format!("rate_{}", rate))
+            .with_object_type("sflow_session")
+            .with_error(&format!("Session not found for rate {}", rate)));
+            SflowOrchError::InvalidConfig(format!("Session not found for rate {}", rate))
+        })?;
 
         self.session_to_rate.remove(&session.session_id);
 
         callbacks
             .remove_samplepacket_session(session.session_id)
             .map_err(|e| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "SflowOrch", "destroy_session")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(&format!("rate_{}", rate))
-                        .with_object_type("sflow_session")
-                        .with_error(&e)
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "SflowOrch",
+                    "destroy_session"
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(&format!("rate_{}", rate))
+                .with_object_type("sflow_session")
+                .with_error(&e));
                 SflowOrchError::SaiError(e)
             })?;
 
         self.stats.sessions_destroyed += 1;
 
-        audit_log!(
-            AuditRecord::new(AuditCategory::ResourceDelete, "SflowOrch", "destroy_session")
-                .with_outcome(AuditOutcome::Success)
-                .with_object_id(&format!("rate_{}", rate))
-                .with_object_type("sflow_session")
-        );
+        audit_log!(AuditRecord::new(
+            AuditCategory::ResourceDelete,
+            "SflowOrch",
+            "destroy_session"
+        )
+        .with_outcome(AuditOutcome::Success)
+        .with_object_id(&format!("rate_{}", rate))
+        .with_object_type("sflow_session"));
 
         Ok(())
     }
@@ -338,7 +349,11 @@ impl SflowOrch {
     }
 
     /// Configures sflow on a port.
-    pub fn configure_port(&mut self, alias: &str, config: SflowConfig) -> Result<(), SflowOrchError> {
+    pub fn configure_port(
+        &mut self,
+        alias: &str,
+        config: SflowConfig,
+    ) -> Result<(), SflowOrchError> {
         let callbacks = self
             .callbacks
             .as_ref()
@@ -346,13 +361,15 @@ impl SflowOrch {
 
         // Check if ports are ready
         if !callbacks.all_ports_ready() {
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceCreate, "SflowOrch", "configure_port")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(alias)
-                    .with_object_type("port")
-                    .with_error("Ports not ready")
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "SflowOrch",
+                "configure_port"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(alias)
+            .with_object_type("port")
+            .with_error("Ports not ready"));
             return Err(SflowOrchError::PortNotReady);
         }
 
@@ -362,32 +379,32 @@ impl SflowOrch {
         }
 
         // Get port ID
-        let port_id = callbacks
-            .get_port_id(alias)
-            .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceCreate, "SflowOrch", "configure_port")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(alias)
-                        .with_object_type("port")
-                        .with_error(&format!("Port not found: {}", alias))
-                );
-                SflowOrchError::PortNotFound(alias.to_string())
-            })?;
+        let port_id = callbacks.get_port_id(alias).ok_or_else(|| {
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "SflowOrch",
+                "configure_port"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(alias)
+            .with_object_type("port")
+            .with_error(&format!("Port not found: {}", alias)));
+            SflowOrchError::PortNotFound(alias.to_string())
+        })?;
 
         // Get rate (required)
-        let rate = config
-            .rate
-            .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceCreate, "SflowOrch", "configure_port")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(alias)
-                        .with_object_type("port")
-                        .with_error("Sample rate required")
-                );
-                SflowOrchError::InvalidConfig("Sample rate required".to_string())
-            })?;
+        let rate = config.rate.ok_or_else(|| {
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "SflowOrch",
+                "configure_port"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(alias)
+            .with_object_type("port")
+            .with_error("Sample rate required"));
+            SflowOrchError::InvalidConfig("Sample rate required".to_string())
+        })?;
 
         // Get or create session
         self.create_session(rate)?;
@@ -465,17 +482,19 @@ impl SflowOrch {
                 info.admin_state = config.admin_state;
             }
 
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceModify, "SflowOrch", "configure_port")
-                    .with_outcome(AuditOutcome::Success)
-                    .with_object_id(alias)
-                    .with_object_type("port")
-                    .with_details(serde_json::json!({
-                        "operation": "update",
-                        "rate": rate.get(),
-                        "direction": format!("{:?}", config.direction)
-                    }))
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceModify,
+                "SflowOrch",
+                "configure_port"
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(alias)
+            .with_object_type("port")
+            .with_details(serde_json::json!({
+                "operation": "update",
+                "rate": rate.get(),
+                "direction": format!("{:?}", config.direction)
+            })));
         } else {
             // New port configuration
             self.apply_port_sampling(port_id, session_id, config.direction)?;
@@ -489,18 +508,20 @@ impl SflowOrch {
             }
             self.stats.ports_configured += 1;
 
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceCreate, "SflowOrch", "configure_port")
-                    .with_outcome(AuditOutcome::Success)
-                    .with_object_id(alias)
-                    .with_object_type("port")
-                    .with_details(serde_json::json!({
-                        "operation": "create",
-                        "rate": rate.get(),
-                        "direction": format!("{:?}", config.direction),
-                        "session_id": format!("0x{:x}", session_id)
-                    }))
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "SflowOrch",
+                "configure_port"
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(alias)
+            .with_object_type("port")
+            .with_details(serde_json::json!({
+                "operation": "create",
+                "rate": rate.get(),
+                "direction": format!("{:?}", config.direction),
+                "session_id": format!("0x{:x}", session_id)
+            })));
         }
 
         Ok(())
@@ -514,33 +535,28 @@ impl SflowOrch {
             .ok_or_else(|| SflowOrchError::InvalidConfig("No callbacks set".to_string()))?;
 
         // Get port ID
-        let port_id = callbacks
-            .get_port_id(alias)
-            .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "SflowOrch", "remove_port")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(alias)
-                        .with_object_type("port")
-                        .with_error(&format!("Port not found: {}", alias))
-                );
-                SflowOrchError::PortNotFound(alias.to_string())
-            })?;
+        let port_id = callbacks.get_port_id(alias).ok_or_else(|| {
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceDelete, "SflowOrch", "remove_port")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(alias)
+                    .with_object_type("port")
+                    .with_error(&format!("Port not found: {}", alias))
+            );
+            SflowOrchError::PortNotFound(alias.to_string())
+        })?;
 
         // Get existing info
-        let info = self
-            .port_info
-            .remove(&port_id)
-            .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "SflowOrch", "remove_port")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(alias)
-                        .with_object_type("port")
-                        .with_error(&format!("Port not configured for sampling: {}", alias))
-                );
-                SflowOrchError::PortNotFound(alias.to_string())
-            })?;
+        let info = self.port_info.remove(&port_id).ok_or_else(|| {
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceDelete, "SflowOrch", "remove_port")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(alias)
+                    .with_object_type("port")
+                    .with_error(&format!("Port not configured for sampling: {}", alias))
+            );
+            SflowOrchError::PortNotFound(alias.to_string())
+        })?;
 
         // Remove sampling from port
         self.remove_port_sampling(port_id, info.direction)?;
@@ -624,7 +640,11 @@ mod tests {
             Ok(())
         }
 
-        fn enable_port_ingress_sample(&self, port_id: RawSaiObjectId, session_id: RawSaiObjectId) -> Result<(), String> {
+        fn enable_port_ingress_sample(
+            &self,
+            port_id: RawSaiObjectId,
+            session_id: RawSaiObjectId,
+        ) -> Result<(), String> {
             self.port_ops
                 .lock()
                 .unwrap()
@@ -640,7 +660,11 @@ mod tests {
             Ok(())
         }
 
-        fn enable_port_egress_sample(&self, port_id: RawSaiObjectId, session_id: RawSaiObjectId) -> Result<(), String> {
+        fn enable_port_egress_sample(
+            &self,
+            port_id: RawSaiObjectId,
+            session_id: RawSaiObjectId,
+        ) -> Result<(), String> {
             self.port_ops
                 .lock()
                 .unwrap()
@@ -847,7 +871,12 @@ mod tests {
         // Check port ops: disable rx, then enable both rx+tx
         let ops = callbacks.port_ops.lock().unwrap();
         assert!(ops.iter().any(|s| s.starts_with("disable_ingress:")));
-        assert!(ops.iter().filter(|s| s.starts_with("enable_ingress:")).count() == 2); // Initial + update
+        assert!(
+            ops.iter()
+                .filter(|s| s.starts_with("enable_ingress:"))
+                .count()
+                == 2
+        ); // Initial + update
         assert!(ops.iter().any(|s| s.starts_with("enable_egress:")));
     }
 

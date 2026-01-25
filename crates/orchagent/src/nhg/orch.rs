@@ -1,11 +1,14 @@
 //! Next hop group orchestration logic.
 
 use super::types::{LabelStack, NextHopGroupMember, NextHopKey};
-use crate::{audit_log, audit::{AuditCategory, AuditOutcome, AuditRecord}};
+use crate::{
+    audit::{AuditCategory, AuditOutcome, AuditRecord},
+    audit_log,
+};
 use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Error)]
@@ -38,7 +41,10 @@ pub struct NhgOrchStats {
 pub trait NhgOrchCallbacks: Send + Sync {
     fn create_next_hop(&self, key: &NextHopKey) -> Result<RawSaiObjectId, String>;
     fn remove_next_hop(&self, nh_id: RawSaiObjectId) -> Result<(), String>;
-    fn create_next_hop_group(&self, members: &[NextHopGroupMember]) -> Result<RawSaiObjectId, String>;
+    fn create_next_hop_group(
+        &self,
+        members: &[NextHopGroupMember],
+    ) -> Result<RawSaiObjectId, String>;
     fn remove_next_hop_group(&self, nhg_id: RawSaiObjectId) -> Result<(), String>;
 }
 
@@ -89,17 +95,22 @@ impl NhgOrch {
         &self.stats
     }
 
-    pub fn get_or_create_nexthop(&mut self, key: NextHopKey) -> Result<RawSaiObjectId, NhgOrchError> {
+    pub fn get_or_create_nexthop(
+        &mut self,
+        key: NextHopKey,
+    ) -> Result<RawSaiObjectId, NhgOrchError> {
         if let Some(&oid) = self.nexthops.get(&key) {
             return Ok(oid);
         }
 
         let callbacks = Arc::clone(
-            self.callbacks.as_ref()
+            self.callbacks
+                .as_ref()
                 .ok_or_else(|| NhgOrchError::InvalidConfig("No callbacks set".to_string()))?,
         );
 
-        let nh_id = callbacks.create_next_hop(&key)
+        let nh_id = callbacks
+            .create_next_hop(&key)
             .map_err(NhgOrchError::SaiError)?;
 
         self.nexthops.insert(key, nh_id);
@@ -108,7 +119,11 @@ impl NhgOrch {
         Ok(nh_id)
     }
 
-    pub fn create_nhg(&mut self, name: String, members: Vec<NextHopGroupMember>) -> Result<(), NhgOrchError> {
+    pub fn create_nhg(
+        &mut self,
+        name: String,
+        members: Vec<NextHopGroupMember>,
+    ) -> Result<(), NhgOrchError> {
         if self.nhgs.contains_key(&name) {
             let err = NhgOrchError::NhgExists(name.clone());
             audit_log!(
@@ -122,7 +137,8 @@ impl NhgOrch {
         }
 
         let callbacks = Arc::clone(
-            self.callbacks.as_ref()
+            self.callbacks
+                .as_ref()
                 .ok_or_else(|| NhgOrchError::InvalidConfig("No callbacks set".to_string()))?,
         );
 
@@ -130,16 +146,18 @@ impl NhgOrch {
             Ok(id) => id,
             Err(e) => {
                 let err = NhgOrchError::SaiError(e);
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceCreate, "NhgOrch", "create_nhg")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(name)
-                        .with_object_type("next_hop_group")
-                        .with_error(err.to_string())
-                        .with_details(serde_json::json!({
-                            "member_count": members.len(),
-                        }))
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceCreate,
+                    "NhgOrch",
+                    "create_nhg"
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(name)
+                .with_object_type("next_hop_group")
+                .with_error(err.to_string())
+                .with_details(serde_json::json!({
+                    "member_count": members.len(),
+                })));
                 return Err(err);
             }
         };
@@ -170,14 +188,17 @@ impl NhgOrch {
     }
 
     pub fn remove_nhg(&mut self, name: &str) -> Result<(), NhgOrchError> {
-        let entry = self.nhgs.get(name)
+        let entry = self
+            .nhgs
+            .get(name)
             .ok_or_else(|| NhgOrchError::NhgNotFound(name.to_string()))?;
 
         let ref_count = entry.ref_count.load(Ordering::SeqCst);
         if ref_count > 0 {
-            let err = NhgOrchError::InvalidConfig(
-                format!("NHG {} still in use (ref_count={})", name, ref_count)
-            );
+            let err = NhgOrchError::InvalidConfig(format!(
+                "NHG {} still in use (ref_count={})",
+                name, ref_count
+            ));
             audit_log!(
                 AuditRecord::new(AuditCategory::ResourceDelete, "NhgOrch", "remove_nhg")
                     .with_outcome(AuditOutcome::Failure)
@@ -193,7 +214,9 @@ impl NhgOrch {
 
         let entry = self.nhgs.remove(name).unwrap();
 
-        let callbacks = self.callbacks.as_ref()
+        let callbacks = self
+            .callbacks
+            .as_ref()
             .ok_or_else(|| NhgOrchError::InvalidConfig("No callbacks set".to_string()))?;
 
         if let Err(e) = callbacks.remove_next_hop_group(entry.nhg_id) {
@@ -225,7 +248,9 @@ impl NhgOrch {
     }
 
     pub fn increment_nhg_ref(&self, name: &str) -> Result<u32, NhgOrchError> {
-        let entry = self.nhgs.get(name)
+        let entry = self
+            .nhgs
+            .get(name)
             .ok_or_else(|| NhgOrchError::NhgNotFound(name.to_string()))?;
 
         let prev = entry.ref_count.fetch_add(1, Ordering::SeqCst);
@@ -246,14 +271,14 @@ impl NhgOrch {
     }
 
     pub fn decrement_nhg_ref(&self, name: &str) -> Result<u32, NhgOrchError> {
-        let entry = self.nhgs.get(name)
+        let entry = self
+            .nhgs
+            .get(name)
             .ok_or_else(|| NhgOrchError::NhgNotFound(name.to_string()))?;
 
         let prev = entry.ref_count.load(Ordering::SeqCst);
         if prev == 0 {
-            let err = NhgOrchError::InvalidConfig(
-                format!("NHG {} ref_count already at 0", name)
-            );
+            let err = NhgOrchError::InvalidConfig(format!("NHG {} ref_count already at 0", name));
             audit_log!(
                 AuditRecord::new(AuditCategory::ResourceModify, "NhgOrch", "remove_member")
                     .with_outcome(AuditOutcome::Failure)
@@ -310,7 +335,10 @@ mod tests {
         fn remove_next_hop(&self, _nh_id: RawSaiObjectId) -> Result<(), String> {
             Ok(())
         }
-        fn create_next_hop_group(&self, _members: &[NextHopGroupMember]) -> Result<RawSaiObjectId, String> {
+        fn create_next_hop_group(
+            &self,
+            _members: &[NextHopGroupMember],
+        ) -> Result<RawSaiObjectId, String> {
             Ok(self.next_nhg_id.fetch_add(1, Ordering::SeqCst))
         }
         fn remove_next_hop_group(&self, _nhg_id: RawSaiObjectId) -> Result<(), String> {
@@ -326,7 +354,10 @@ mod tests {
         fn remove_next_hop(&self, _nh_id: RawSaiObjectId) -> Result<(), String> {
             Err("Failed to remove next hop".to_string())
         }
-        fn create_next_hop_group(&self, _members: &[NextHopGroupMember]) -> Result<RawSaiObjectId, String> {
+        fn create_next_hop_group(
+            &self,
+            _members: &[NextHopGroupMember],
+        ) -> Result<RawSaiObjectId, String> {
             Err("Failed to create NHG".to_string())
         }
         fn remove_next_hop_group(&self, _nhg_id: RawSaiObjectId) -> Result<(), String> {
@@ -426,7 +457,9 @@ mod tests {
         orch.set_callbacks(Arc::new(MockCallbacks::new()));
 
         let member = create_test_member("10.0.0.1", "Ethernet0");
-        assert!(orch.create_nhg("nhg1".to_string(), vec![member.clone()]).is_ok());
+        assert!(orch
+            .create_nhg("nhg1".to_string(), vec![member.clone()])
+            .is_ok());
 
         let result = orch.create_nhg("nhg1".to_string(), vec![member]);
         assert!(matches!(result, Err(NhgOrchError::NhgExists(_))));
@@ -534,7 +567,9 @@ mod tests {
             nh_id: 0,
         };
 
-        assert!(orch.create_nhg("overlay_nhg".to_string(), vec![member]).is_ok());
+        assert!(orch
+            .create_nhg("overlay_nhg".to_string(), vec![member])
+            .is_ok());
         assert!(orch.nhg_exists("overlay_nhg"));
     }
 
@@ -559,7 +594,9 @@ mod tests {
             nh_id: 0,
         };
 
-        assert!(orch.create_nhg("srv6_nhg".to_string(), vec![member]).is_ok());
+        assert!(orch
+            .create_nhg("srv6_nhg".to_string(), vec![member])
+            .is_ok());
         assert!(orch.nhg_exists("srv6_nhg"));
     }
 
@@ -584,7 +621,9 @@ mod tests {
             nh_id: 0,
         };
 
-        assert!(orch.create_nhg("srv6_vpn_nhg".to_string(), vec![member]).is_ok());
+        assert!(orch
+            .create_nhg("srv6_vpn_nhg".to_string(), vec![member])
+            .is_ok());
         assert!(orch.nhg_exists("srv6_vpn_nhg"));
     }
 
@@ -609,7 +648,9 @@ mod tests {
             nh_id: 0,
         };
 
-        assert!(orch.create_nhg("mpls_nhg".to_string(), vec![member]).is_ok());
+        assert!(orch
+            .create_nhg("mpls_nhg".to_string(), vec![member])
+            .is_ok());
         assert!(orch.nhg_exists("mpls_nhg"));
     }
 
@@ -630,7 +671,9 @@ mod tests {
         orch.set_callbacks(Arc::new(MockCallbacks::new()));
 
         let member = create_test_member("10.0.0.1", "Ethernet0");
-        assert!(orch.create_nhg("single_member".to_string(), vec![member]).is_ok());
+        assert!(orch
+            .create_nhg("single_member".to_string(), vec![member])
+            .is_ok());
         assert!(orch.nhg_exists("single_member"));
     }
 
@@ -820,10 +863,12 @@ mod tests {
         assert_eq!(orch.nhg_count(), 0);
 
         let member = create_test_member("10.0.0.1", "Ethernet0");
-        orch.create_nhg("nhg1".to_string(), vec![member.clone()]).unwrap();
+        orch.create_nhg("nhg1".to_string(), vec![member.clone()])
+            .unwrap();
         assert_eq!(orch.nhg_count(), 1);
 
-        orch.create_nhg("nhg2".to_string(), vec![member.clone()]).unwrap();
+        orch.create_nhg("nhg2".to_string(), vec![member.clone()])
+            .unwrap();
         assert_eq!(orch.nhg_count(), 2);
 
         orch.create_nhg("nhg3".to_string(), vec![member]).unwrap();
@@ -840,14 +885,17 @@ mod tests {
 
         assert_eq!(orch.nexthop_count(), 0);
 
-        orch.get_or_create_nexthop(create_test_nexthop_key("10.0.0.1", "Ethernet0")).unwrap();
+        orch.get_or_create_nexthop(create_test_nexthop_key("10.0.0.1", "Ethernet0"))
+            .unwrap();
         assert_eq!(orch.nexthop_count(), 1);
 
-        orch.get_or_create_nexthop(create_test_nexthop_key("10.0.0.2", "Ethernet4")).unwrap();
+        orch.get_or_create_nexthop(create_test_nexthop_key("10.0.0.2", "Ethernet4"))
+            .unwrap();
         assert_eq!(orch.nexthop_count(), 2);
 
         // Reusing existing nexthop doesn't increase count
-        orch.get_or_create_nexthop(create_test_nexthop_key("10.0.0.1", "Ethernet0")).unwrap();
+        orch.get_or_create_nexthop(create_test_nexthop_key("10.0.0.1", "Ethernet0"))
+            .unwrap();
         assert_eq!(orch.nexthop_count(), 2);
     }
 
@@ -859,7 +907,8 @@ mod tests {
         assert_eq!(orch.stats().nhgs_created, 0);
 
         let member = create_test_member("10.0.0.1", "Ethernet0");
-        orch.create_nhg("nhg1".to_string(), vec![member.clone()]).unwrap();
+        orch.create_nhg("nhg1".to_string(), vec![member.clone()])
+            .unwrap();
         assert_eq!(orch.stats().nhgs_created, 1);
 
         orch.create_nhg("nhg2".to_string(), vec![member]).unwrap();
@@ -874,7 +923,8 @@ mod tests {
         assert_eq!(orch.stats().nhgs_removed, 0);
 
         let member = create_test_member("10.0.0.1", "Ethernet0");
-        orch.create_nhg("nhg1".to_string(), vec![member.clone()]).unwrap();
+        orch.create_nhg("nhg1".to_string(), vec![member.clone()])
+            .unwrap();
         orch.create_nhg("nhg2".to_string(), vec![member]).unwrap();
 
         orch.remove_nhg("nhg1").unwrap();
@@ -891,14 +941,17 @@ mod tests {
 
         assert_eq!(orch.stats().nexthops_created, 0);
 
-        orch.get_or_create_nexthop(create_test_nexthop_key("10.0.0.1", "Ethernet0")).unwrap();
+        orch.get_or_create_nexthop(create_test_nexthop_key("10.0.0.1", "Ethernet0"))
+            .unwrap();
         assert_eq!(orch.stats().nexthops_created, 1);
 
-        orch.get_or_create_nexthop(create_test_nexthop_key("10.0.0.2", "Ethernet4")).unwrap();
+        orch.get_or_create_nexthop(create_test_nexthop_key("10.0.0.2", "Ethernet4"))
+            .unwrap();
         assert_eq!(orch.stats().nexthops_created, 2);
 
         // Reusing doesn't increment
-        orch.get_or_create_nexthop(create_test_nexthop_key("10.0.0.1", "Ethernet0")).unwrap();
+        orch.get_or_create_nexthop(create_test_nexthop_key("10.0.0.1", "Ethernet0"))
+            .unwrap();
         assert_eq!(orch.stats().nexthops_created, 2);
     }
 
@@ -914,7 +967,8 @@ mod tests {
             create_test_member("10.0.0.2", "Ethernet4"),
         ];
 
-        orch.create_nhg("nhg1".to_string(), members.clone()).unwrap();
+        orch.create_nhg("nhg1".to_string(), members.clone())
+            .unwrap();
         orch.create_nhg("nhg2".to_string(), members).unwrap();
 
         assert_eq!(orch.nhg_count(), 2);

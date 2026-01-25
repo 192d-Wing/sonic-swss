@@ -1,7 +1,7 @@
 //! FFI exports for VxlanOrch.
 
-use std::cell::RefCell;
 use super::orch::{VxlanOrch, VxlanOrchConfig};
+use std::cell::RefCell;
 
 thread_local! {
     static VXLAN_ORCH: RefCell<Option<Box<VxlanOrch>>> = const { RefCell::new(None) };

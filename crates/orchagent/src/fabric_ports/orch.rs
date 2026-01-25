@@ -10,11 +10,11 @@
 //! - Support manual isolation configuration
 
 use super::types::{FabricPortState, IsolationState, LinkStatus, PortHealthState};
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
 use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
-use crate::audit_log;
 
 /// Result type for FabricPortsOrch operations.
 pub type Result<T> = std::result::Result<T, FabricPortsOrchError>;
@@ -629,7 +629,10 @@ mod tests {
             FabricPortsOrch::new(FabricPortsOrchConfig::default());
 
         let result = orch.remove_port(99);
-        assert!(matches!(result, Err(FabricPortsOrchError::PortNotFound(99))));
+        assert!(matches!(
+            result,
+            Err(FabricPortsOrchError::PortNotFound(99))
+        ));
     }
 
     #[test]

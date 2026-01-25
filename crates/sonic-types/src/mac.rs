@@ -67,14 +67,22 @@ impl MacAddress {
 
     /// Returns true if this is the broadcast address.
     pub const fn is_broadcast(&self) -> bool {
-        self.0[0] == 0xff && self.0[1] == 0xff && self.0[2] == 0xff
-            && self.0[3] == 0xff && self.0[4] == 0xff && self.0[5] == 0xff
+        self.0[0] == 0xff
+            && self.0[1] == 0xff
+            && self.0[2] == 0xff
+            && self.0[3] == 0xff
+            && self.0[4] == 0xff
+            && self.0[5] == 0xff
     }
 
     /// Returns true if this is the zero address.
     pub const fn is_zero(&self) -> bool {
-        self.0[0] == 0 && self.0[1] == 0 && self.0[2] == 0
-            && self.0[3] == 0 && self.0[4] == 0 && self.0[5] == 0
+        self.0[0] == 0
+            && self.0[1] == 0
+            && self.0[2] == 0
+            && self.0[3] == 0
+            && self.0[4] == 0
+            && self.0[5] == 0
     }
 }
 

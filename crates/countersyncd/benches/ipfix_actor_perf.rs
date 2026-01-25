@@ -1,5 +1,5 @@
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use criterion::SamplingMode;
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use std::sync::Arc;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc;
@@ -7,9 +7,7 @@ use tokio::time::{timeout, Duration, Instant};
 
 use countersyncd::actor::ipfix::IpfixActor;
 use countersyncd::message::{
-    buffer::SocketBufferMessage,
-    ipfix::IPFixTemplatesMessage,
-    saistats::SAIStatsMessage,
+    buffer::SocketBufferMessage, ipfix::IPFixTemplatesMessage, saistats::SAIStatsMessage,
 };
 use log::warn;
 
@@ -138,7 +136,7 @@ fn bench_ipfix_actor_datasets(c: &mut Criterion) {
     for spec in datasets() {
         let bench_id = BenchmarkId::from_parameter(spec.name);
         group.throughput(Throughput::Elements(
-            spec.total_counters_per_iteration() as u64,
+            spec.total_counters_per_iteration() as u64
         ));
         let bench_spec = Arc::new(spec.clone());
         group.bench_function(bench_id, move |b| {
@@ -157,26 +155,26 @@ fn bench_ipfix_actor_datasets(c: &mut Criterion) {
                     move |prepared| {
                         let spec = Arc::clone(&spec);
                         async move {
-                    let (
-                        elapsed,
-                        received_messages,
-                        received_counters,
-                        expected_messages,
-                        expected_counters,
-                    ) = run_prepared_dataset(prepared).await;
+                            let (
+                                elapsed,
+                                received_messages,
+                                received_counters,
+                                expected_messages,
+                                expected_counters,
+                            ) = run_prepared_dataset(prepared).await;
 
-                    let cps = counters_per_second(elapsed, received_counters);
+                            let cps = counters_per_second(elapsed, received_counters);
 
-                    println!(
-                        "Dataset {} -> elapsed {:?}, msgs {}/{}, counters {}/{}, cps {:.2}",
-                        spec.name,
-                        elapsed,
-                        received_messages,
-                        expected_messages,
-                        received_counters,
-                        expected_counters,
-                        cps,
-                    );
+                            println!(
+                                "Dataset {} -> elapsed {:?}, msgs {}/{}, counters {}/{}, cps {:.2}",
+                                spec.name,
+                                elapsed,
+                                received_messages,
+                                expected_messages,
+                                received_counters,
+                                expected_counters,
+                                cps,
+                            );
                         }
                     }
                 },

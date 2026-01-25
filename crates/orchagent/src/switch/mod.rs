@@ -13,5 +13,10 @@ mod orch;
 mod types;
 
 pub use ffi::{register_switch_orch, unregister_switch_orch};
-pub use orch::{SwitchOrch, SwitchOrchCallbacks, SwitchOrchConfig, SwitchOrchError, SwitchOrchStats};
-pub use types::{SwitchCapabilities, SwitchConfig, SwitchHashAlgorithm, SwitchHashConfig, SwitchHashField, SwitchState};
+pub use orch::{
+    SwitchOrch, SwitchOrchCallbacks, SwitchOrchConfig, SwitchOrchError, SwitchOrchStats,
+};
+pub use types::{
+    SwitchCapabilities, SwitchConfig, SwitchHashAlgorithm, SwitchHashConfig, SwitchHashField,
+    SwitchState,
+};

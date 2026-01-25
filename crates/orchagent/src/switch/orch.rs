@@ -1,9 +1,11 @@
 //! Switch orchestration logic.
 
-use std::sync::Arc;
-use super::types::{SwitchConfig, SwitchState, SwitchHashConfig, SwitchCapabilities, RawSaiObjectId};
+use super::types::{
+    RawSaiObjectId, SwitchCapabilities, SwitchConfig, SwitchHashConfig, SwitchState,
+};
 use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
-use crate::{audit_log, debug_log, info_log, warn_log, error_log, security_audit};
+use crate::{audit_log, debug_log, error_log, info_log, security_audit, warn_log};
+use std::sync::Arc;
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, SwitchOrchError>;
@@ -116,7 +118,12 @@ impl<C: SwitchOrchCallbacks> SwitchOrch<C> {
             e
         })?;
 
-        debug_log!("SwitchOrch", max_ports = capabilities.max_ports, max_vlans = capabilities.max_vlans, "Retrieved switch capabilities");
+        debug_log!(
+            "SwitchOrch",
+            max_ports = capabilities.max_ports,
+            max_vlans = capabilities.max_vlans,
+            "Retrieved switch capabilities"
+        );
 
         let mut state = callbacks.initialize_switch(&capabilities).map_err(|e| {
             error_log!("SwitchOrch", error = %e, "Failed to initialize switch");
@@ -135,21 +142,24 @@ impl<C: SwitchOrchCallbacks> SwitchOrch<C> {
         self.state = Some(state.clone());
         callbacks.on_switch_initialized(&state);
 
-        info_log!("SwitchOrch", switch_oid = switch_oid, cpu_port = state.cpu_port_oid, "Switch initialized successfully");
-        audit_log!(AuditRecord::new(
-            AuditCategory::SystemLifecycle,
+        info_log!(
             "SwitchOrch",
-            "initialize"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(format!("0x{:x}", switch_oid))
-        .with_object_type("switch")
-        .with_details(serde_json::json!({
-            "switch_oid": format!("0x{:x}", switch_oid),
-            "cpu_port_oid": format!("0x{:x}", state.cpu_port_oid),
-            "default_vlan_oid": format!("0x{:x}", state.default_vlan_oid),
-            "warm_restart_enabled": self.config.enable_warm_restart
-        })));
+            switch_oid = switch_oid,
+            cpu_port = state.cpu_port_oid,
+            "Switch initialized successfully"
+        );
+        audit_log!(
+            AuditRecord::new(AuditCategory::SystemLifecycle, "SwitchOrch", "initialize")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("0x{:x}", switch_oid))
+                .with_object_type("switch")
+                .with_details(serde_json::json!({
+                    "switch_oid": format!("0x{:x}", switch_oid),
+                    "cpu_port_oid": format!("0x{:x}", state.cpu_port_oid),
+                    "default_vlan_oid": format!("0x{:x}", state.default_vlan_oid),
+                    "warm_restart_enabled": self.config.enable_warm_restart
+                }))
+        );
 
         Ok(())
     }
@@ -170,7 +180,10 @@ impl<C: SwitchOrchCallbacks> SwitchOrch<C> {
             return Err(SwitchOrchError::NotInitialized);
         }
 
-        let callbacks = self.callbacks.as_ref().ok_or(SwitchOrchError::NotInitialized)?;
+        let callbacks = self
+            .callbacks
+            .as_ref()
+            .ok_or(SwitchOrchError::NotInitialized)?;
         callbacks.set_hash_algorithm(true, &config).map_err(|e| {
             error_log!("SwitchOrch", error = %e, "SAI set_hash_algorithm failed for ECMP");
             audit_log!(AuditRecord::new(
@@ -213,16 +226,17 @@ impl<C: SwitchOrchCallbacks> SwitchOrch<C> {
             return Err(SwitchOrchError::NotInitialized);
         }
 
-        let callbacks = self.callbacks.as_ref().ok_or(SwitchOrchError::NotInitialized)?;
+        let callbacks = self
+            .callbacks
+            .as_ref()
+            .ok_or(SwitchOrchError::NotInitialized)?;
         callbacks.set_hash_algorithm(false, &config).map_err(|e| {
             error_log!("SwitchOrch", error = %e, "SAI set_hash_algorithm failed for LAG");
-            audit_log!(AuditRecord::new(
-                AuditCategory::SaiOperation,
-                "SwitchOrch",
-                "set_lag_hash"
-            )
-            .with_object_type("lag_hash")
-            .with_error(e.to_string()));
+            audit_log!(
+                AuditRecord::new(AuditCategory::SaiOperation, "SwitchOrch", "set_lag_hash")
+                    .with_object_type("lag_hash")
+                    .with_error(e.to_string())
+            );
             e
         })?;
 
@@ -256,9 +270,15 @@ impl<C: SwitchOrchCallbacks> SwitchOrch<C> {
             return Err(SwitchOrchError::NotInitialized);
         }
 
-        let callbacks = self.callbacks.as_ref().ok_or(SwitchOrchError::NotInitialized)?;
+        let callbacks = self
+            .callbacks
+            .as_ref()
+            .ok_or(SwitchOrchError::NotInitialized)?;
 
-        let old_value = self.state.as_ref().and_then(|s| s.attributes.get(&name).cloned());
+        let old_value = self
+            .state
+            .as_ref()
+            .and_then(|s| s.attributes.get(&name).cloned());
 
         callbacks.set_switch_attribute(&name, &value).map_err(|e| {
             error_log!("SwitchOrch", attribute = %name, error = %e, "SAI set_switch_attribute failed");
@@ -300,12 +320,18 @@ impl<C: SwitchOrchCallbacks> SwitchOrch<C> {
             return Err(SwitchOrchError::NotInitialized);
         }
 
-        let callbacks = self.callbacks.as_ref().ok_or(SwitchOrchError::NotInitialized)?;
+        let callbacks = self
+            .callbacks
+            .as_ref()
+            .ok_or(SwitchOrchError::NotInitialized)?;
         callbacks.get_switch_attribute(name)
     }
 
     pub fn query_capabilities(&mut self) -> Result<SwitchCapabilities> {
-        let callbacks = self.callbacks.as_ref().ok_or(SwitchOrchError::NotInitialized)?;
+        let callbacks = self
+            .callbacks
+            .as_ref()
+            .ok_or(SwitchOrchError::NotInitialized)?;
         let caps = callbacks.get_capabilities()?;
         self.stats.capability_queries += 1;
 
@@ -320,7 +346,10 @@ impl<C: SwitchOrchCallbacks> SwitchOrch<C> {
         info_log!("SwitchOrch", "Beginning warm restart sequence");
 
         if self.state.is_none() {
-            error_log!("SwitchOrch", "Cannot begin warm restart: switch not initialized");
+            error_log!(
+                "SwitchOrch",
+                "Cannot begin warm restart: switch not initialized"
+            );
             security_audit!(AuditRecord::new(
                 AuditCategory::WarmRestart,
                 "SwitchOrch",
@@ -330,7 +359,10 @@ impl<C: SwitchOrchCallbacks> SwitchOrch<C> {
             return Err(SwitchOrchError::NotInitialized);
         }
 
-        let callbacks = self.callbacks.as_ref().ok_or(SwitchOrchError::NotInitialized)?;
+        let callbacks = self
+            .callbacks
+            .as_ref()
+            .ok_or(SwitchOrchError::NotInitialized)?;
         callbacks.on_warm_restart_begin();
         self.stats.warm_restarts += 1;
 
@@ -351,17 +383,31 @@ impl<C: SwitchOrchCallbacks> SwitchOrch<C> {
     }
 
     pub fn end_warm_restart(&mut self, success: bool) -> Result<()> {
-        info_log!("SwitchOrch", success = success, "Ending warm restart sequence");
+        info_log!(
+            "SwitchOrch",
+            success = success,
+            "Ending warm restart sequence"
+        );
 
         if self.state.is_none() {
-            error_log!("SwitchOrch", "Cannot end warm restart: switch not initialized");
+            error_log!(
+                "SwitchOrch",
+                "Cannot end warm restart: switch not initialized"
+            );
             return Err(SwitchOrchError::NotInitialized);
         }
 
-        let callbacks = self.callbacks.as_ref().ok_or(SwitchOrchError::NotInitialized)?;
+        let callbacks = self
+            .callbacks
+            .as_ref()
+            .ok_or(SwitchOrchError::NotInitialized)?;
         callbacks.on_warm_restart_end(success);
 
-        let outcome = if success { AuditOutcome::Success } else { AuditOutcome::Failure };
+        let outcome = if success {
+            AuditOutcome::Success
+        } else {
+            AuditOutcome::Failure
+        };
 
         // Warm restart completion is a security-relevant event (NIST AU-2)
         security_audit!(AuditRecord::new(
@@ -435,7 +481,9 @@ mod tests {
         fn get_switch_attribute(&self, name: &str) -> Result<String> {
             match name {
                 "cpu_port" => Ok("100".to_string()),
-                _ => Err(SwitchOrchError::ConfigurationError("Unknown attribute".into())),
+                _ => Err(SwitchOrchError::ConfigurationError(
+                    "Unknown attribute".into(),
+                )),
             }
         }
 
@@ -459,8 +507,8 @@ mod tests {
     #[test]
     fn test_initialize_switch() {
         let config = SwitchOrchConfig::default();
-        let mut orch: SwitchOrch<MockSwitchCallbacks> = SwitchOrch::new(config)
-            .with_callbacks(Arc::new(MockSwitchCallbacks));
+        let mut orch: SwitchOrch<MockSwitchCallbacks> =
+            SwitchOrch::new(config).with_callbacks(Arc::new(MockSwitchCallbacks));
 
         assert!(!orch.is_initialized());
         assert!(orch.initialize().is_ok());
@@ -471,8 +519,8 @@ mod tests {
     #[test]
     fn test_initialize_twice_returns_error() {
         let config = SwitchOrchConfig::default();
-        let mut orch: SwitchOrch<MockSwitchCallbacks> = SwitchOrch::new(config)
-            .with_callbacks(Arc::new(MockSwitchCallbacks));
+        let mut orch: SwitchOrch<MockSwitchCallbacks> =
+            SwitchOrch::new(config).with_callbacks(Arc::new(MockSwitchCallbacks));
 
         assert!(orch.initialize().is_ok());
         assert!(orch.initialize().is_err());
@@ -481,8 +529,8 @@ mod tests {
     #[test]
     fn test_set_ecmp_hash() {
         let config = SwitchOrchConfig::default();
-        let mut orch: SwitchOrch<MockSwitchCallbacks> = SwitchOrch::new(config)
-            .with_callbacks(Arc::new(MockSwitchCallbacks));
+        let mut orch: SwitchOrch<MockSwitchCallbacks> =
+            SwitchOrch::new(config).with_callbacks(Arc::new(MockSwitchCallbacks));
 
         assert!(orch.initialize().is_ok());
 
@@ -500,8 +548,8 @@ mod tests {
     #[test]
     fn test_set_lag_hash() {
         let config = SwitchOrchConfig::default();
-        let mut orch: SwitchOrch<MockSwitchCallbacks> = SwitchOrch::new(config)
-            .with_callbacks(Arc::new(MockSwitchCallbacks));
+        let mut orch: SwitchOrch<MockSwitchCallbacks> =
+            SwitchOrch::new(config).with_callbacks(Arc::new(MockSwitchCallbacks));
 
         assert!(orch.initialize().is_ok());
 
@@ -519,11 +567,13 @@ mod tests {
     #[test]
     fn test_set_attribute() {
         let config = SwitchOrchConfig::default();
-        let mut orch: SwitchOrch<MockSwitchCallbacks> = SwitchOrch::new(config)
-            .with_callbacks(Arc::new(MockSwitchCallbacks));
+        let mut orch: SwitchOrch<MockSwitchCallbacks> =
+            SwitchOrch::new(config).with_callbacks(Arc::new(MockSwitchCallbacks));
 
         assert!(orch.initialize().is_ok());
-        assert!(orch.set_attribute("max_mtu".to_string(), "9216".to_string()).is_ok());
+        assert!(orch
+            .set_attribute("max_mtu".to_string(), "9216".to_string())
+            .is_ok());
 
         if let Some(state) = orch.get_state() {
             assert_eq!(state.attributes.get("max_mtu"), Some(&"9216".to_string()));
@@ -533,8 +583,8 @@ mod tests {
     #[test]
     fn test_get_attribute() {
         let config = SwitchOrchConfig::default();
-        let mut orch: SwitchOrch<MockSwitchCallbacks> = SwitchOrch::new(config)
-            .with_callbacks(Arc::new(MockSwitchCallbacks));
+        let mut orch: SwitchOrch<MockSwitchCallbacks> =
+            SwitchOrch::new(config).with_callbacks(Arc::new(MockSwitchCallbacks));
 
         assert!(orch.initialize().is_ok());
         let result = orch.get_attribute("cpu_port");
@@ -545,8 +595,8 @@ mod tests {
     #[test]
     fn test_query_capabilities() {
         let config = SwitchOrchConfig::default();
-        let mut orch: SwitchOrch<MockSwitchCallbacks> = SwitchOrch::new(config)
-            .with_callbacks(Arc::new(MockSwitchCallbacks));
+        let mut orch: SwitchOrch<MockSwitchCallbacks> =
+            SwitchOrch::new(config).with_callbacks(Arc::new(MockSwitchCallbacks));
 
         assert!(orch.initialize().is_ok());
         assert_eq!(orch.stats().capability_queries, 0);
@@ -563,8 +613,8 @@ mod tests {
             warm_restart_read_timer: 60,
             warm_restart_timer: 120,
         };
-        let mut orch: SwitchOrch<MockSwitchCallbacks> = SwitchOrch::new(config)
-            .with_callbacks(Arc::new(MockSwitchCallbacks));
+        let mut orch: SwitchOrch<MockSwitchCallbacks> =
+            SwitchOrch::new(config).with_callbacks(Arc::new(MockSwitchCallbacks));
 
         assert!(orch.initialize().is_ok());
         assert_eq!(orch.stats().warm_restarts, 0);
@@ -578,8 +628,8 @@ mod tests {
     #[test]
     fn test_operations_fail_without_initialization() {
         let config = SwitchOrchConfig::default();
-        let mut orch: SwitchOrch<MockSwitchCallbacks> = SwitchOrch::new(config)
-            .with_callbacks(Arc::new(MockSwitchCallbacks));
+        let mut orch: SwitchOrch<MockSwitchCallbacks> =
+            SwitchOrch::new(config).with_callbacks(Arc::new(MockSwitchCallbacks));
 
         let hash_config = SwitchHashConfig::default();
         assert!(orch.set_ecmp_hash(hash_config.clone()).is_err());

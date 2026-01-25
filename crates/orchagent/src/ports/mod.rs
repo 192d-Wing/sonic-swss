@@ -47,9 +47,9 @@ mod types;
 pub use config::{PortConfig, PortConfigError};
 pub use ffi::{register_ports_orch, unregister_ports_orch};
 pub use orch::{PortsOrch, PortsOrchCallbacks, PortsOrchConfig, PortsOrchError};
-pub use port::{Port, PortType, PortRole, PortFecMode, PortAdminState, PortOperState};
+pub use port::{Port, PortAdminState, PortFecMode, PortOperState, PortRole, PortType};
 pub use queue::{QueueInfo, QueueType, SchedulerInfo};
 pub use types::{
-    PortInitState, PortTable, LagTable, VlanTable, GearboxPortTable,
-    SystemPortTable, PortSupportedSpeeds, VlanTaggingMode,
+    GearboxPortTable, LagTable, PortInitState, PortSupportedSpeeds, PortTable, SystemPortTable,
+    VlanTable, VlanTaggingMode,
 };

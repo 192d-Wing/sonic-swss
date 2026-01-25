@@ -170,7 +170,11 @@ pub struct TunnelEntry {
 }
 
 impl TunnelEntry {
-    pub fn new(config: TunnelConfig, tunnel_id: RawSaiObjectId, overlay_intf_id: RawSaiObjectId) -> Self {
+    pub fn new(
+        config: TunnelConfig,
+        tunnel_id: RawSaiObjectId,
+        overlay_intf_id: RawSaiObjectId,
+    ) -> Self {
         Self {
             tunnel_id,
             overlay_intf_id,
@@ -223,7 +227,10 @@ pub struct NexthopTunnel {
 
 impl NexthopTunnel {
     pub fn new(nh_id: RawSaiObjectId) -> Self {
-        Self { nh_id, ref_count: 1 }
+        Self {
+            nh_id,
+            ref_count: 1,
+        }
     }
 }
 
@@ -246,7 +253,10 @@ mod tests {
 
     #[test]
     fn test_ecn_mode() {
-        assert_eq!(EcnMode::parse("copy_from_outer"), Some(EcnMode::CopyFromOuter));
+        assert_eq!(
+            EcnMode::parse("copy_from_outer"),
+            Some(EcnMode::CopyFromOuter)
+        );
         assert_eq!(EcnMode::parse("standard"), Some(EcnMode::Standard));
     }
 }

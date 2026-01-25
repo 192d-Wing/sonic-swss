@@ -88,9 +88,7 @@ impl FromStr for VlanId {
             s
         };
 
-        let id: u16 = id_str
-            .parse()
-            .map_err(|_| ParseError::InvalidVlanId(0))?;
+        let id: u16 = id_str.parse().map_err(|_| ParseError::InvalidVlanId(0))?;
 
         VlanId::new(id)
     }

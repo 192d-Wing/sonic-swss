@@ -1,8 +1,8 @@
 //! FFI exports for IsolationGroupOrch.
 
+use super::orch::{IsolationGroupOrch, IsolationGroupOrchConfig};
 use std::cell::RefCell;
 use std::ffi::{c_char, CStr};
-use super::orch::{IsolationGroupOrch, IsolationGroupOrchConfig};
 
 thread_local! {
     static ISOLATION_GROUP_ORCH: RefCell<Option<Box<IsolationGroupOrch>>> = const { RefCell::new(None) };
@@ -14,7 +14,9 @@ pub extern "C" fn register_isolation_group_orch() -> bool {
         if orch.borrow().is_some() {
             return false;
         }
-        *orch.borrow_mut() = Some(Box::new(IsolationGroupOrch::new(IsolationGroupOrchConfig::default())));
+        *orch.borrow_mut() = Some(Box::new(IsolationGroupOrch::new(
+            IsolationGroupOrchConfig::default(),
+        )));
         true
     })
 }

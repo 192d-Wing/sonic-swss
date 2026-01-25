@@ -1,7 +1,7 @@
 //! FFI exports for NatOrch.
 
-use std::cell::RefCell;
 use super::orch::{NatOrch, NatOrchConfig};
+use std::cell::RefCell;
 
 thread_local! {
     static NAT_ORCH: RefCell<Option<Box<NatOrch>>> = const { RefCell::new(None) };

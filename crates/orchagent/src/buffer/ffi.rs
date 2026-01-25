@@ -1,7 +1,7 @@
 //! FFI exports for BufferOrch.
 
-use std::cell::RefCell;
 use super::orch::{BufferOrch, BufferOrchConfig};
+use std::cell::RefCell;
 
 thread_local! {
     static BUFFER_ORCH: RefCell<Option<Box<BufferOrch>>> = const { RefCell::new(None) };

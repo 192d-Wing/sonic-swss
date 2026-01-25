@@ -1,8 +1,8 @@
 //! FFI exports for SwitchOrch.
 
-use std::cell::RefCell;
-use super::orch::{SwitchOrch, SwitchOrchCallbacks, SwitchOrchConfig, Result};
+use super::orch::{Result, SwitchOrch, SwitchOrchCallbacks, SwitchOrchConfig};
 use super::types::{SwitchCapabilities, SwitchHashConfig, SwitchState};
+use std::cell::RefCell;
 
 /// FFI stub callbacks that do nothing (for C++ interop).
 struct FfiSwitchCallbacks;

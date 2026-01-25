@@ -15,5 +15,11 @@ mod orch;
 mod types;
 
 pub use ffi::{register_mplsroute_orch, unregister_mplsroute_orch};
-pub use orch::{MplsRouteOrch, MplsRouteOrchCallbacks, MplsRouteOrchConfig, MplsRouteOrchError, MplsRouteOrchStats, Result};
-pub use types::{MplsAction, MplsLabel, MplsRouteConfig, MplsRouteEntry, MplsRouteKey, MplsRouteStats, RawSaiObjectId};
+pub use orch::{
+    MplsRouteOrch, MplsRouteOrchCallbacks, MplsRouteOrchConfig, MplsRouteOrchError,
+    MplsRouteOrchStats, Result,
+};
+pub use types::{
+    MplsAction, MplsLabel, MplsRouteConfig, MplsRouteEntry, MplsRouteKey, MplsRouteStats,
+    RawSaiObjectId,
+};

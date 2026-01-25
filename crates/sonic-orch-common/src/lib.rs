@@ -44,14 +44,14 @@
 //! }
 //! ```
 
-mod orch;
 mod consumer;
+mod orch;
+mod retry;
 mod sync_map;
 mod task;
-mod retry;
 
-pub use orch::{Orch, OrchContext};
 pub use consumer::{Consumer, ConsumerConfig, KeyOpFieldsValues, Operation};
+pub use orch::{Orch, OrchContext};
+pub use retry::{Constraint, RetryCache};
 pub use sync_map::SyncMap;
-pub use task::{TaskStatus, TaskResult};
-pub use retry::{RetryCache, Constraint};
+pub use task::{TaskResult, TaskStatus};

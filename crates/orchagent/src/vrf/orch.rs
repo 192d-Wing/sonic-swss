@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::types::{L3VniEntry, Vni, VrfConfig, VrfEntry, VrfId, VrfName, VrfVlanId};
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
 use crate::audit_log;
 
 /// Error type for VRF operations.
@@ -34,7 +34,6 @@ pub enum VrfOrchError {
     #[error("Callback error: {0}")]
     CallbackError(String),
 }
-
 
 /// Callbacks for VRF operations.
 ///
@@ -282,10 +281,7 @@ impl VrfOrch {
     ///
     /// Returns -1 if not found (matching C++ behavior).
     pub fn get_vrf_ref_count(&self, name: &str) -> i32 {
-        self.vrf_table
-            .get(name)
-            .map(|e| e.ref_count)
-            .unwrap_or(-1)
+        self.vrf_table.get(name).map(|e| e.ref_count).unwrap_or(-1)
     }
 
     /// Gets the VNI mapped to a VRF.
@@ -361,24 +357,22 @@ impl VrfOrch {
 
         self.stats.vrfs_created += 1;
 
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceCreate,
-            "VrfOrch",
-            "create_vrf"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(name.clone())
-        .with_object_type("vrf")
-        .with_details(serde_json::json!({
-            "vrf_name": name,
-            "vrf_id": vrf_id,
-            "v4_enabled": entry.admin_v4_state,
-            "v6_enabled": entry.admin_v6_state,
-            "vni": config.vni,
-            "stats": {
-                "vrfs_created": self.stats.vrfs_created
-            }
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "VrfOrch", "create_vrf")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(name.clone())
+                .with_object_type("vrf")
+                .with_details(serde_json::json!({
+                    "vrf_name": name,
+                    "vrf_id": vrf_id,
+                    "v4_enabled": entry.admin_v4_state,
+                    "v6_enabled": entry.admin_v6_state,
+                    "vni": config.vni,
+                    "stats": {
+                        "vrfs_created": self.stats.vrfs_created
+                    }
+                }))
+        );
 
         Ok(vrf_id)
     }
@@ -438,15 +432,13 @@ impl VrfOrch {
 
         if entry.is_in_use() {
             let error = VrfOrchError::VrfInUse(name.to_string(), entry.ref_count);
-            audit_log!(AuditRecord::new(
-                AuditCategory::ResourceDelete,
-                "VrfOrch",
-                "remove_vrf"
-            )
-            .with_outcome(AuditOutcome::Failure)
-            .with_object_id(name.to_string())
-            .with_object_type("vrf")
-            .with_error(error.to_string()));
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceDelete, "VrfOrch", "remove_vrf")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(name.to_string())
+                    .with_object_type("vrf")
+                    .with_error(error.to_string())
+            );
             return Err(error);
         }
 
@@ -467,21 +459,19 @@ impl VrfOrch {
 
         self.stats.vrfs_removed += 1;
 
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceDelete,
-            "VrfOrch",
-            "remove_vrf"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(name.to_string())
-        .with_object_type("vrf")
-        .with_details(serde_json::json!({
-            "vrf_name": name,
-            "vrf_id": vrf_id,
-            "stats": {
-                "vrfs_removed": self.stats.vrfs_removed
-            }
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceDelete, "VrfOrch", "remove_vrf")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(name.to_string())
+                .with_object_type("vrf")
+                .with_details(serde_json::json!({
+                    "vrf_name": name,
+                    "vrf_id": vrf_id,
+                    "stats": {
+                        "vrfs_removed": self.stats.vrfs_removed
+                    }
+                }))
+        );
 
         Ok(())
     }
@@ -529,21 +519,19 @@ impl VrfOrch {
 
         self.stats.vni_mappings_created += 1;
 
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceCreate,
-            "VrfOrch",
-            "add_l3_vni"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(format!("vrf_vni_{}_{}",vrf_name, vni))
-        .with_object_type("l3_vni")
-        .with_details(serde_json::json!({
-            "vrf_name": vrf_name,
-            "vni": vni,
-            "stats": {
-                "vni_mappings_created": self.stats.vni_mappings_created
-            }
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "VrfOrch", "add_l3_vni")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("vrf_vni_{}_{}", vrf_name, vni))
+                .with_object_type("l3_vni")
+                .with_details(serde_json::json!({
+                    "vrf_name": vrf_name,
+                    "vni": vni,
+                    "stats": {
+                        "vni_mappings_created": self.stats.vni_mappings_created
+                    }
+                }))
+        );
 
         Ok(())
     }
@@ -574,21 +562,19 @@ impl VrfOrch {
 
         self.stats.vni_mappings_removed += 1;
 
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceDelete,
-            "VrfOrch",
-            "remove_l3_vni"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(format!("vrf_vni_{}_{}",vrf_name, vni))
-        .with_object_type("l3_vni")
-        .with_details(serde_json::json!({
-            "vrf_name": vrf_name,
-            "vni": vni,
-            "stats": {
-                "vni_mappings_removed": self.stats.vni_mappings_removed
-            }
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceDelete, "VrfOrch", "remove_l3_vni")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("vrf_vni_{}_{}", vrf_name, vni))
+                .with_object_type("l3_vni")
+                .with_details(serde_json::json!({
+                    "vrf_name": vrf_name,
+                    "vni": vni,
+                    "stats": {
+                        "vni_mappings_removed": self.stats.vni_mappings_removed
+                    }
+                }))
+        );
 
         Ok(())
     }
@@ -983,9 +969,7 @@ mod tests {
     fn test_ipv4_ipv6_route_table_per_vrf() {
         let mut orch = VrfOrch::new(VrfOrchConfig::default());
 
-        let config = VrfConfig::new("Vrf1")
-            .with_v4(true)
-            .with_v6(false);
+        let config = VrfConfig::new("Vrf1").with_v4(true).with_v6(false);
         orch.add_vrf(&config).unwrap();
 
         let entry = orch.get_vrf("Vrf1").unwrap();
@@ -1073,7 +1057,8 @@ mod tests {
         }
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(10000)).unwrap();
+        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(10000))
+            .unwrap();
 
         assert_eq!(orch.get_vrf_mapped_vni("Vrf1"), 10000);
         assert!(orch.is_l3_vni(10000));
@@ -1094,8 +1079,10 @@ mod tests {
         }
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(10000)).unwrap();
-        orch.add_vrf(&VrfConfig::new("Vrf2").with_vni(20000)).unwrap();
+        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(10000))
+            .unwrap();
+        orch.add_vrf(&VrfConfig::new("Vrf2").with_vni(20000))
+            .unwrap();
 
         assert_eq!(orch.get_vrf_mapped_vni("Vrf1"), 10000);
         assert_eq!(orch.get_vrf_mapped_vni("Vrf2"), 20000);
@@ -1119,12 +1106,14 @@ mod tests {
         orch.set_callbacks(Arc::new(MockCallbacks));
 
         // Create VRF with VNI
-        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(10000)).unwrap();
+        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(10000))
+            .unwrap();
         assert_eq!(orch.get_vrf_mapped_vni("Vrf1"), 10000);
         assert_eq!(orch.stats().vni_mappings_created, 1);
 
         // Update to new VNI - VRF-to-VNI map updated but old L3VNI entry remains
-        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(20000)).unwrap();
+        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(20000))
+            .unwrap();
         assert_eq!(orch.get_vrf_mapped_vni("Vrf1"), 20000);
 
         // The VRF should now be mapped to new VNI
@@ -1162,7 +1151,8 @@ mod tests {
         }
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(10000)).unwrap();
+        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(10000))
+            .unwrap();
         assert!(orch.is_l3_vni(10000));
 
         // Remove VRF should remove VNI mapping
@@ -1220,7 +1210,8 @@ mod tests {
         orch.add_vrf(&VrfConfig::new("Vrf1")).unwrap();
         assert_eq!(orch.stats().vrfs_created, 1);
 
-        orch.add_vrf(&VrfConfig::new("Vrf1").with_v4(false)).unwrap();
+        orch.add_vrf(&VrfConfig::new("Vrf1").with_v4(false))
+            .unwrap();
         assert_eq!(orch.stats().vrfs_updated, 1);
 
         orch.remove_vrf("Vrf1").unwrap();
@@ -1245,7 +1236,8 @@ mod tests {
         assert_eq!(orch.stats().vni_mappings_created, 0);
         assert_eq!(orch.stats().vni_mappings_removed, 0);
 
-        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(10000)).unwrap();
+        orch.add_vrf(&VrfConfig::new("Vrf1").with_vni(10000))
+            .unwrap();
         assert_eq!(orch.stats().vni_mappings_created, 1);
 
         orch.remove_vrf("Vrf1").unwrap();

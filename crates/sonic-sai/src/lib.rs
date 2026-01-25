@@ -25,35 +25,20 @@
 //! }
 //! ```
 
-pub mod types;
-pub mod error;
 pub mod api;
+pub mod error;
+pub mod types;
 
 // Re-export commonly used types
 pub use types::{
-    SaiObjectId, SaiObjectKind,
-    PortOid, PortKind,
-    RouterInterfaceOid, RouterInterfaceKind,
-    NextHopOid, NextHopKind,
-    NextHopGroupOid, NextHopGroupKind,
-    NextHopGroupMemberOid, NextHopGroupMemberKind,
-    AclTableOid, AclTableKind,
-    AclEntryOid, AclEntryKind,
-    VlanOid, VlanKind,
-    LagOid, LagKind,
-    LagMemberOid, LagMemberKind,
-    BridgeOid, BridgeKind,
-    BridgePortOid, BridgePortKind,
-    FdbEntryOid, FdbEntryKind,
-    NeighborEntryOid, NeighborEntryKind,
-    RouteEntryOid, RouteEntryKind,
-    SwitchOid, SwitchKind,
-    VirtualRouterOid, VirtualRouterKind,
-    BufferPoolOid, BufferPoolKind,
-    BufferProfileOid, BufferProfileKind,
-    QueueOid, QueueKind,
-    SchedulerOid, SchedulerKind,
-    IngressPriorityGroupOid, IngressPriorityGroupKind,
+    AclEntryKind, AclEntryOid, AclTableKind, AclTableOid, BridgeKind, BridgeOid, BridgePortKind,
+    BridgePortOid, BufferPoolKind, BufferPoolOid, BufferProfileKind, BufferProfileOid,
+    FdbEntryKind, FdbEntryOid, IngressPriorityGroupKind, IngressPriorityGroupOid, LagKind,
+    LagMemberKind, LagMemberOid, LagOid, NeighborEntryKind, NeighborEntryOid, NextHopGroupKind,
+    NextHopGroupMemberKind, NextHopGroupMemberOid, NextHopGroupOid, NextHopKind, NextHopOid,
+    PortKind, PortOid, QueueKind, QueueOid, RouteEntryKind, RouteEntryOid, RouterInterfaceKind,
+    RouterInterfaceOid, SaiObjectId, SaiObjectKind, SchedulerKind, SchedulerOid, SwitchKind,
+    SwitchOid, VirtualRouterKind, VirtualRouterOid, VlanKind, VlanOid,
 };
 
 pub use error::{SaiError, SaiResult, SaiStatus};

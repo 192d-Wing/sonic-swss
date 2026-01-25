@@ -63,10 +63,8 @@ impl PreparedDataset {
             compute_distribution(&spec);
 
         for (idx, tmpl) in spec.templates.iter().enumerate() {
-            let tmpl_bytes = ipfix_test_helpers::generate_ipfix_templates(
-                tmpl.counters,
-                tmpl.template_id,
-            );
+            let tmpl_bytes =
+                ipfix_test_helpers::generate_ipfix_templates(tmpl.counters, tmpl.template_id);
             key_to_templates
                 .entry(tmpl.key.clone())
                 .or_default()

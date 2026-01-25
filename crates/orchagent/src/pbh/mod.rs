@@ -15,6 +15,6 @@ mod types;
 pub use ffi::{register_pbh_orch, unregister_pbh_orch};
 pub use orch::{PbhOrch, PbhOrchCallbacks, PbhOrchConfig, PbhOrchError, PbhOrchStats};
 pub use types::{
-    PbhHashConfig, PbhHashEntry, PbhHashField, PbhPacketAction,
-    PbhRuleConfig, PbhRuleEntry, PbhStats, PbhTableConfig, PbhTableEntry,
+    PbhHashConfig, PbhHashEntry, PbhHashField, PbhPacketAction, PbhRuleConfig, PbhRuleEntry,
+    PbhStats, PbhTableConfig, PbhTableEntry,
 };

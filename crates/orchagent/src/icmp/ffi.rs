@@ -1,8 +1,8 @@
 //! FFI exports for IcmpOrch.
 
-use std::cell::RefCell;
 use super::orch::{IcmpOrch, IcmpOrchCallbacks, IcmpOrchConfig, Result};
-use super::types::{IcmpRedirectConfig, NeighborDiscoveryConfig, IcmpStats};
+use super::types::{IcmpRedirectConfig, IcmpStats, NeighborDiscoveryConfig};
+use std::cell::RefCell;
 
 /// FFI stub callbacks that do nothing (for C++ interop).
 struct FfiIcmpCallbacks;

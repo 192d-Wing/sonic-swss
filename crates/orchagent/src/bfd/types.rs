@@ -446,11 +446,20 @@ mod tests {
     fn test_bfd_session_state() {
         assert_eq!(BfdSessionState::Down.sai_value(), 1);
         assert_eq!(BfdSessionState::Up.sai_value(), 3);
-        assert_eq!(BfdSessionState::from_sai_value(3), Some(BfdSessionState::Up));
+        assert_eq!(
+            BfdSessionState::from_sai_value(3),
+            Some(BfdSessionState::Up)
+        );
         assert_eq!(BfdSessionState::from_sai_value(99), None);
 
-        assert_eq!("up".parse::<BfdSessionState>().unwrap(), BfdSessionState::Up);
-        assert_eq!("Down".parse::<BfdSessionState>().unwrap(), BfdSessionState::Down);
+        assert_eq!(
+            "up".parse::<BfdSessionState>().unwrap(),
+            BfdSessionState::Up
+        );
+        assert_eq!(
+            "Down".parse::<BfdSessionState>().unwrap(),
+            BfdSessionState::Down
+        );
     }
 
     #[test]
@@ -497,11 +506,7 @@ mod tests {
         assert_eq!(key.to_state_db_key(), "default|Ethernet0|10.0.0.1");
 
         // Multihop
-        let key = BfdSessionKey::new(
-            "default",
-            None,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-        );
+        let key = BfdSessionKey::new("default", None, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         assert_eq!(key.to_config_key(), "default::10.0.0.1");
         assert_eq!(key.to_state_db_key(), "default|10.0.0.1");
     }
@@ -531,7 +536,9 @@ mod tests {
         config.parse_field("type", "demand_active").unwrap();
         assert_eq!(config.session_type, BfdSessionType::DemandActive);
 
-        config.parse_field("shutdown_bfd_during_tsa", "true").unwrap();
+        config
+            .parse_field("shutdown_bfd_during_tsa", "true")
+            .unwrap();
         assert!(config.shutdown_bfd_during_tsa);
 
         config.parse_field("local_addr", "192.168.1.1").unwrap();

@@ -183,7 +183,11 @@ impl std::str::FromStr for PortAdminState {
 
 impl From<bool> for PortAdminState {
     fn from(v: bool) -> Self {
-        if v { Self::Up } else { Self::Down }
+        if v {
+            Self::Up
+        } else {
+            Self::Down
+        }
     }
 }
 
@@ -621,7 +625,7 @@ impl Default for Port {
             fec_mode: PortFecMode::default(),
             autoneg: PortAutoNegMode::default(),
             link_training: PortLinkTrainingMode::default(),
-            mtu: 9100, // Default MTU
+            mtu: 9100,    // Default MTU
             tpid: 0x8100, // Default VLAN TPID
             preemphasis: None,
             serdes_lane_config: HashMap::new(),

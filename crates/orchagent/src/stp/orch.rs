@@ -1,11 +1,11 @@
 //! STP orchestration logic.
 
 use super::types::{SaiStpPortState, StpInstanceEntry, StpPortIds, StpState};
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
 use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
-use crate::audit_log;
 
 /// STP orchestrator error types.
 #[derive(Debug, Clone, thiserror::Error)]
@@ -53,10 +53,23 @@ pub trait StpOrchCallbacks: Send + Sync {
     fn get_port_bridge_port_id(&self, alias: &str) -> Option<RawSaiObjectId>;
     fn create_stp_instance(&self) -> Result<RawSaiObjectId, String>;
     fn remove_stp_instance(&self, oid: RawSaiObjectId) -> Result<(), String>;
-    fn set_vlan_stp_instance(&self, vlan_alias: &str, stp_inst_oid: RawSaiObjectId) -> Result<(), String>;
-    fn create_stp_port(&self, bridge_port_id: RawSaiObjectId, stp_inst_oid: RawSaiObjectId, state: SaiStpPortState) -> Result<RawSaiObjectId, String>;
+    fn set_vlan_stp_instance(
+        &self,
+        vlan_alias: &str,
+        stp_inst_oid: RawSaiObjectId,
+    ) -> Result<(), String>;
+    fn create_stp_port(
+        &self,
+        bridge_port_id: RawSaiObjectId,
+        stp_inst_oid: RawSaiObjectId,
+        state: SaiStpPortState,
+    ) -> Result<RawSaiObjectId, String>;
     fn remove_stp_port(&self, stp_port_oid: RawSaiObjectId) -> Result<(), String>;
-    fn set_stp_port_state(&self, stp_port_oid: RawSaiObjectId, state: SaiStpPortState) -> Result<(), String>;
+    fn set_stp_port_state(
+        &self,
+        stp_port_oid: RawSaiObjectId,
+        state: SaiStpPortState,
+    ) -> Result<(), String>;
     fn flush_fdb_by_vlan(&self, vlan_alias: &str) -> Result<(), String>;
     fn ensure_bridge_port(&self, port_alias: &str) -> Result<RawSaiObjectId, String>;
 }
@@ -131,10 +144,13 @@ impl StpOrch {
             return Ok(*oid);
         }
 
-        let callbacks = self.callbacks.as_ref()
+        let callbacks = self
+            .callbacks
+            .as_ref()
             .ok_or_else(|| StpOrchError::SaiError("No callbacks set".to_string()))?;
 
-        let stp_oid = callbacks.create_stp_instance()
+        let stp_oid = callbacks
+            .create_stp_instance()
             .map_err(StpOrchError::SaiError)?;
 
         self.stp_inst_to_oid.insert(instance, stp_oid);
@@ -161,14 +177,19 @@ impl StpOrch {
 
     /// Removes STP instance.
     pub fn remove_instance(&mut self, instance: u16) -> Result<(), StpOrchError> {
-        let stp_oid = self.stp_inst_to_oid.get(&instance)
+        let stp_oid = self
+            .stp_inst_to_oid
+            .get(&instance)
             .copied()
             .ok_or(StpOrchError::InstanceNotFound(instance))?;
 
-        let callbacks = self.callbacks.as_ref()
+        let callbacks = self
+            .callbacks
+            .as_ref()
             .ok_or_else(|| StpOrchError::SaiError("No callbacks set".to_string()))?;
 
-        callbacks.remove_stp_instance(stp_oid)
+        callbacks
+            .remove_stp_instance(stp_oid)
             .map_err(StpOrchError::SaiError)?;
 
         self.stp_inst_to_oid.remove(&instance);
@@ -195,7 +216,11 @@ impl StpOrch {
     }
 
     /// Adds VLAN to STP instance.
-    pub fn add_vlan_to_instance(&mut self, vlan_alias: &str, instance: u16) -> Result<(), StpOrchError> {
+    pub fn add_vlan_to_instance(
+        &mut self,
+        vlan_alias: &str,
+        instance: u16,
+    ) -> Result<(), StpOrchError> {
         // Lazy-create instance if needed
         let stp_inst_oid = if let Some(oid) = self.get_instance_oid(instance) {
             oid
@@ -203,11 +228,14 @@ impl StpOrch {
             self.add_instance(instance)?
         };
 
-        let callbacks = self.callbacks.as_ref()
+        let callbacks = self
+            .callbacks
+            .as_ref()
             .ok_or_else(|| StpOrchError::SaiError("No callbacks set".to_string()))?;
 
         // Set VLAN attribute
-        callbacks.set_vlan_stp_instance(vlan_alias, stp_inst_oid)
+        callbacks
+            .set_vlan_stp_instance(vlan_alias, stp_inst_oid)
             .map_err(StpOrchError::SaiError)?;
 
         // Track VLAN in instance
@@ -220,12 +248,19 @@ impl StpOrch {
     }
 
     /// Removes VLAN from STP instance.
-    pub fn remove_vlan_from_instance(&mut self, vlan_alias: &str, instance: u16) -> Result<(), StpOrchError> {
-        let callbacks = self.callbacks.as_ref()
+    pub fn remove_vlan_from_instance(
+        &mut self,
+        vlan_alias: &str,
+        instance: u16,
+    ) -> Result<(), StpOrchError> {
+        let callbacks = self
+            .callbacks
+            .as_ref()
             .ok_or_else(|| StpOrchError::SaiError("No callbacks set".to_string()))?;
 
         // Reset to default instance
-        callbacks.set_vlan_stp_instance(vlan_alias, self.default_stp_id)
+        callbacks
+            .set_vlan_stp_instance(vlan_alias, self.default_stp_id)
             .map_err(StpOrchError::SaiError)?;
 
         // Remove from tracking
@@ -248,22 +283,24 @@ impl StpOrch {
             return Ok(*existing);
         }
 
-        let stp_inst_oid = self.get_instance_oid(instance)
+        let stp_inst_oid = self
+            .get_instance_oid(instance)
             .ok_or(StpOrchError::InstanceNotFound(instance))?;
 
-        let callbacks = self.callbacks.as_ref()
+        let callbacks = self
+            .callbacks
+            .as_ref()
             .ok_or_else(|| StpOrchError::SaiError("No callbacks set".to_string()))?;
 
         // Ensure bridge port exists
-        let bridge_port_id = callbacks.ensure_bridge_port(port_alias)
+        let bridge_port_id = callbacks
+            .ensure_bridge_port(port_alias)
             .map_err(StpOrchError::SaiError)?;
 
         // Create STP port with blocking state
-        let stp_port_oid = callbacks.create_stp_port(
-            bridge_port_id,
-            stp_inst_oid,
-            SaiStpPortState::Blocking,
-        ).map_err(StpOrchError::SaiError)?;
+        let stp_port_oid = callbacks
+            .create_stp_port(bridge_port_id, stp_inst_oid, SaiStpPortState::Blocking)
+            .map_err(StpOrchError::SaiError)?;
 
         stp_port_ids.insert(instance, stp_port_oid);
         self.stats.ports_created += 1;
@@ -277,14 +314,18 @@ impl StpOrch {
         instance: u16,
         stp_port_ids: &mut StpPortIds,
     ) -> Result<(), StpOrchError> {
-        let stp_port_oid = stp_port_ids.get(&instance)
+        let stp_port_oid = stp_port_ids
+            .get(&instance)
             .copied()
             .ok_or(StpOrchError::StpPortNotFound(instance))?;
 
-        let callbacks = self.callbacks.as_ref()
+        let callbacks = self
+            .callbacks
+            .as_ref()
             .ok_or_else(|| StpOrchError::SaiError("No callbacks set".to_string()))?;
 
-        callbacks.remove_stp_port(stp_port_oid)
+        callbacks
+            .remove_stp_port(stp_port_oid)
             .map_err(StpOrchError::SaiError)?;
 
         stp_port_ids.remove(&instance);
@@ -308,11 +349,14 @@ impl StpOrch {
             self.add_stp_port(port_alias, instance, stp_port_ids)?
         };
 
-        let callbacks = self.callbacks.as_ref()
+        let callbacks = self
+            .callbacks
+            .as_ref()
             .ok_or_else(|| StpOrchError::SaiError("No callbacks set".to_string()))?;
 
         let sai_state = state.to_sai_state();
-        callbacks.set_stp_port_state(stp_port_oid, sai_state)
+        callbacks
+            .set_stp_port_state(stp_port_oid, sai_state)
             .map_err(StpOrchError::SaiError)?;
 
         self.stats.state_updates += 1;
@@ -340,10 +384,13 @@ impl StpOrch {
 
     /// Flushes FDB for a VLAN.
     pub fn flush_fdb_vlan(&mut self, vlan_alias: &str) -> Result<(), StpOrchError> {
-        let callbacks = self.callbacks.as_ref()
+        let callbacks = self
+            .callbacks
+            .as_ref()
             .ok_or_else(|| StpOrchError::SaiError("No callbacks set".to_string()))?;
 
-        callbacks.flush_fdb_by_vlan(vlan_alias)
+        callbacks
+            .flush_fdb_by_vlan(vlan_alias)
             .map_err(StpOrchError::SaiError)?;
 
         self.stats.fdb_flushes += 1;
@@ -410,13 +457,25 @@ mod tests {
             Ok(())
         }
 
-        fn set_vlan_stp_instance(&self, _vlan_alias: &str, _stp_inst_oid: RawSaiObjectId) -> Result<(), String> {
+        fn set_vlan_stp_instance(
+            &self,
+            _vlan_alias: &str,
+            _stp_inst_oid: RawSaiObjectId,
+        ) -> Result<(), String> {
             Ok(())
         }
 
-        fn create_stp_port(&self, bridge_port_id: RawSaiObjectId, stp_inst_oid: RawSaiObjectId, state: SaiStpPortState) -> Result<RawSaiObjectId, String> {
+        fn create_stp_port(
+            &self,
+            bridge_port_id: RawSaiObjectId,
+            stp_inst_oid: RawSaiObjectId,
+            state: SaiStpPortState,
+        ) -> Result<RawSaiObjectId, String> {
             let oid = self.next_id();
-            self.created_ports.lock().unwrap().push((bridge_port_id, stp_inst_oid, state));
+            self.created_ports
+                .lock()
+                .unwrap()
+                .push((bridge_port_id, stp_inst_oid, state));
             Ok(oid)
         }
 
@@ -424,7 +483,11 @@ mod tests {
             Ok(())
         }
 
-        fn set_stp_port_state(&self, _stp_port_oid: RawSaiObjectId, _state: SaiStpPortState) -> Result<(), String> {
+        fn set_stp_port_state(
+            &self,
+            _stp_port_oid: RawSaiObjectId,
+            _state: SaiStpPortState,
+        ) -> Result<(), String> {
             Ok(())
         }
 
@@ -475,7 +538,9 @@ mod tests {
         orch.add_instance(1).unwrap();
 
         let mut stp_port_ids = HashMap::new();
-        let port_oid = orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids).unwrap();
+        let port_oid = orch
+            .add_stp_port("Ethernet0", 1, &mut stp_port_ids)
+            .unwrap();
 
         assert_eq!(stp_port_ids.get(&1), Some(&port_oid));
 
@@ -497,7 +562,8 @@ mod tests {
         orch.add_instance(1).unwrap();
 
         let mut stp_port_ids = HashMap::new();
-        orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids).unwrap();
+        orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids)
+            .unwrap();
 
         assert!(stp_port_ids.contains_key(&1));
         assert_eq!(orch.stats().state_updates, 1);
@@ -610,7 +676,8 @@ mod tests {
         orch.add_instance(1).unwrap();
 
         let mut stp_port_ids = HashMap::new();
-        orch.update_port_state("Ethernet0", 1, StpState::Disabled, &mut stp_port_ids).unwrap();
+        orch.update_port_state("Ethernet0", 1, StpState::Disabled, &mut stp_port_ids)
+            .unwrap();
 
         assert!(stp_port_ids.contains_key(&1));
         assert_eq!(orch.stats().state_updates, 1);
@@ -626,7 +693,8 @@ mod tests {
         orch.add_instance(1).unwrap();
 
         let mut stp_port_ids = HashMap::new();
-        orch.update_port_state("Ethernet0", 1, StpState::Blocking, &mut stp_port_ids).unwrap();
+        orch.update_port_state("Ethernet0", 1, StpState::Blocking, &mut stp_port_ids)
+            .unwrap();
 
         assert!(stp_port_ids.contains_key(&1));
     }
@@ -641,7 +709,8 @@ mod tests {
         orch.add_instance(1).unwrap();
 
         let mut stp_port_ids = HashMap::new();
-        orch.update_port_state("Ethernet0", 1, StpState::Learning, &mut stp_port_ids).unwrap();
+        orch.update_port_state("Ethernet0", 1, StpState::Learning, &mut stp_port_ids)
+            .unwrap();
 
         assert!(stp_port_ids.contains_key(&1));
     }
@@ -658,13 +727,16 @@ mod tests {
         let mut stp_port_ids = HashMap::new();
 
         // Transition: Blocking -> Learning -> Forwarding
-        orch.update_port_state("Ethernet0", 1, StpState::Blocking, &mut stp_port_ids).unwrap();
+        orch.update_port_state("Ethernet0", 1, StpState::Blocking, &mut stp_port_ids)
+            .unwrap();
         assert_eq!(orch.stats().state_updates, 1);
 
-        orch.update_port_state("Ethernet0", 1, StpState::Learning, &mut stp_port_ids).unwrap();
+        orch.update_port_state("Ethernet0", 1, StpState::Learning, &mut stp_port_ids)
+            .unwrap();
         assert_eq!(orch.stats().state_updates, 2);
 
-        orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids).unwrap();
+        orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids)
+            .unwrap();
         assert_eq!(orch.stats().state_updates, 3);
     }
 
@@ -682,8 +754,10 @@ mod tests {
         let mut stp_port_ids = HashMap::new();
 
         // Same port, different VLANs/instances, different states
-        orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids).unwrap();
-        orch.update_port_state("Ethernet0", 2, StpState::Blocking, &mut stp_port_ids).unwrap();
+        orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids)
+            .unwrap();
+        orch.update_port_state("Ethernet0", 2, StpState::Blocking, &mut stp_port_ids)
+            .unwrap();
 
         // Should have two STP port entries
         assert_eq!(stp_port_ids.len(), 2);
@@ -705,14 +779,19 @@ mod tests {
         let mut stp_port_ids_eth2 = HashMap::new();
 
         // Add multiple ports to same instance
-        orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids_eth0).unwrap();
-        orch.add_stp_port("Ethernet1", 1, &mut stp_port_ids_eth1).unwrap();
-        orch.add_stp_port("Ethernet2", 1, &mut stp_port_ids_eth2).unwrap();
+        orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids_eth0)
+            .unwrap();
+        orch.add_stp_port("Ethernet1", 1, &mut stp_port_ids_eth1)
+            .unwrap();
+        orch.add_stp_port("Ethernet2", 1, &mut stp_port_ids_eth2)
+            .unwrap();
 
         // All ports created with blocking state
         let created = callbacks.created_ports.lock().unwrap();
         assert_eq!(created.len(), 3);
-        assert!(created.iter().all(|(_, _, state)| *state == SaiStpPortState::Blocking));
+        assert!(created
+            .iter()
+            .all(|(_, _, state)| *state == SaiStpPortState::Blocking));
     }
 
     // VLAN Configuration Tests
@@ -800,7 +879,8 @@ mod tests {
         orch.add_instance(1).unwrap();
 
         let mut stp_port_ids = HashMap::new();
-        orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids).unwrap();
+        orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids)
+            .unwrap();
 
         let created = callbacks.created_ports.lock().unwrap();
         assert_eq!(created.len(), 1);
@@ -817,8 +897,12 @@ mod tests {
         orch.add_instance(1).unwrap();
 
         let mut stp_port_ids = HashMap::new();
-        let oid1 = orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids).unwrap();
-        let oid2 = orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids).unwrap();
+        let oid1 = orch
+            .add_stp_port("Ethernet0", 1, &mut stp_port_ids)
+            .unwrap();
+        let oid2 = orch
+            .add_stp_port("Ethernet0", 1, &mut stp_port_ids)
+            .unwrap();
 
         // Should return existing OID
         assert_eq!(oid1, oid2);
@@ -835,7 +919,8 @@ mod tests {
         orch.add_instance(1).unwrap();
 
         let mut stp_port_ids = HashMap::new();
-        orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids).unwrap();
+        orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids)
+            .unwrap();
         assert_eq!(orch.stats().ports_created, 1);
 
         orch.remove_stp_port(1, &mut stp_port_ids).unwrap();
@@ -870,9 +955,12 @@ mod tests {
         let mut stp_port_ids = HashMap::new();
 
         // Same port in multiple instances
-        orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids).unwrap();
-        orch.add_stp_port("Ethernet0", 2, &mut stp_port_ids).unwrap();
-        orch.add_stp_port("Ethernet0", 3, &mut stp_port_ids).unwrap();
+        orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids)
+            .unwrap();
+        orch.add_stp_port("Ethernet0", 2, &mut stp_port_ids)
+            .unwrap();
+        orch.add_stp_port("Ethernet0", 3, &mut stp_port_ids)
+            .unwrap();
 
         assert_eq!(stp_port_ids.len(), 3);
         assert!(stp_port_ids.contains_key(&1));
@@ -897,13 +985,17 @@ mod tests {
         // Create ports
         let mut stp_port_ids1 = HashMap::new();
         let mut stp_port_ids2 = HashMap::new();
-        orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids1).unwrap();
-        orch.add_stp_port("Ethernet1", 2, &mut stp_port_ids2).unwrap();
+        orch.add_stp_port("Ethernet0", 1, &mut stp_port_ids1)
+            .unwrap();
+        orch.add_stp_port("Ethernet1", 2, &mut stp_port_ids2)
+            .unwrap();
         assert_eq!(orch.stats().ports_created, 2);
 
         // Update states
-        orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids1).unwrap();
-        orch.update_port_state("Ethernet1", 2, StpState::Learning, &mut stp_port_ids2).unwrap();
+        orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids1)
+            .unwrap();
+        orch.update_port_state("Ethernet1", 2, StpState::Learning, &mut stp_port_ids2)
+            .unwrap();
         assert_eq!(orch.stats().state_updates, 2);
 
         // Remove ports
@@ -990,9 +1082,12 @@ mod tests {
 
         // Rapid state changes
         for _ in 0..10 {
-            orch.update_port_state("Ethernet0", 1, StpState::Blocking, &mut stp_port_ids).unwrap();
-            orch.update_port_state("Ethernet0", 1, StpState::Learning, &mut stp_port_ids).unwrap();
-            orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids).unwrap();
+            orch.update_port_state("Ethernet0", 1, StpState::Blocking, &mut stp_port_ids)
+                .unwrap();
+            orch.update_port_state("Ethernet0", 1, StpState::Learning, &mut stp_port_ids)
+                .unwrap();
+            orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids)
+                .unwrap();
         }
 
         assert_eq!(orch.stats().state_updates, 30);
@@ -1027,7 +1122,8 @@ mod tests {
         let mut stp_port_ids = HashMap::new();
 
         // Update state without explicitly creating port (lazy creation)
-        orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids).unwrap();
+        orch.update_port_state("Ethernet0", 1, StpState::Forwarding, &mut stp_port_ids)
+            .unwrap();
 
         // Port should be created automatically
         assert!(stp_port_ids.contains_key(&1));

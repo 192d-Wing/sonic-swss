@@ -2,7 +2,7 @@
 
 use super::types::{MirrorEntry, MirrorSessionConfig, MirrorSessionType, RawSaiObjectId};
 use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
-use crate::{audit_log, debug_log, info_log, warn_log, error_log};
+use crate::{audit_log, debug_log, error_log, info_log, warn_log};
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -50,8 +50,15 @@ pub struct MirrorOrchStats {
 pub trait MirrorOrchCallbacks: Send + Sync {
     fn create_mirror_session(&self, config: &MirrorSessionConfig) -> Result<RawSaiObjectId>;
     fn remove_mirror_session(&self, session_id: RawSaiObjectId) -> Result<()>;
-    fn update_mirror_session(&self, session_id: RawSaiObjectId, config: &MirrorSessionConfig) -> Result<()>;
-    fn get_mirror_sessions_by_type(&self, session_type: MirrorSessionType) -> Result<Vec<RawSaiObjectId>>;
+    fn update_mirror_session(
+        &self,
+        session_id: RawSaiObjectId,
+        config: &MirrorSessionConfig,
+    ) -> Result<()>;
+    fn get_mirror_sessions_by_type(
+        &self,
+        session_type: MirrorSessionType,
+    ) -> Result<Vec<RawSaiObjectId>>;
     fn on_session_created(&self, name: &str, session_id: RawSaiObjectId);
     fn on_session_removed(&self, name: &str);
 }
@@ -78,7 +85,11 @@ impl<C: MirrorOrchCallbacks> MirrorOrch<C> {
         self
     }
 
-    pub fn create_session(&mut self, name: String, config: MirrorSessionConfig) -> Result<RawSaiObjectId> {
+    pub fn create_session(
+        &mut self,
+        name: String,
+        config: MirrorSessionConfig,
+    ) -> Result<RawSaiObjectId> {
         debug_log!("MirrorOrch", session_name = %name, session_type = ?config.session_type, "Creating mirror session");
 
         if self.sessions.contains_key(&name) {
@@ -275,21 +286,29 @@ impl<C: MirrorOrchCallbacks> MirrorOrch<C> {
     }
 
     pub fn increment_ref_count(&mut self, name: &str) -> Result<u32> {
-        let entry = self.sessions.get_mut(name)
+        let entry = self
+            .sessions
+            .get_mut(name)
             .ok_or_else(|| MirrorOrchError::SessionNotFound(name.to_string()))?;
         entry.ref_count = entry.ref_count.saturating_add(1);
         Ok(entry.ref_count)
     }
 
     pub fn decrement_ref_count(&mut self, name: &str) -> Result<u32> {
-        let entry = self.sessions.get_mut(name)
+        let entry = self
+            .sessions
+            .get_mut(name)
             .ok_or_else(|| MirrorOrchError::SessionNotFound(name.to_string()))?;
         entry.ref_count = entry.ref_count.saturating_sub(1);
         Ok(entry.ref_count)
     }
 
-    pub fn get_sessions_by_type(&self, session_type: MirrorSessionType) -> Vec<(String, &MirrorEntry)> {
-        self.sessions.iter()
+    pub fn get_sessions_by_type(
+        &self,
+        session_type: MirrorSessionType,
+    ) -> Vec<(String, &MirrorEntry)> {
+        self.sessions
+            .iter()
             .filter(|(_, entry)| entry.config.session_type == session_type)
             .map(|(k, v)| (k.clone(), v))
             .collect()
@@ -302,8 +321,8 @@ impl<C: MirrorOrchCallbacks> MirrorOrch<C> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::MirrorDirection;
+    use super::*;
 
     struct MockMirrorCallbacks;
 
@@ -316,11 +335,18 @@ mod tests {
             Ok(())
         }
 
-        fn update_mirror_session(&self, _session_id: RawSaiObjectId, _config: &MirrorSessionConfig) -> Result<()> {
+        fn update_mirror_session(
+            &self,
+            _session_id: RawSaiObjectId,
+            _config: &MirrorSessionConfig,
+        ) -> Result<()> {
             Ok(())
         }
 
-        fn get_mirror_sessions_by_type(&self, _session_type: MirrorSessionType) -> Result<Vec<RawSaiObjectId>> {
+        fn get_mirror_sessions_by_type(
+            &self,
+            _session_type: MirrorSessionType,
+        ) -> Result<Vec<RawSaiObjectId>> {
             Ok(vec![])
         }
 
@@ -330,8 +356,9 @@ mod tests {
 
     #[test]
     fn test_create_session() {
-        let mut orch: MirrorOrch<MockMirrorCallbacks> = MirrorOrch::new(MirrorOrchConfig::default())
-            .with_callbacks(Arc::new(MockMirrorCallbacks));
+        let mut orch: MirrorOrch<MockMirrorCallbacks> =
+            MirrorOrch::new(MirrorOrchConfig::default())
+                .with_callbacks(Arc::new(MockMirrorCallbacks));
 
         let config = MirrorSessionConfig {
             session_type: MirrorSessionType::Span,
@@ -349,8 +376,9 @@ mod tests {
 
     #[test]
     fn test_create_duplicate_session() {
-        let mut orch: MirrorOrch<MockMirrorCallbacks> = MirrorOrch::new(MirrorOrchConfig::default())
-            .with_callbacks(Arc::new(MockMirrorCallbacks));
+        let mut orch: MirrorOrch<MockMirrorCallbacks> =
+            MirrorOrch::new(MirrorOrchConfig::default())
+                .with_callbacks(Arc::new(MockMirrorCallbacks));
 
         let config = MirrorSessionConfig {
             session_type: MirrorSessionType::Span,
@@ -360,14 +388,17 @@ mod tests {
             dst_ip: None,
         };
 
-        assert!(orch.create_session("session1".into(), config.clone()).is_ok());
+        assert!(orch
+            .create_session("session1".into(), config.clone())
+            .is_ok());
         assert!(orch.create_session("session1".into(), config).is_err());
     }
 
     #[test]
     fn test_remove_session() {
-        let mut orch: MirrorOrch<MockMirrorCallbacks> = MirrorOrch::new(MirrorOrchConfig::default())
-            .with_callbacks(Arc::new(MockMirrorCallbacks));
+        let mut orch: MirrorOrch<MockMirrorCallbacks> =
+            MirrorOrch::new(MirrorOrchConfig::default())
+                .with_callbacks(Arc::new(MockMirrorCallbacks));
 
         let config = MirrorSessionConfig {
             session_type: MirrorSessionType::Span,
@@ -387,8 +418,9 @@ mod tests {
 
     #[test]
     fn test_update_session() {
-        let mut orch: MirrorOrch<MockMirrorCallbacks> = MirrorOrch::new(MirrorOrchConfig::default())
-            .with_callbacks(Arc::new(MockMirrorCallbacks));
+        let mut orch: MirrorOrch<MockMirrorCallbacks> =
+            MirrorOrch::new(MirrorOrchConfig::default())
+                .with_callbacks(Arc::new(MockMirrorCallbacks));
 
         let config = MirrorSessionConfig {
             session_type: MirrorSessionType::Span,
@@ -415,8 +447,9 @@ mod tests {
 
     #[test]
     fn test_get_session() {
-        let mut orch: MirrorOrch<MockMirrorCallbacks> = MirrorOrch::new(MirrorOrchConfig::default())
-            .with_callbacks(Arc::new(MockMirrorCallbacks));
+        let mut orch: MirrorOrch<MockMirrorCallbacks> =
+            MirrorOrch::new(MirrorOrchConfig::default())
+                .with_callbacks(Arc::new(MockMirrorCallbacks));
 
         let config = MirrorSessionConfig {
             session_type: MirrorSessionType::Span,
@@ -433,8 +466,9 @@ mod tests {
 
     #[test]
     fn test_ref_count_operations() {
-        let mut orch: MirrorOrch<MockMirrorCallbacks> = MirrorOrch::new(MirrorOrchConfig::default())
-            .with_callbacks(Arc::new(MockMirrorCallbacks));
+        let mut orch: MirrorOrch<MockMirrorCallbacks> =
+            MirrorOrch::new(MirrorOrchConfig::default())
+                .with_callbacks(Arc::new(MockMirrorCallbacks));
 
         let config = MirrorSessionConfig {
             session_type: MirrorSessionType::Span,
@@ -452,8 +486,9 @@ mod tests {
 
     #[test]
     fn test_get_sessions_by_type() {
-        let mut orch: MirrorOrch<MockMirrorCallbacks> = MirrorOrch::new(MirrorOrchConfig::default())
-            .with_callbacks(Arc::new(MockMirrorCallbacks));
+        let mut orch: MirrorOrch<MockMirrorCallbacks> =
+            MirrorOrch::new(MirrorOrchConfig::default())
+                .with_callbacks(Arc::new(MockMirrorCallbacks));
 
         let span_config = MirrorSessionConfig {
             session_type: MirrorSessionType::Span,
@@ -471,7 +506,9 @@ mod tests {
             dst_ip: None,
         };
 
-        assert!(orch.create_session("span1".into(), span_config.clone()).is_ok());
+        assert!(orch
+            .create_session("span1".into(), span_config.clone())
+            .is_ok());
         assert!(orch.create_session("span2".into(), span_config).is_ok());
         assert!(orch.create_session("erspan1".into(), erspan_config).is_ok());
 
@@ -484,8 +521,9 @@ mod tests {
 
     #[test]
     fn test_get_all_sessions() {
-        let mut orch: MirrorOrch<MockMirrorCallbacks> = MirrorOrch::new(MirrorOrchConfig::default())
-            .with_callbacks(Arc::new(MockMirrorCallbacks));
+        let mut orch: MirrorOrch<MockMirrorCallbacks> =
+            MirrorOrch::new(MirrorOrchConfig::default())
+                .with_callbacks(Arc::new(MockMirrorCallbacks));
 
         let config = MirrorSessionConfig {
             session_type: MirrorSessionType::Span,
@@ -495,7 +533,9 @@ mod tests {
             dst_ip: None,
         };
 
-        assert!(orch.create_session("session1".into(), config.clone()).is_ok());
+        assert!(orch
+            .create_session("session1".into(), config.clone())
+            .is_ok());
         assert!(orch.create_session("session2".into(), config).is_ok());
 
         let all = orch.get_all_sessions();
@@ -504,8 +544,9 @@ mod tests {
 
     #[test]
     fn test_session_exists() {
-        let mut orch: MirrorOrch<MockMirrorCallbacks> = MirrorOrch::new(MirrorOrchConfig::default())
-            .with_callbacks(Arc::new(MockMirrorCallbacks));
+        let mut orch: MirrorOrch<MockMirrorCallbacks> =
+            MirrorOrch::new(MirrorOrchConfig::default())
+                .with_callbacks(Arc::new(MockMirrorCallbacks));
 
         let config = MirrorSessionConfig {
             session_type: MirrorSessionType::Span,

@@ -1,9 +1,9 @@
 //! FFI exports for FdbOrch.
 
-use std::cell::RefCell;
-use std::sync::Arc;
 use super::orch::{FdbOrch, FdbOrchCallbacks, FdbOrchConfig, Result};
 use super::types::{FdbEntry, FdbKey};
+use std::cell::RefCell;
+use std::sync::Arc;
 
 /// Stub FFI callbacks for FdbOrch.
 /// These are placeholder implementations used by FFI. In production,
@@ -64,8 +64,8 @@ pub extern "C" fn register_fdb_orch() -> bool {
         if orch.borrow().is_some() {
             return false;
         }
-        let fdb_orch = FdbOrch::new(FdbOrchConfig::default())
-            .with_callbacks(Arc::new(FdbOrchFfiCallbacks));
+        let fdb_orch =
+            FdbOrch::new(FdbOrchConfig::default()).with_callbacks(Arc::new(FdbOrchFfiCallbacks));
         *orch.borrow_mut() = Some(Box::new(fdb_orch));
         true
     })

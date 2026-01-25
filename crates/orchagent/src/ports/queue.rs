@@ -178,11 +178,7 @@ pub struct SchedulerGroupInfo {
 
 impl SchedulerGroupInfo {
     /// Creates a new scheduler group info entry.
-    pub fn new(
-        scheduler_group_id: RawSaiObjectId,
-        level: u32,
-        port_id: RawSaiObjectId,
-    ) -> Self {
+    pub fn new(scheduler_group_id: RawSaiObjectId, level: u32, port_id: RawSaiObjectId) -> Self {
         Self {
             scheduler_group_id,
             level,
@@ -241,15 +237,24 @@ mod tests {
     #[test]
     fn test_queue_type_parse() {
         assert_eq!("UC".parse::<QueueType>().unwrap(), QueueType::Unicast);
-        assert_eq!("MULTICAST".parse::<QueueType>().unwrap(), QueueType::Multicast);
+        assert_eq!(
+            "MULTICAST".parse::<QueueType>().unwrap(),
+            QueueType::Multicast
+        );
         assert_eq!("ALL".parse::<QueueType>().unwrap(), QueueType::All);
     }
 
     #[test]
     fn test_scheduler_type_parse() {
-        assert_eq!("STRICT".parse::<SchedulerType>().unwrap(), SchedulerType::Strict);
+        assert_eq!(
+            "STRICT".parse::<SchedulerType>().unwrap(),
+            SchedulerType::Strict
+        );
         assert_eq!("WRR".parse::<SchedulerType>().unwrap(), SchedulerType::Wrr);
-        assert_eq!("DWRR".parse::<SchedulerType>().unwrap(), SchedulerType::Dwrr);
+        assert_eq!(
+            "DWRR".parse::<SchedulerType>().unwrap(),
+            SchedulerType::Dwrr
+        );
     }
 
     #[test]
@@ -262,8 +267,7 @@ mod tests {
 
     #[test]
     fn test_scheduler_info() {
-        let scheduler = SchedulerInfo::new(0x5678, SchedulerType::Wrr)
-            .with_weight(10);
+        let scheduler = SchedulerInfo::new(0x5678, SchedulerType::Wrr).with_weight(10);
         assert_eq!(scheduler.sai_id(), 0x5678);
         assert_eq!(scheduler.scheduler_type, SchedulerType::Wrr);
         assert_eq!(scheduler.weight, 10);

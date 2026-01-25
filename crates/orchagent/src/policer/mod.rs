@@ -46,5 +46,9 @@ mod orch;
 mod types;
 
 pub use ffi::{register_policer_orch, unregister_policer_orch};
-pub use orch::{PolicerOrch, PolicerOrchCallbacks, PolicerOrchConfig, PolicerOrchError, PolicerOrchStats};
-pub use types::{ColorSource, MeterType, PacketAction, PolicerConfig, PolicerEntry, PolicerMode, StormType};
+pub use orch::{
+    PolicerOrch, PolicerOrchCallbacks, PolicerOrchConfig, PolicerOrchError, PolicerOrchStats,
+};
+pub use types::{
+    ColorSource, MeterType, PacketAction, PolicerConfig, PolicerEntry, PolicerMode, StormType,
+};

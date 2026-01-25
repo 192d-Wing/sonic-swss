@@ -1,8 +1,8 @@
 //! FFI exports for DebugCounterOrch.
 
+use super::orch::{DebugCounterOrch, DebugCounterOrchConfig};
 use std::cell::RefCell;
 use std::ffi::{c_char, CStr};
-use super::orch::{DebugCounterOrch, DebugCounterOrchConfig};
 
 thread_local! {
     static DEBUG_COUNTER_ORCH: RefCell<Option<Box<DebugCounterOrch>>> = const { RefCell::new(None) };
@@ -14,7 +14,9 @@ pub extern "C" fn register_debug_counter_orch() -> bool {
         if orch.borrow().is_some() {
             return false;
         }
-        *orch.borrow_mut() = Some(Box::new(DebugCounterOrch::new(DebugCounterOrchConfig::default())));
+        *orch.borrow_mut() = Some(Box::new(DebugCounterOrch::new(
+            DebugCounterOrchConfig::default(),
+        )));
         true
     })
 }

@@ -15,6 +15,6 @@ pub mod types;
 pub use ffi::{register_mux_orch, unregister_mux_orch};
 pub use orch::{MuxOrch, MuxOrchCallbacks, MuxOrchConfig, MuxOrchError, MuxOrchStats};
 pub use types::{
-    MuxCableType, MuxNeighborConfig, MuxNeighborEntry, MuxPortConfig,
-    MuxPortEntry, MuxState, MuxStateChange, MuxStats,
+    MuxCableType, MuxNeighborConfig, MuxNeighborEntry, MuxPortConfig, MuxPortEntry, MuxState,
+    MuxStateChange, MuxStats,
 };

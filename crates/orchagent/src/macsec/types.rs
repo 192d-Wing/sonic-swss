@@ -63,7 +63,7 @@ impl MacsecSc {
 
 #[derive(Debug, Clone)]
 pub struct MacsecSa {
-    pub an: u8, // Association Number (0-3)
+    pub an: u8,  // Association Number (0-3)
     pub pn: u64, // Packet Number
     pub auth_key: Vec<u8>,
     pub sak: Vec<u8>, // Secure Association Key

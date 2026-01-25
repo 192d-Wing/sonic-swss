@@ -4,8 +4,8 @@
 //! as they are migrated. Each function uses `extern "C"` ABI and
 //! follows C naming conventions.
 
-use std::ffi::{c_char, CStr};
 use std::cell::RefCell;
+use std::ffi::{c_char, CStr};
 
 // =============================================================================
 // Thread-local storage for Rust Orch instances

@@ -47,13 +47,22 @@ impl fmt::Display for AclRuleType {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AclMatchValue {
     /// IPv4 address with optional mask.
-    Ipv4 { addr: IpAddress, mask: Option<IpAddress> },
+    Ipv4 {
+        addr: IpAddress,
+        mask: Option<IpAddress>,
+    },
     /// IPv6 address with optional mask.
-    Ipv6 { addr: IpAddress, mask: Option<IpAddress> },
+    Ipv6 {
+        addr: IpAddress,
+        mask: Option<IpAddress>,
+    },
     /// IP prefix (address/mask combined).
     IpPrefix(IpPrefix),
     /// MAC address with optional mask.
-    Mac { addr: MacAddress, mask: Option<MacAddress> },
+    Mac {
+        addr: MacAddress,
+        mask: Option<MacAddress>,
+    },
     /// Single unsigned value (port, protocol, DSCP, etc.).
     U8(u8),
     /// Single unsigned 16-bit value.
@@ -163,12 +172,18 @@ impl AclRuleMatch {
 
     /// Creates an L4 source port range match.
     pub fn l4_src_port_range(min: u32, max: u32) -> Self {
-        Self::new(AclMatchField::L4SrcPortRange, AclMatchValue::Range { min, max })
+        Self::new(
+            AclMatchField::L4SrcPortRange,
+            AclMatchValue::Range { min, max },
+        )
     }
 
     /// Creates an L4 destination port range match.
     pub fn l4_dst_port_range(min: u32, max: u32) -> Self {
-        Self::new(AclMatchField::L4DstPortRange, AclMatchValue::Range { min, max })
+        Self::new(
+            AclMatchField::L4DstPortRange,
+            AclMatchValue::Range { min, max },
+        )
     }
 
     /// Creates an IN_PORTS match.
@@ -178,7 +193,10 @@ impl AclRuleMatch {
 
     /// Creates a TCP flags match.
     pub fn tcp_flags(flags: u8, mask: u8) -> Self {
-        Self::new(AclMatchField::TcpFlags, AclMatchValue::TcpFlags { flags, mask })
+        Self::new(
+            AclMatchField::TcpFlags,
+            AclMatchValue::TcpFlags { flags, mask },
+        )
     }
 
     /// Creates an ether type match.
@@ -214,7 +232,11 @@ impl fmt::Display for AclRedirectTarget {
             Self::NextHopGroup(nhg) => write!(f, "NHG:{}", nhg),
             Self::Port(alias) => write!(f, "PORT:{}", alias),
             Self::PortOid(oid) => write!(f, "PORT:0x{:x}", oid),
-            Self::TunnelNextHop { tunnel_name, endpoint_ip, .. } => {
+            Self::TunnelNextHop {
+                tunnel_name,
+                endpoint_ip,
+                ..
+            } => {
                 write!(f, "TUNNEL:{}@{}", endpoint_ip, tunnel_name)
             }
         }
@@ -286,7 +308,10 @@ impl AclRuleAction {
 
     /// Creates a packet action (forward/drop/etc).
     pub fn packet_action(action: AclPacketAction) -> Self {
-        Self::new(AclActionType::PacketAction, AclActionValue::PacketAction(action))
+        Self::new(
+            AclActionType::PacketAction,
+            AclActionValue::PacketAction(action),
+        )
     }
 
     /// Creates a drop action.
@@ -306,12 +331,18 @@ impl AclRuleAction {
 
     /// Creates a mirror action (ingress).
     pub fn mirror_ingress(session: impl Into<String>) -> Self {
-        Self::new(AclActionType::MirrorIngress, AclActionValue::Mirror(session.into()))
+        Self::new(
+            AclActionType::MirrorIngress,
+            AclActionValue::Mirror(session.into()),
+        )
     }
 
     /// Creates a mirror action (egress).
     pub fn mirror_egress(session: impl Into<String>) -> Self {
-        Self::new(AclActionType::MirrorEgress, AclActionValue::Mirror(session.into()))
+        Self::new(
+            AclActionType::MirrorEgress,
+            AclActionValue::Mirror(session.into()),
+        )
     }
 
     /// Creates a set DSCP action.
@@ -321,7 +352,10 @@ impl AclRuleAction {
 
     /// Creates a set metadata action.
     pub fn set_metadata(meta: MetaDataValue) -> Self {
-        Self::new(AclActionType::SetAclMetaData, AclActionValue::SetMetaData(meta))
+        Self::new(
+            AclActionType::SetAclMetaData,
+            AclActionValue::SetMetaData(meta),
+        )
     }
 
     /// Creates a counter enable action.
@@ -488,7 +522,10 @@ impl AclRule {
 
     /// Returns true if this rule requires deferred activation.
     pub fn requires_deferred_activation(&self) -> bool {
-        matches!(self.rule_type, AclRuleType::Mirror | AclRuleType::DtelWatchlist)
+        matches!(
+            self.rule_type,
+            AclRuleType::Mirror | AclRuleType::DtelWatchlist
+        )
     }
 
     /// Returns true if this rule is active.
@@ -529,7 +566,11 @@ impl AclRule {
     }
 
     /// Validates the rule.
-    pub fn validate(&self, min_priority: AclPriority, max_priority: AclPriority) -> Result<(), String> {
+    pub fn validate(
+        &self,
+        min_priority: AclPriority,
+        max_priority: AclPriority,
+    ) -> Result<(), String> {
         // Validate priority
         if self.priority < min_priority || self.priority > max_priority {
             return Err(format!(

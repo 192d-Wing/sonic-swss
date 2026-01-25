@@ -1,3 +1,14 @@
+use crate::message::{otel::OtelMetrics, saistats::SAIStatsMessage};
+use log::{debug, error, info, warn};
+use opentelemetry::ExportError;
+use opentelemetry_proto::tonic::{
+    collector::metrics::v1::{
+        metrics_service_client::MetricsServiceClient, ExportMetricsServiceRequest,
+    },
+    common::v1::{any_value::Value, AnyValue, InstrumentationScope, KeyValue as ProtoKeyValue},
+    metrics::v1::{Gauge as ProtoGauge, Metric, ResourceMetrics, ScopeMetrics},
+    resource::v1::Resource as ProtoResource,
+};
 use std::{
     fmt::{Display, Formatter},
     pin::Pin,
@@ -8,32 +19,7 @@ use tokio::{
     sync::{mpsc::Receiver, oneshot},
     time::{sleep_until, Instant as TokioInstant, Sleep},
 };
-use log::{debug, error, info, warn};
 use tonic::transport::{Channel, Endpoint};
-use opentelemetry::ExportError;
-use opentelemetry_proto::tonic::{
-    collector::metrics::v1::{
-        metrics_service_client::MetricsServiceClient,
-        ExportMetricsServiceRequest,
-    },
-    common::v1::{
-        any_value::Value,
-        AnyValue,
-        InstrumentationScope,
-        KeyValue as ProtoKeyValue,
-    },
-    metrics::v1::{
-        Gauge as ProtoGauge,
-        Metric,
-        ResourceMetrics,
-        ScopeMetrics,
-    },
-    resource::v1::Resource as ProtoResource,
-};
-use crate::message::{
-    otel::OtelMetrics,
-    saistats::SAIStatsMessage,
-};
 
 const INITIAL_BACKOFF_DELAY_SECS: u64 = 1;
 const MAX_BACKOFF_DELAY_SECS: u64 = 10;
@@ -95,7 +81,7 @@ pub struct OtelActor {
     buffer: Vec<OtelMetrics>,
     buffered_counters: usize,
     flush_deadline: TokioInstant,
-    
+
     // Statistics tracking
     messages_received: u64,
     exports_performed: u64,
@@ -114,7 +100,7 @@ impl OtelActor {
     pub async fn new(
         stats_receiver: Receiver<SAIStatsMessage>,
         config: OtelActorConfig,
-        shutdown_notifier: oneshot::Sender<()>
+        shutdown_notifier: oneshot::Sender<()>,
     ) -> Result<OtelActor, Box<dyn std::error::Error>> {
         let client = None;
 
@@ -139,8 +125,7 @@ impl OtelActor {
 
         info!(
             "OtelActor initialized - console: {}, endpoint: {}",
-            config.print_to_console,
-            config.collector_endpoint
+            config.print_to_console, config.collector_endpoint
         );
 
         let flush_deadline = TokioInstant::now() + config.flush_timeout;
@@ -204,11 +189,17 @@ impl OtelActor {
     }
 
     /// Handle incoming SAI statistics message
-    async fn handle_stats_message(&mut self, stats: SAIStatsMessage) -> Result<(), Box<dyn ExportError>>{
+    async fn handle_stats_message(
+        &mut self,
+        stats: SAIStatsMessage,
+    ) -> Result<(), Box<dyn ExportError>> {
         self.messages_received += 1;
 
-        debug!("Received SAI stats with {} entries, observation_time: {}",
-               stats.stats.len(), stats.observation_time);
+        debug!(
+            "Received SAI stats with {} entries, observation_time: {}",
+            stats.stats.len(),
+            stats.observation_time
+        );
 
         let was_empty = self.buffer.is_empty();
 
@@ -273,12 +264,14 @@ impl OtelActor {
                 info!("Raw Gauge: {:#?}", gauge);
             }
         }
-        
     }
 
     // Exponential backoff
     async fn backoff(&self, attempt: u64) {
-        let delay_secs = std::cmp::min(INITIAL_BACKOFF_DELAY_SECS * 2u64.pow(attempt as u32 - 1), MAX_BACKOFF_DELAY_SECS);
+        let delay_secs = std::cmp::min(
+            INITIAL_BACKOFF_DELAY_SECS * 2u64.pow(attempt as u32 - 1),
+            MAX_BACKOFF_DELAY_SECS,
+        );
         tokio::time::sleep(Duration::from_secs(delay_secs)).await;
     }
 
@@ -308,7 +301,8 @@ impl OtelActor {
             // Ensure we have a client
             let client = match self.get_client() {
                 Some(c) => c, // Use existing or newly created client
-                _none => { // Failed to create client
+                _none => {
+                    // Failed to create client
                     self.client = None;
                     self.backoff(attempt).await; // Wait before retrying
                     continue;
@@ -317,7 +311,8 @@ impl OtelActor {
 
             // Attempt to send the request
             match client.export(request.clone()).await {
-                Ok(_) => { // Successful export
+                Ok(_) => {
+                    // Successful export
                     self.exports_performed += 1;
                     self.consecutive_failures = 0;
                     return Ok(());
@@ -332,10 +327,12 @@ impl OtelActor {
         }
 
         // All retries exhausted
-        Err(Box::new(OtelActorExportError("Max export retries exceeded".to_string())))
+        Err(Box::new(OtelActorExportError(
+            "Max export retries exceeded".to_string(),
+        )))
     }
 
-    // Export buffered metrics to OpenTelemetry collector 
+    // Export buffered metrics to OpenTelemetry collector
     async fn flush_buffer(&mut self) -> Result<(), Box<dyn ExportError>> {
         if self.buffer.is_empty() {
             return Ok(());
@@ -345,9 +342,7 @@ impl OtelActor {
 
         for otel_metrics in &self.buffer {
             for gauge in &otel_metrics.gauges {
-                let proto_data_points = gauge.data_points.iter()
-                    .map(|dp| dp.to_proto())
-                    .collect();
+                let proto_data_points = gauge.data_points.iter().map(|dp| dp.to_proto()).collect();
 
                 let proto_gauge = ProtoGauge {
                     data_points: proto_data_points,
@@ -357,7 +352,9 @@ impl OtelActor {
                     name: gauge.name.clone(),
                     description: gauge.description.clone(),
                     metadata: vec![],
-                    data: Some(opentelemetry_proto::tonic::metrics::v1::metric::Data::Gauge(proto_gauge)),
+                    data: Some(
+                        opentelemetry_proto::tonic::metrics::v1::metric::Data::Gauge(proto_gauge),
+                    ),
                     ..Default::default()
                 });
             }

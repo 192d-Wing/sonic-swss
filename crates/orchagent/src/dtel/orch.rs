@@ -6,12 +6,12 @@
 //! - Watchlist management for selective telemetry
 
 use super::types::{DtelEventType, IntSessionConfig, IntSessionEntry};
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
 use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
-use crate::audit_log;
 
 /// Result type for DtelOrch operations.
 pub type Result<T> = std::result::Result<T, DtelOrchError>;
@@ -56,10 +56,7 @@ pub struct DtelOrchStats {
 /// Callbacks for DTel SAI operations.
 pub trait DtelOrchCallbacks: Send + Sync {
     /// Create an INT session in SAI.
-    fn create_int_session(
-        &self,
-        config: &IntSessionConfig,
-    ) -> Result<RawSaiObjectId>;
+    fn create_int_session(&self, config: &IntSessionConfig) -> Result<RawSaiObjectId>;
 
     /// Remove an INT session from SAI.
     fn remove_int_session(&self, session_oid: RawSaiObjectId) -> Result<()>;
@@ -206,23 +203,20 @@ impl<C: DtelOrchCallbacks> DtelOrch<C> {
 
     /// Remove an INT session.
     pub fn remove_session(&mut self, session_id: &str) -> Result<()> {
-        let entry = self
-            .sessions
-            .remove(session_id)
-            .ok_or_else(|| {
-                let record = AuditRecord::new(
-                    AuditCategory::ErrorCondition,
-                    "DtelOrch",
-                    format!("remove_session_failed: {}", session_id),
-                )
-                .with_outcome(AuditOutcome::Failure)
-                .with_object_id(session_id)
-                .with_object_type("int_session")
-                .with_error("Session not found");
-                audit_log!(record);
+        let entry = self.sessions.remove(session_id).ok_or_else(|| {
+            let record = AuditRecord::new(
+                AuditCategory::ErrorCondition,
+                "DtelOrch",
+                format!("remove_session_failed: {}", session_id),
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(session_id)
+            .with_object_type("int_session")
+            .with_error("Session not found");
+            audit_log!(record);
 
-                DtelOrchError::SessionNotFound(session_id.to_string())
-            })?;
+            DtelOrchError::SessionNotFound(session_id.to_string())
+        })?;
 
         // Check reference count before removing
         let ref_count = entry.ref_count.load(Ordering::SeqCst);
@@ -233,7 +227,10 @@ impl<C: DtelOrchCallbacks> DtelOrch<C> {
             let record = AuditRecord::new(
                 AuditCategory::ErrorCondition,
                 "DtelOrch",
-                format!("remove_session_failed: {} (ref_count={})", session_id, ref_count),
+                format!(
+                    "remove_session_failed: {} (ref_count={})",
+                    session_id, ref_count
+                ),
             )
             .with_outcome(AuditOutcome::Denied)
             .with_object_id(session_id)
@@ -340,23 +337,20 @@ impl<C: DtelOrchCallbacks> DtelOrch<C> {
 
     /// Disable a DTel event type.
     pub fn disable_event(&mut self, event_type: DtelEventType) -> Result<()> {
-        let entry = self
-            .events
-            .remove(&event_type)
-            .ok_or_else(|| {
-                let record = AuditRecord::new(
-                    AuditCategory::ErrorCondition,
-                    "DtelOrch",
-                    format!("disable_event_failed: {:?}", event_type),
-                )
-                .with_outcome(AuditOutcome::Failure)
-                .with_object_id(format!("{:?}", event_type))
-                .with_object_type("dtel_event")
-                .with_error("Event not found");
-                audit_log!(record);
+        let entry = self.events.remove(&event_type).ok_or_else(|| {
+            let record = AuditRecord::new(
+                AuditCategory::ErrorCondition,
+                "DtelOrch",
+                format!("disable_event_failed: {:?}", event_type),
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(format!("{:?}", event_type))
+            .with_object_type("dtel_event")
+            .with_error("Event not found");
+            audit_log!(record);
 
-                DtelOrchError::EventNotFound(event_type)
-            })?;
+            DtelOrchError::EventNotFound(event_type)
+        })?;
 
         let record = AuditRecord::new(
             AuditCategory::ResourceDelete,
@@ -453,7 +447,11 @@ impl<C: DtelOrchCallbacks> DtelOrch<C> {
             if new_config.int_endpoint != self.config.int_endpoint {
                 callbacks.set_dtel_attribute(
                     "INT_ENDPOINT",
-                    if new_config.int_endpoint { "true" } else { "false" },
+                    if new_config.int_endpoint {
+                        "true"
+                    } else {
+                        "false"
+                    },
                 )?;
             }
 
@@ -461,7 +459,11 @@ impl<C: DtelOrchCallbacks> DtelOrch<C> {
             if new_config.int_transit != self.config.int_transit {
                 callbacks.set_dtel_attribute(
                     "INT_TRANSIT",
-                    if new_config.int_transit { "true" } else { "false" },
+                    if new_config.int_transit {
+                        "true"
+                    } else {
+                        "false"
+                    },
                 )?;
             }
 
@@ -817,7 +819,10 @@ mod tests {
         let tail_drop = DtelEventType::QueueReportTailDrop;
 
         assert_ne!(threshold, tail_drop);
-        assert!(matches!(threshold, DtelEventType::QueueReportThresholdBreach));
+        assert!(matches!(
+            threshold,
+            DtelEventType::QueueReportThresholdBreach
+        ));
         assert!(matches!(tail_drop, DtelEventType::QueueReportTailDrop));
     }
 
@@ -1145,7 +1150,8 @@ mod tests {
 
         orch.enable_event(DtelEventType::DropReport).unwrap();
         orch.enable_event(DtelEventType::FlowState).unwrap();
-        orch.enable_event(DtelEventType::QueueReportTailDrop).unwrap();
+        orch.enable_event(DtelEventType::QueueReportTailDrop)
+            .unwrap();
 
         let events = orch.get_enabled_events();
         assert_eq!(events.len(), 3);

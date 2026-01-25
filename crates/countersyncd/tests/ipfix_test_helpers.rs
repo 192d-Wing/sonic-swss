@@ -22,7 +22,10 @@ pub fn generate_ipfix_templates(counters_count: usize, template_id: u16) -> Vec<
 
     let set_length = 12 + counters_count * 8; // set hdr (4) + template hdr (4) + obs field (4) + N enterprise fields (8 each)
     let message_length = 16 + set_length;
-    assert!(message_length <= u16::MAX as usize, "template too large for a single IPFIX message");
+    assert!(
+        message_length <= u16::MAX as usize,
+        "template too large for a single IPFIX message"
+    );
 
     let mut buf = Vec::with_capacity(message_length);
 

@@ -391,7 +391,12 @@ impl CrmResourceCounter {
 
     /// Checks if threshold is exceeded and updates log counter.
     /// Returns true if an event should be published.
-    pub fn check_threshold(&mut self, threshold_type: CrmThresholdType, high: u32, low: u32) -> ThresholdCheck {
+    pub fn check_threshold(
+        &mut self,
+        threshold_type: CrmThresholdType,
+        high: u32,
+        low: u32,
+    ) -> ThresholdCheck {
         let utilization = match threshold_type {
             CrmThresholdType::Percentage => self.utilization_percent(),
             CrmThresholdType::Used => self.used,
@@ -465,7 +470,10 @@ impl CrmResourceEntry {
         let mut counters = HashMap::new();
         // Initialize default counter for global resources
         if !resource_type.is_acl_resource() && !resource_type.is_dash_resource() {
-            counters.insert(CRM_COUNTERS_TABLE_KEY.to_string(), CrmResourceCounter::new());
+            counters.insert(
+                CRM_COUNTERS_TABLE_KEY.to_string(),
+                CrmResourceCounter::new(),
+            );
         }
         Self {
             resource_type,
@@ -786,7 +794,8 @@ mod tests {
 
     #[test]
     fn test_threshold_field_parse() {
-        let (resource, field) = CrmThresholdField::parse_field("ipv4_route_threshold_type").unwrap();
+        let (resource, field) =
+            CrmThresholdField::parse_field("ipv4_route_threshold_type").unwrap();
         assert_eq!(resource, "ipv4_route");
         assert_eq!(field, CrmThresholdField::Type);
 

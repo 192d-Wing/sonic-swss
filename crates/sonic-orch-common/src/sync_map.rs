@@ -199,9 +199,7 @@ where
     /// or the count would underflow.
     pub fn decrement_ref(&mut self, key: &K) -> Result<u32, SyncMapError> {
         match self.inner.get_mut(key) {
-            Some(entry) => entry
-                .decrement_ref()
-                .ok_or(SyncMapError::RefCountUnderflow),
+            Some(entry) => entry.decrement_ref().ok_or(SyncMapError::RefCountUnderflow),
             None => Err(SyncMapError::KeyNotFound),
         }
     }

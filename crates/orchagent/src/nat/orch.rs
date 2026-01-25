@@ -1,7 +1,10 @@
 //! NAT orchestration logic.
 
 use super::types::{NatEntry, NatEntryKey, NatPoolEntry, NatPoolKey, NatStats};
-use crate::{audit_log, audit::{AuditCategory, AuditOutcome, AuditRecord}};
+use crate::{
+    audit::{AuditCategory, AuditOutcome, AuditRecord},
+    audit_log,
+};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -111,28 +114,32 @@ impl NatOrch {
     pub fn remove_entry(&mut self, key: &NatEntryKey) -> Result<NatEntry, NatOrchError> {
         match self.entries.remove(key) {
             Some(entry) => {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "NatOrch", "remove_entry")
-                        .with_outcome(AuditOutcome::Success)
-                        .with_object_id(format!("{:?}", key))
-                        .with_object_type("nat_entry")
-                        .with_details(serde_json::json!({
-                            "nat_type": format!("{:?}", entry.config.nat_type),
-                            "src_ip": entry.key.src_ip.to_string(),
-                            "dst_ip": entry.key.dst_ip.to_string(),
-                        }))
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "NatOrch",
+                    "remove_entry"
+                )
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("{:?}", key))
+                .with_object_type("nat_entry")
+                .with_details(serde_json::json!({
+                    "nat_type": format!("{:?}", entry.config.nat_type),
+                    "src_ip": entry.key.src_ip.to_string(),
+                    "dst_ip": entry.key.dst_ip.to_string(),
+                })));
                 Ok(entry)
             }
             None => {
                 let err = NatOrchError::EntryNotFound(key.clone());
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "NatOrch", "remove_entry")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(format!("{:?}", key))
-                        .with_object_type("nat_entry")
-                        .with_error(err.to_string())
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "NatOrch",
+                    "remove_entry"
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(format!("{:?}", key))
+                .with_object_type("nat_entry")
+                .with_error(err.to_string()));
                 Err(err)
             }
         }
@@ -181,9 +188,7 @@ impl NatOrch {
         // Validate IP range
         let (start, end) = entry.config.ip_range;
         if start > end {
-            let err = NatOrchError::InvalidIpRange(
-                format!("Start IP {} > End IP {}", start, end)
-            );
+            let err = NatOrchError::InvalidIpRange(format!("Start IP {} > End IP {}", start, end));
             audit_log!(
                 AuditRecord::new(AuditCategory::ResourceCreate, "NatOrch", "add_pool")
                     .with_outcome(AuditOutcome::Failure)
@@ -201,9 +206,10 @@ impl NatOrch {
         // Validate port range if present
         if let Some((start_port, end_port)) = entry.config.port_range {
             if start_port > end_port {
-                let err = NatOrchError::InvalidPortRange(
-                    format!("Start port {} > End port {}", start_port, end_port)
-                );
+                let err = NatOrchError::InvalidPortRange(format!(
+                    "Start port {} > End port {}",
+                    start_port, end_port
+                ));
                 audit_log!(
                     AuditRecord::new(AuditCategory::ResourceCreate, "NatOrch", "add_pool")
                         .with_outcome(AuditOutcome::Failure)
@@ -240,27 +246,31 @@ impl NatOrch {
     pub fn remove_pool(&mut self, key: &NatPoolKey) -> Result<NatPoolEntry, NatOrchError> {
         match self.pools.remove(key) {
             Some(entry) => {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "NatOrch", "remove_pool")
-                        .with_outcome(AuditOutcome::Success)
-                        .with_object_id(key.pool_name.clone())
-                        .with_object_type("nat_pool")
-                        .with_details(serde_json::json!({
-                            "start_ip": entry.config.ip_range.0.to_string(),
-                            "end_ip": entry.config.ip_range.1.to_string(),
-                        }))
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "NatOrch",
+                    "remove_pool"
+                )
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(key.pool_name.clone())
+                .with_object_type("nat_pool")
+                .with_details(serde_json::json!({
+                    "start_ip": entry.config.ip_range.0.to_string(),
+                    "end_ip": entry.config.ip_range.1.to_string(),
+                })));
                 Ok(entry)
             }
             None => {
                 let err = NatOrchError::PoolNotFound(key.clone());
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "NatOrch", "remove_pool")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(key.pool_name.clone())
-                        .with_object_type("nat_pool")
-                        .with_error(err.to_string())
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "NatOrch",
+                    "remove_pool"
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(key.pool_name.clone())
+                .with_object_type("nat_pool")
+                .with_error(err.to_string()));
                 Err(err)
             }
         }
@@ -281,8 +291,8 @@ impl NatOrch {
 
 #[cfg(test)]
 mod tests {
+    use super::super::types::{NatEntryConfig, NatPoolConfig, NatProtocol, NatType};
     use super::*;
-    use super::super::types::{NatEntryConfig, NatPoolConfig, NatType, NatProtocol};
     use std::net::Ipv4Addr;
 
     fn create_test_nat_entry(
@@ -325,7 +335,8 @@ mod tests {
     #[test]
     fn test_add_entry() {
         let mut orch = NatOrch::new(NatOrchConfig::default());
-        let entry = create_test_nat_entry("10.0.0.1", "192.168.1.1", NatType::Source, Some("1.1.1.1"));
+        let entry =
+            create_test_nat_entry("10.0.0.1", "192.168.1.1", NatType::Source, Some("1.1.1.1"));
 
         assert_eq!(orch.entry_count(), 0);
         orch.add_entry(entry.clone()).unwrap();
@@ -334,14 +345,19 @@ mod tests {
 
         // Verify entry can be retrieved
         let retrieved = orch.get_entry(&entry.key).unwrap();
-        assert_eq!(retrieved.key.src_ip, "10.0.0.1".parse::<Ipv4Addr>().unwrap());
+        assert_eq!(
+            retrieved.key.src_ip,
+            "10.0.0.1".parse::<Ipv4Addr>().unwrap()
+        );
     }
 
     #[test]
     fn test_add_duplicate_entry() {
         let mut orch = NatOrch::new(NatOrchConfig::default());
-        let entry1 = create_test_nat_entry("10.0.0.1", "192.168.1.1", NatType::Source, Some("1.1.1.1"));
-        let entry2 = create_test_nat_entry("10.0.0.1", "192.168.1.1", NatType::Source, Some("2.2.2.2"));
+        let entry1 =
+            create_test_nat_entry("10.0.0.1", "192.168.1.1", NatType::Source, Some("1.1.1.1"));
+        let entry2 =
+            create_test_nat_entry("10.0.0.1", "192.168.1.1", NatType::Source, Some("2.2.2.2"));
 
         orch.add_entry(entry1).unwrap();
         assert_eq!(orch.entry_count(), 1);
@@ -356,7 +372,8 @@ mod tests {
     #[test]
     fn test_remove_entry() {
         let mut orch = NatOrch::new(NatOrchConfig::default());
-        let entry = create_test_nat_entry("10.0.0.1", "192.168.1.1", NatType::Source, Some("1.1.1.1"));
+        let entry =
+            create_test_nat_entry("10.0.0.1", "192.168.1.1", NatType::Source, Some("1.1.1.1"));
         let key = entry.key.clone();
 
         orch.add_entry(entry).unwrap();
@@ -369,7 +386,10 @@ mod tests {
         // Removing again should fail
         let result = orch.remove_entry(&key);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), NatOrchError::EntryNotFound(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            NatOrchError::EntryNotFound(_)
+        ));
     }
 
     #[test]
@@ -377,14 +397,38 @@ mod tests {
         let mut orch = NatOrch::new(NatOrchConfig::default());
 
         // Add SNAT entries
-        orch.add_entry(create_test_nat_entry("10.0.0.1", "192.168.1.1", NatType::Source, Some("1.1.1.1"))).unwrap();
-        orch.add_entry(create_test_nat_entry("10.0.0.2", "192.168.1.2", NatType::Source, Some("1.1.1.2"))).unwrap();
+        orch.add_entry(create_test_nat_entry(
+            "10.0.0.1",
+            "192.168.1.1",
+            NatType::Source,
+            Some("1.1.1.1"),
+        ))
+        .unwrap();
+        orch.add_entry(create_test_nat_entry(
+            "10.0.0.2",
+            "192.168.1.2",
+            NatType::Source,
+            Some("1.1.1.2"),
+        ))
+        .unwrap();
 
         // Add DNAT entry
-        orch.add_entry(create_test_nat_entry("10.0.0.3", "192.168.1.3", NatType::Destination, None)).unwrap();
+        orch.add_entry(create_test_nat_entry(
+            "10.0.0.3",
+            "192.168.1.3",
+            NatType::Destination,
+            None,
+        ))
+        .unwrap();
 
         // Add Double NAT entry
-        orch.add_entry(create_test_nat_entry("10.0.0.4", "192.168.1.4", NatType::DoubleNat, Some("1.1.1.4"))).unwrap();
+        orch.add_entry(create_test_nat_entry(
+            "10.0.0.4",
+            "192.168.1.4",
+            NatType::DoubleNat,
+            Some("1.1.1.4"),
+        ))
+        .unwrap();
 
         let snat_entries = orch.get_snat_entries();
         assert_eq!(snat_entries.len(), 2);
@@ -400,14 +444,38 @@ mod tests {
         let mut orch = NatOrch::new(NatOrchConfig::default());
 
         // Add SNAT entry
-        orch.add_entry(create_test_nat_entry("10.0.0.1", "192.168.1.1", NatType::Source, Some("1.1.1.1"))).unwrap();
+        orch.add_entry(create_test_nat_entry(
+            "10.0.0.1",
+            "192.168.1.1",
+            NatType::Source,
+            Some("1.1.1.1"),
+        ))
+        .unwrap();
 
         // Add DNAT entries
-        orch.add_entry(create_test_nat_entry("10.0.0.2", "192.168.1.2", NatType::Destination, None)).unwrap();
-        orch.add_entry(create_test_nat_entry("10.0.0.3", "192.168.1.3", NatType::Destination, None)).unwrap();
+        orch.add_entry(create_test_nat_entry(
+            "10.0.0.2",
+            "192.168.1.2",
+            NatType::Destination,
+            None,
+        ))
+        .unwrap();
+        orch.add_entry(create_test_nat_entry(
+            "10.0.0.3",
+            "192.168.1.3",
+            NatType::Destination,
+            None,
+        ))
+        .unwrap();
 
         // Add Double NAT entry
-        orch.add_entry(create_test_nat_entry("10.0.0.4", "192.168.1.4", NatType::DoubleNat, Some("1.1.1.4"))).unwrap();
+        orch.add_entry(create_test_nat_entry(
+            "10.0.0.4",
+            "192.168.1.4",
+            NatType::DoubleNat,
+            Some("1.1.1.4"),
+        ))
+        .unwrap();
 
         let dnat_entries = orch.get_dnat_entries();
         assert_eq!(dnat_entries.len(), 2);
@@ -423,15 +491,45 @@ mod tests {
         let mut orch = NatOrch::new(NatOrchConfig::default());
 
         // Add SNAT entry
-        orch.add_entry(create_test_nat_entry("10.0.0.1", "192.168.1.1", NatType::Source, Some("1.1.1.1"))).unwrap();
+        orch.add_entry(create_test_nat_entry(
+            "10.0.0.1",
+            "192.168.1.1",
+            NatType::Source,
+            Some("1.1.1.1"),
+        ))
+        .unwrap();
 
         // Add DNAT entry
-        orch.add_entry(create_test_nat_entry("10.0.0.2", "192.168.1.2", NatType::Destination, None)).unwrap();
+        orch.add_entry(create_test_nat_entry(
+            "10.0.0.2",
+            "192.168.1.2",
+            NatType::Destination,
+            None,
+        ))
+        .unwrap();
 
         // Add Double NAT entries
-        orch.add_entry(create_test_nat_entry("10.0.0.3", "192.168.1.3", NatType::DoubleNat, Some("1.1.1.3"))).unwrap();
-        orch.add_entry(create_test_nat_entry("10.0.0.4", "192.168.1.4", NatType::DoubleNat, Some("1.1.1.4"))).unwrap();
-        orch.add_entry(create_test_nat_entry("10.0.0.5", "192.168.1.5", NatType::DoubleNat, Some("1.1.1.5"))).unwrap();
+        orch.add_entry(create_test_nat_entry(
+            "10.0.0.3",
+            "192.168.1.3",
+            NatType::DoubleNat,
+            Some("1.1.1.3"),
+        ))
+        .unwrap();
+        orch.add_entry(create_test_nat_entry(
+            "10.0.0.4",
+            "192.168.1.4",
+            NatType::DoubleNat,
+            Some("1.1.1.4"),
+        ))
+        .unwrap();
+        orch.add_entry(create_test_nat_entry(
+            "10.0.0.5",
+            "192.168.1.5",
+            NatType::DoubleNat,
+            Some("1.1.1.5"),
+        ))
+        .unwrap();
 
         let double_nat_entries = orch.get_double_nat_entries();
         assert_eq!(double_nat_entries.len(), 3);
@@ -454,8 +552,14 @@ mod tests {
 
         // Verify pool can be retrieved
         let retrieved = orch.get_pool(&pool.key).unwrap();
-        assert_eq!(retrieved.config.ip_range.0, "1.1.1.1".parse::<Ipv4Addr>().unwrap());
-        assert_eq!(retrieved.config.ip_range.1, "1.1.1.10".parse::<Ipv4Addr>().unwrap());
+        assert_eq!(
+            retrieved.config.ip_range.0,
+            "1.1.1.1".parse::<Ipv4Addr>().unwrap()
+        );
+        assert_eq!(
+            retrieved.config.ip_range.1,
+            "1.1.1.10".parse::<Ipv4Addr>().unwrap()
+        );
     }
 
     #[test]
@@ -466,7 +570,10 @@ mod tests {
 
         let result = orch.add_pool(pool);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), NatOrchError::InvalidIpRange(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            NatOrchError::InvalidIpRange(_)
+        ));
         assert_eq!(orch.pool_count(), 0);
     }
 
@@ -478,7 +585,10 @@ mod tests {
 
         let result = orch.add_pool(pool);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), NatOrchError::InvalidPortRange(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            NatOrchError::InvalidPortRange(_)
+        ));
         assert_eq!(orch.pool_count(), 0);
     }
 

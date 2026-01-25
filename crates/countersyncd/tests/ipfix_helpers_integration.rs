@@ -6,10 +6,7 @@ use tokio::sync::mpsc::channel;
 use tokio::time::{sleep, timeout, Duration};
 
 use countersyncd::actor::ipfix::IpfixActor;
-use countersyncd::message::{
-    buffer::SocketBufferMessage,
-    ipfix::IPFixTemplatesMessage,
-};
+use countersyncd::message::{buffer::SocketBufferMessage, ipfix::IPFixTemplatesMessage};
 
 #[tokio::test]
 async fn ipfix_templates_delete_and_readd_schema_change() {
@@ -83,7 +80,8 @@ async fn ipfix_templates_delete_and_readd_schema_change() {
 
     let mut received = Vec::new();
     for _ in 0..expected_counts.len() {
-        if let Ok(Some(stats_msg)) = timeout(Duration::from_secs(2), saistats_receiver.recv()).await {
+        if let Ok(Some(stats_msg)) = timeout(Duration::from_secs(2), saistats_receiver.recv()).await
+        {
             let stats = Arc::try_unwrap(stats_msg).expect("unwrap stats Arc");
             received.push(stats);
         } else {
@@ -91,14 +89,27 @@ async fn ipfix_templates_delete_and_readd_schema_change() {
         }
     }
 
-    assert_eq!(received.len(), expected_counts.len(), "should receive one stats message per template");
+    assert_eq!(
+        received.len(),
+        expected_counts.len(),
+        "should receive one stats message per template"
+    );
 
     for (i, stats) in received.iter().enumerate() {
         let expected_count = expected_counts[i];
         let expected_obs_time = (i as u64) + 1;
 
-        assert_eq!(stats.observation_time, expected_obs_time, "observation time mismatch for message {}", i);
-        assert_eq!(stats.stats.len(), expected_count, "counter count mismatch for message {}", i);
+        assert_eq!(
+            stats.observation_time, expected_obs_time,
+            "observation time mismatch for message {}",
+            i
+        );
+        assert_eq!(
+            stats.stats.len(),
+            expected_count,
+            "counter count mismatch for message {}",
+            i
+        );
 
         let mut got: Vec<(u32, u32, u64)> = stats
             .stats
@@ -120,9 +131,23 @@ async fn ipfix_templates_delete_and_readd_schema_change() {
             let (type_id, stat_id, counter) = got[idx];
             let expected_idx = (idx + 1) as u32;
 
-            assert_eq!(type_id, expected_idx, "type_id mismatch at stat {} for message {}", idx, i);
-            assert_eq!(stat_id, expected_idx, "stat_id mismatch at stat {} for message {}", idx, i);
-            assert_eq!(counter, expected_obs_time + idx as u64, "counter mismatch at stat {} for message {}", idx, i);
+            assert_eq!(
+                type_id, expected_idx,
+                "type_id mismatch at stat {} for message {}",
+                idx, i
+            );
+            assert_eq!(
+                stat_id, expected_idx,
+                "stat_id mismatch at stat {} for message {}",
+                idx, i
+            );
+            assert_eq!(
+                counter,
+                expected_obs_time + idx as u64,
+                "counter mismatch at stat {} for message {}",
+                idx,
+                i
+            );
         }
     }
 
@@ -148,10 +173,7 @@ async fn ipfix_templates_delete_and_readd_schema_change() {
     );
 
     // Re-add the deleted key with the same template IDs but different shapes
-    let readd_template_defs = vec![
-        (delete_key, 302u16, 4usize),
-        (delete_key, 303u16, 6usize),
-    ];
+    let readd_template_defs = vec![(delete_key, 302u16, 4usize), (delete_key, 303u16, 6usize)];
 
     let mut readd_templates_bytes = Vec::new();
     for (_, template_id, counters) in &readd_template_defs {
@@ -176,10 +198,12 @@ async fn ipfix_templates_delete_and_readd_schema_change() {
         .await
         .expect("record send after re-add should succeed");
 
-    let expected_readd_counts: Vec<usize> = readd_template_defs.iter().map(|(_, _, c)| *c).collect();
+    let expected_readd_counts: Vec<usize> =
+        readd_template_defs.iter().map(|(_, _, c)| *c).collect();
     let mut readd_received = Vec::new();
     for _ in 0..expected_readd_counts.len() {
-        if let Ok(Some(stats_msg)) = timeout(Duration::from_secs(2), saistats_receiver.recv()).await {
+        if let Ok(Some(stats_msg)) = timeout(Duration::from_secs(2), saistats_receiver.recv()).await
+        {
             let stats = Arc::try_unwrap(stats_msg).expect("unwrap stats Arc");
             readd_received.push(stats);
         } else {
@@ -197,8 +221,17 @@ async fn ipfix_templates_delete_and_readd_schema_change() {
         let expected_count = expected_readd_counts[i];
         let expected_obs_time = (i as u64) + 1;
 
-        assert_eq!(stats.observation_time, expected_obs_time, "observation time mismatch after re-add for message {}", i);
-        assert_eq!(stats.stats.len(), expected_count, "counter count mismatch after re-add for message {}", i);
+        assert_eq!(
+            stats.observation_time, expected_obs_time,
+            "observation time mismatch after re-add for message {}",
+            i
+        );
+        assert_eq!(
+            stats.stats.len(),
+            expected_count,
+            "counter count mismatch after re-add for message {}",
+            i
+        );
 
         let mut got: Vec<(u32, u32, u64)> = stats
             .stats
@@ -220,9 +253,23 @@ async fn ipfix_templates_delete_and_readd_schema_change() {
             let (type_id, stat_id, counter) = got[idx];
             let expected_idx = (idx + 1) as u32;
 
-            assert_eq!(type_id, expected_idx, "type_id mismatch at stat {} after re-add for message {}", idx, i);
-            assert_eq!(stat_id, expected_idx, "stat_id mismatch at stat {} after re-add for message {}", idx, i);
-            assert_eq!(counter, expected_obs_time + idx as u64, "counter mismatch at stat {} after re-add for message {}", idx, i);
+            assert_eq!(
+                type_id, expected_idx,
+                "type_id mismatch at stat {} after re-add for message {}",
+                idx, i
+            );
+            assert_eq!(
+                stat_id, expected_idx,
+                "stat_id mismatch at stat {} after re-add for message {}",
+                idx, i
+            );
+            assert_eq!(
+                counter,
+                expected_obs_time + idx as u64,
+                "counter mismatch at stat {} after re-add for message {}",
+                idx,
+                i
+            );
         }
     }
 

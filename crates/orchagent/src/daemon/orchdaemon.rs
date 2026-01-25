@@ -7,13 +7,13 @@
 //! - Task dispatch to appropriate Orchs
 //! - Warm restart coordination
 
-use log::{debug, info, error};
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
+use log::{debug, error, info};
 use sonic_orch_common::{Orch, OrchContext};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
-use crate::audit_log;
 
 /// Configuration for the OrchDaemon.
 #[derive(Debug, Clone)]
@@ -94,7 +94,10 @@ impl OrchDaemon {
     ///
     /// Called during startup before the event loop begins.
     pub async fn init(&mut self) -> bool {
-        info!("Initializing OrchDaemon with {} orch groups", self.orchs.len());
+        info!(
+            "Initializing OrchDaemon with {} orch groups",
+            self.orchs.len()
+        );
 
         let record = AuditRecord::new(
             AuditCategory::SystemLifecycle,
@@ -177,12 +180,8 @@ impl OrchDaemon {
     pub fn stop(&mut self) {
         info!("Stopping OrchDaemon");
 
-        let record = AuditRecord::new(
-            AuditCategory::AdminAction,
-            "OrchDaemon",
-            "stop_requested",
-        )
-        .with_outcome(AuditOutcome::Success);
+        let record = AuditRecord::new(AuditCategory::AdminAction, "OrchDaemon", "stop_requested")
+            .with_outcome(AuditOutcome::Success);
         audit_log!(record);
 
         self.running = false;
@@ -234,12 +233,8 @@ impl OrchDaemon {
     pub async fn on_warm_boot_end(&mut self) {
         info!("Warm boot ended, resuming normal operation");
 
-        let record = AuditRecord::new(
-            AuditCategory::WarmRestart,
-            "OrchDaemon",
-            "warm_boot_ended",
-        )
-        .with_outcome(AuditOutcome::Success);
+        let record = AuditRecord::new(AuditCategory::WarmRestart, "OrchDaemon", "warm_boot_ended")
+            .with_outcome(AuditOutcome::Success);
         audit_log!(record);
 
         for (_priority, orchs) in self.orchs.iter_mut() {
@@ -260,8 +255,12 @@ impl OrchDaemon {
 
         for (priority, orchs) in &self.orchs {
             for orch in orchs {
-                lines.push(format!("  [{:3}] {} - {} pending", priority, orch.name(),
-                    orch.dump_pending_tasks().len()));
+                lines.push(format!(
+                    "  [{:3}] {} - {} pending",
+                    priority,
+                    orch.name(),
+                    orch.dump_pending_tasks().len()
+                ));
             }
         }
 

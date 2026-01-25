@@ -1,7 +1,10 @@
 //! Policy-Based Hashing orchestration logic.
 
 use super::types::{PbhHashEntry, PbhRuleEntry, PbhStats, PbhTableEntry};
-use crate::{audit_log, audit::{AuditCategory, AuditOutcome, AuditRecord}};
+use crate::{
+    audit::{AuditCategory, AuditOutcome, AuditRecord},
+    audit_log,
+};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -69,7 +72,8 @@ impl PbhOrch {
     }
 
     pub fn get_rule(&self, table_name: &str, rule_name: &str) -> Option<&PbhRuleEntry> {
-        self.rules.get(&(table_name.to_string(), rule_name.to_string()))
+        self.rules
+            .get(&(table_name.to_string(), rule_name.to_string()))
     }
 
     pub fn stats(&self) -> &PbhOrchStats {
@@ -79,13 +83,15 @@ impl PbhOrch {
     pub fn create_pbh_table(&mut self, name: String) -> Result<(), PbhOrchError> {
         if self.tables.contains_key(&name) {
             let err = PbhOrchError::TableNotFound(name.clone());
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceCreate, "PbhOrch", "create_pbh_table")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(name)
-                    .with_object_type("pbh_table")
-                    .with_error(err.to_string())
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "PbhOrch",
+                "create_pbh_table"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(name)
+            .with_object_type("pbh_table")
+            .with_error(err.to_string()));
             return Err(err);
         }
 
@@ -104,13 +110,15 @@ impl PbhOrch {
     pub fn remove_pbh_table(&mut self, name: &str) -> Result<(), PbhOrchError> {
         if !self.tables.contains_key(name) {
             let err = PbhOrchError::TableNotFound(name.to_string());
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceDelete, "PbhOrch", "remove_pbh_table")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(name)
-                    .with_object_type("pbh_table")
-                    .with_error(err.to_string())
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "PbhOrch",
+                "remove_pbh_table"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(name)
+            .with_object_type("pbh_table")
+            .with_error(err.to_string()));
             return Err(err);
         }
 
@@ -127,28 +135,39 @@ impl PbhOrch {
         Ok(())
     }
 
-    pub fn create_pbh_rule(&mut self, table_name: String, rule_name: String) -> Result<(), PbhOrchError> {
+    pub fn create_pbh_rule(
+        &mut self,
+        table_name: String,
+        rule_name: String,
+    ) -> Result<(), PbhOrchError> {
         if !self.tables.contains_key(&table_name) {
             let err = PbhOrchError::TableNotFound(table_name);
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceCreate, "PbhOrch", "create_pbh_rule")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(rule_name)
-                    .with_object_type("pbh_rule")
-                    .with_error(err.to_string())
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "PbhOrch",
+                "create_pbh_rule"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(rule_name)
+            .with_object_type("pbh_rule")
+            .with_error(err.to_string()));
             return Err(err);
         }
 
-        if self.rules.contains_key(&(table_name.clone(), rule_name.clone())) {
+        if self
+            .rules
+            .contains_key(&(table_name.clone(), rule_name.clone()))
+        {
             let err = PbhOrchError::RuleNotFound(rule_name.clone());
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceCreate, "PbhOrch", "create_pbh_rule")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(format!("{}/{}", table_name, rule_name))
-                    .with_object_type("pbh_rule")
-                    .with_error(err.to_string())
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "PbhOrch",
+                "create_pbh_rule"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(format!("{}/{}", table_name, rule_name))
+            .with_object_type("pbh_rule")
+            .with_error(err.to_string()));
             return Err(err);
         }
 
@@ -164,20 +183,30 @@ impl PbhOrch {
         Ok(())
     }
 
-    pub fn remove_pbh_rule(&mut self, table_name: &str, rule_name: &str) -> Result<(), PbhOrchError> {
-        if !self.rules.contains_key(&(table_name.to_string(), rule_name.to_string())) {
+    pub fn remove_pbh_rule(
+        &mut self,
+        table_name: &str,
+        rule_name: &str,
+    ) -> Result<(), PbhOrchError> {
+        if !self
+            .rules
+            .contains_key(&(table_name.to_string(), rule_name.to_string()))
+        {
             let err = PbhOrchError::RuleNotFound(rule_name.to_string());
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceDelete, "PbhOrch", "remove_pbh_rule")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(format!("{}/{}", table_name, rule_name))
-                    .with_object_type("pbh_rule")
-                    .with_error(err.to_string())
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "PbhOrch",
+                "remove_pbh_rule"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(format!("{}/{}", table_name, rule_name))
+            .with_object_type("pbh_rule")
+            .with_error(err.to_string()));
             return Err(err);
         }
 
-        self.rules.remove(&(table_name.to_string(), rule_name.to_string()));
+        self.rules
+            .remove(&(table_name.to_string(), rule_name.to_string()));
         self.stats.stats.rules_created -= 1;
 
         audit_log!(
@@ -193,13 +222,15 @@ impl PbhOrch {
     pub fn create_pbh_hash(&mut self, name: String) -> Result<(), PbhOrchError> {
         if self.hashes.contains_key(&name) {
             let err = PbhOrchError::HashNotFound(name.clone());
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceCreate, "PbhOrch", "create_pbh_hash")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(name)
-                    .with_object_type("pbh_hash")
-                    .with_error(err.to_string())
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceCreate,
+                "PbhOrch",
+                "create_pbh_hash"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(name)
+            .with_object_type("pbh_hash")
+            .with_error(err.to_string()));
             return Err(err);
         }
 
@@ -218,13 +249,15 @@ impl PbhOrch {
     pub fn remove_pbh_hash(&mut self, name: &str) -> Result<(), PbhOrchError> {
         if !self.hashes.contains_key(name) {
             let err = PbhOrchError::HashNotFound(name.to_string());
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceDelete, "PbhOrch", "remove_pbh_hash")
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(name)
-                    .with_object_type("pbh_hash")
-                    .with_error(err.to_string())
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "PbhOrch",
+                "remove_pbh_hash"
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(name)
+            .with_object_type("pbh_hash")
+            .with_error(err.to_string()));
             return Err(err);
         }
 
@@ -244,8 +277,10 @@ impl PbhOrch {
 
 #[cfg(test)]
 mod tests {
+    use super::super::types::{
+        PbhHashConfig, PbhHashField, PbhPacketAction, PbhRuleConfig, PbhTableConfig,
+    };
     use super::*;
-    use super::super::types::{PbhHashConfig, PbhHashField, PbhPacketAction, PbhRuleConfig, PbhTableConfig};
 
     #[test]
     fn test_new_pbh_orch_with_default_config() {

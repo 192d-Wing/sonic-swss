@@ -24,12 +24,18 @@ pub enum TaskStatus {
 impl TaskStatus {
     /// Returns true if the task completed successfully.
     pub fn is_success(&self) -> bool {
-        matches!(self, TaskStatus::Success | TaskStatus::Ignore | TaskStatus::Duplicated)
+        matches!(
+            self,
+            TaskStatus::Success | TaskStatus::Ignore | TaskStatus::Duplicated
+        )
     }
 
     /// Returns true if the task should be retried.
     pub fn is_retryable(&self) -> bool {
-        matches!(self, TaskStatus::NeedRetry | TaskStatus::WaitingForDependency)
+        matches!(
+            self,
+            TaskStatus::NeedRetry | TaskStatus::WaitingForDependency
+        )
     }
 
     /// Returns true if the task failed permanently.
@@ -169,10 +175,7 @@ mod tests {
             TaskError::need_retry("test").to_status(),
             TaskStatus::NeedRetry
         );
-        assert_eq!(
-            TaskError::ignored("test").to_status(),
-            TaskStatus::Ignore
-        );
+        assert_eq!(TaskError::ignored("test").to_status(), TaskStatus::Ignore);
     }
 
     #[test]

@@ -137,11 +137,7 @@ pub struct AclTable {
 
 impl AclTable {
     /// Creates a new ACL table.
-    pub fn new(
-        id: impl Into<String>,
-        table_type: Arc<AclTableType>,
-        stage: AclStage,
-    ) -> Self {
+    pub fn new(id: impl Into<String>, table_type: Arc<AclTableType>, stage: AclStage) -> Self {
         Self {
             id: id.into(),
             table_type,
@@ -243,7 +239,10 @@ impl AclTable {
         self.table_type.validate_actions(&rule.action_types())?;
 
         if self.rules.contains_key(&rule.id) {
-            return Err(format!("Rule {} already exists in table {}", rule.id, self.id));
+            return Err(format!(
+                "Rule {} already exists in table {}",
+                rule.id, self.id
+            ));
         }
 
         self.rules.insert(rule.id.clone(), rule);
@@ -405,7 +404,9 @@ mod tests {
             .with_stage(AclStage::Ingress);
 
         config.parse_field("PORTS", "Ethernet0,Ethernet4").unwrap();
-        config.parse_field("POLICY_DESC", "Test description").unwrap();
+        config
+            .parse_field("POLICY_DESC", "Test description")
+            .unwrap();
 
         assert_eq!(config.id, Some("TestTable".to_string()));
         assert_eq!(config.type_name, Some("L3".to_string()));
@@ -523,7 +524,10 @@ mod tests {
         table.add_configured_port("Ethernet0");
         table.add_configured_port("Ethernet4");
 
-        let new_ports: HashSet<_> = ["Ethernet4", "Ethernet8"].iter().map(|s| s.to_string()).collect();
+        let new_ports: HashSet<_> = ["Ethernet4", "Ethernet8"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let (add, remove) = table.update_ports(&new_ports);
 
         assert_eq!(add, vec!["Ethernet8"]);

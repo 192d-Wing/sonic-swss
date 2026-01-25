@@ -1,9 +1,9 @@
 //! VNET orchestration logic.
 
 use super::types::{VnetEntry, VnetKey, VnetRouteEntry, VnetRouteKey, VnetStats};
-use std::collections::HashMap;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
 use crate::audit_log;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum VnetOrchError {
@@ -68,78 +68,71 @@ impl VnetOrch {
 
         if self.vnets.contains_key(&key) {
             let error = VnetOrchError::SaiError("VNET already exists".to_string());
-            audit_log!(AuditRecord::new(
-                AuditCategory::ResourceCreate,
-                "VnetOrch",
-                "add_vnet"
-            )
-            .with_outcome(AuditOutcome::Failure)
-            .with_object_id(entry.config.vnet_name.clone())
-            .with_object_type("vnet")
-            .with_error(error.to_string()));
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceCreate, "VnetOrch", "add_vnet")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(entry.config.vnet_name.clone())
+                    .with_object_type("vnet")
+                    .with_error(error.to_string())
+            );
             return Err(error);
         }
 
         self.stats.stats.vnets_created = self.stats.stats.vnets_created.saturating_add(1);
         self.vnets.insert(key, entry.clone());
 
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceCreate,
-            "VnetOrch",
-            "add_vnet"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(entry.config.vnet_name.clone())
-        .with_object_type("vnet")
-        .with_details(serde_json::json!({
-            "vnet_name": entry.config.vnet_name,
-            "vni": entry.config.vni,
-            "vxlan_tunnel": entry.config.vxlan_tunnel,
-            "stats": {
-                "vnets_created": self.stats.stats.vnets_created
-            }
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "VnetOrch", "add_vnet")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(entry.config.vnet_name.clone())
+                .with_object_type("vnet")
+                .with_details(serde_json::json!({
+                    "vnet_name": entry.config.vnet_name,
+                    "vni": entry.config.vni,
+                    "vxlan_tunnel": entry.config.vxlan_tunnel,
+                    "stats": {
+                        "vnets_created": self.stats.stats.vnets_created
+                    }
+                }))
+        );
 
         Ok(())
     }
 
     pub fn remove_vnet(&mut self, key: &VnetKey) -> Result<VnetEntry, VnetOrchError> {
         // Check if any routes exist for this VNET
-        let has_routes = self.routes
+        let has_routes = self
+            .routes
             .keys()
             .any(|route_key| route_key.vnet_name == key.vnet_name);
 
         if has_routes {
-            let error = VnetOrchError::SaiError(
-                format!("VNET {} still has routes", key.vnet_name)
+            let error = VnetOrchError::SaiError(format!("VNET {} still has routes", key.vnet_name));
+            audit_log!(
+                AuditRecord::new(AuditCategory::ResourceDelete, "VnetOrch", "remove_vnet")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(key.vnet_name.clone())
+                    .with_object_type("vnet")
+                    .with_error(error.to_string())
             );
-            audit_log!(AuditRecord::new(
-                AuditCategory::ResourceDelete,
-                "VnetOrch",
-                "remove_vnet"
-            )
-            .with_outcome(AuditOutcome::Failure)
-            .with_object_id(key.vnet_name.clone())
-            .with_object_type("vnet")
-            .with_error(error.to_string()));
             return Err(error);
         }
 
-        let entry = self.vnets.remove(key)
+        let entry = self
+            .vnets
+            .remove(key)
             .ok_or_else(|| VnetOrchError::VnetNotFound(key.clone()))?;
 
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceDelete,
-            "VnetOrch",
-            "remove_vnet"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(key.vnet_name.clone())
-        .with_object_type("vnet")
-        .with_details(serde_json::json!({
-            "vnet_name": key.vnet_name,
-            "vni": entry.config.vni
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceDelete, "VnetOrch", "remove_vnet")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(key.vnet_name.clone())
+                .with_object_type("vnet")
+                .with_details(serde_json::json!({
+                    "vnet_name": key.vnet_name,
+                    "vni": entry.config.vni
+                }))
+        );
 
         Ok(entry)
     }
@@ -174,28 +167,28 @@ impl VnetOrch {
         self.stats.stats.routes_created = self.stats.stats.routes_created.saturating_add(1);
         self.routes.insert(key, entry.clone());
 
-        audit_log!(AuditRecord::new(
-            AuditCategory::ResourceCreate,
-            "VnetOrch",
-            "add_vnet_route"
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(format!("{}/{}", entry.key.vnet_name, entry.key.prefix))
-        .with_object_type("vnet_route")
-        .with_details(serde_json::json!({
-            "vnet_name": entry.key.vnet_name,
-            "prefix": entry.key.prefix,
-            "route_type": format!("{:?}", entry.config.route_type),
-            "stats": {
-                "routes_created": self.stats.stats.routes_created
-            }
-        })));
+        audit_log!(
+            AuditRecord::new(AuditCategory::ResourceCreate, "VnetOrch", "add_vnet_route")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(format!("{}/{}", entry.key.vnet_name, entry.key.prefix))
+                .with_object_type("vnet_route")
+                .with_details(serde_json::json!({
+                    "vnet_name": entry.key.vnet_name,
+                    "prefix": entry.key.prefix,
+                    "route_type": format!("{:?}", entry.config.route_type),
+                    "stats": {
+                        "routes_created": self.stats.stats.routes_created
+                    }
+                }))
+        );
 
         Ok(())
     }
 
     pub fn remove_route(&mut self, key: &VnetRouteKey) -> Result<VnetRouteEntry, VnetOrchError> {
-        let entry = self.routes.remove(key)
+        let entry = self
+            .routes
+            .remove(key)
             .ok_or_else(|| VnetOrchError::RouteNotFound(key.clone()))?;
 
         audit_log!(AuditRecord::new(
@@ -251,8 +244,8 @@ impl VnetOrch {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::{VnetConfig, VnetRouteConfig, VnetRouteType};
+    use super::*;
     use std::net::IpAddr;
 
     fn create_test_vnet(name: &str, vni: Option<u32>) -> VnetEntry {
@@ -265,7 +258,11 @@ mod tests {
         })
     }
 
-    fn create_test_route(vnet_name: &str, prefix: &str, route_type: VnetRouteType) -> VnetRouteEntry {
+    fn create_test_route(
+        vnet_name: &str,
+        prefix: &str,
+        route_type: VnetRouteType,
+    ) -> VnetRouteEntry {
         let key = VnetRouteKey::new(vnet_name.to_string(), prefix.to_string());
         let config = VnetRouteConfig {
             route_type,
@@ -447,9 +444,24 @@ mod tests {
         orch.add_vnet(create_test_vnet("Vnet2", Some(200))).unwrap();
 
         // Add routes to different VNETs
-        orch.add_route(create_test_route("Vnet1", "10.0.0.0/24", VnetRouteType::Direct)).unwrap();
-        orch.add_route(create_test_route("Vnet1", "10.0.1.0/24", VnetRouteType::Direct)).unwrap();
-        orch.add_route(create_test_route("Vnet2", "10.0.2.0/24", VnetRouteType::Direct)).unwrap();
+        orch.add_route(create_test_route(
+            "Vnet1",
+            "10.0.0.0/24",
+            VnetRouteType::Direct,
+        ))
+        .unwrap();
+        orch.add_route(create_test_route(
+            "Vnet1",
+            "10.0.1.0/24",
+            VnetRouteType::Direct,
+        ))
+        .unwrap();
+        orch.add_route(create_test_route(
+            "Vnet2",
+            "10.0.2.0/24",
+            VnetRouteType::Direct,
+        ))
+        .unwrap();
 
         // Get routes for Vnet1
         let vnet1_routes = orch.get_routes_for_vnet("Vnet1");
@@ -470,10 +482,30 @@ mod tests {
         orch.add_vnet(create_test_vnet("Vnet1", Some(100))).unwrap();
 
         // Add different types of routes
-        orch.add_route(create_test_route("Vnet1", "10.0.0.0/24", VnetRouteType::Direct)).unwrap();
-        orch.add_route(create_test_tunnel_route("Vnet1", "10.0.1.0/24", "192.168.1.1")).unwrap();
-        orch.add_route(create_test_tunnel_route("Vnet1", "10.0.2.0/24", "192.168.1.2")).unwrap();
-        orch.add_route(create_test_route("Vnet1", "10.0.3.0/24", VnetRouteType::Vnet)).unwrap();
+        orch.add_route(create_test_route(
+            "Vnet1",
+            "10.0.0.0/24",
+            VnetRouteType::Direct,
+        ))
+        .unwrap();
+        orch.add_route(create_test_tunnel_route(
+            "Vnet1",
+            "10.0.1.0/24",
+            "192.168.1.1",
+        ))
+        .unwrap();
+        orch.add_route(create_test_tunnel_route(
+            "Vnet1",
+            "10.0.2.0/24",
+            "192.168.1.2",
+        ))
+        .unwrap();
+        orch.add_route(create_test_route(
+            "Vnet1",
+            "10.0.3.0/24",
+            VnetRouteType::Vnet,
+        ))
+        .unwrap();
 
         // Get only tunnel routes
         let tunnel_routes = orch.get_tunnel_routes();
@@ -492,10 +524,30 @@ mod tests {
         orch.add_vnet(create_test_vnet("Vnet1", Some(100))).unwrap();
 
         // Add different types of routes
-        orch.add_route(create_test_route("Vnet1", "10.0.0.0/24", VnetRouteType::Direct)).unwrap();
-        orch.add_route(create_test_tunnel_route("Vnet1", "10.0.1.0/24", "192.168.1.1")).unwrap();
-        orch.add_route(create_test_route("Vnet1", "10.0.2.0/24", VnetRouteType::Vnet)).unwrap();
-        orch.add_route(create_test_route("Vnet1", "10.0.3.0/24", VnetRouteType::Vnet)).unwrap();
+        orch.add_route(create_test_route(
+            "Vnet1",
+            "10.0.0.0/24",
+            VnetRouteType::Direct,
+        ))
+        .unwrap();
+        orch.add_route(create_test_tunnel_route(
+            "Vnet1",
+            "10.0.1.0/24",
+            "192.168.1.1",
+        ))
+        .unwrap();
+        orch.add_route(create_test_route(
+            "Vnet1",
+            "10.0.2.0/24",
+            VnetRouteType::Vnet,
+        ))
+        .unwrap();
+        orch.add_route(create_test_route(
+            "Vnet1",
+            "10.0.3.0/24",
+            VnetRouteType::Vnet,
+        ))
+        .unwrap();
 
         // Get only VNET routes
         let vnet_routes = orch.get_vnet_routes();

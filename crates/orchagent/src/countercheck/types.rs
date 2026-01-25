@@ -10,7 +10,10 @@ pub struct CounterCheckKey {
 
 impl CounterCheckKey {
     pub fn new(port_name: String, counter_type: String) -> Self {
-        Self { port_name, counter_type }
+        Self {
+            port_name,
+            counter_type,
+        }
     }
 }
 

@@ -89,9 +89,7 @@ pub unsafe extern "C" fn rust_acl_orch_has_table(table_id: *const c_char) -> boo
 ///
 /// - `table_id` must be a valid null-terminated C string
 #[no_mangle]
-pub unsafe extern "C" fn rust_acl_orch_get_table_oid(
-    table_id: *const c_char,
-) -> RawSaiObjectId {
+pub unsafe extern "C" fn rust_acl_orch_get_table_oid(table_id: *const c_char) -> RawSaiObjectId {
     if table_id.is_null() {
         return 0;
     }
@@ -118,9 +116,7 @@ pub unsafe extern "C" fn rust_acl_orch_get_table_oid(
 ///
 /// - `table_id` must be a valid null-terminated C string
 #[no_mangle]
-pub unsafe extern "C" fn rust_acl_orch_get_table_rule_count(
-    table_id: *const c_char,
-) -> usize {
+pub unsafe extern "C" fn rust_acl_orch_get_table_rule_count(table_id: *const c_char) -> usize {
     if table_id.is_null() {
         return 0;
     }

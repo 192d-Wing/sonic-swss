@@ -5,8 +5,7 @@
 
 use crate::error::{SaiError, SaiResult};
 use crate::types::{
-    NextHopGroupMemberOid, NextHopGroupOid, NextHopOid, RouteEntryOid,
-    VirtualRouterOid,
+    NextHopGroupMemberOid, NextHopGroupOid, NextHopOid, RouteEntryOid, VirtualRouterOid,
 };
 use sonic_types::IpPrefix;
 use std::collections::HashSet;
@@ -37,7 +36,10 @@ pub struct RouteEntry {
 impl RouteEntry {
     /// Creates a new route entry.
     pub fn new(vrf_id: VirtualRouterOid, destination: IpPrefix) -> Self {
-        Self { vrf_id, destination }
+        Self {
+            vrf_id,
+            destination,
+        }
     }
 }
 
@@ -86,9 +88,7 @@ impl NextHopGroupEntry {
     /// Returns an error if the reference count would underflow.
     pub fn decrement_ref(&mut self) -> Result<u32, SaiError> {
         if self.ref_count == 0 {
-            return Err(SaiError::internal(
-                "NextHopGroup reference count underflow",
-            ));
+            return Err(SaiError::internal("NextHopGroup reference count underflow"));
         }
         self.ref_count -= 1;
         Ok(self.ref_count)
@@ -243,10 +243,7 @@ impl RouteApi {
     }
 
     /// Removes a member from a next-hop group.
-    pub fn remove_next_hop_group_member(
-        &self,
-        member: NextHopGroupMemberOid,
-    ) -> SaiResult<()> {
+    pub fn remove_next_hop_group_member(&self, member: NextHopGroupMemberOid) -> SaiResult<()> {
         if member.is_null() {
             return Err(SaiError::invalid_parameter("member OID is null"));
         }
@@ -256,11 +253,7 @@ impl RouteApi {
     }
 
     /// Sets the route action.
-    pub fn set_route_action(
-        &self,
-        entry: &RouteEntry,
-        action: RouteAction,
-    ) -> SaiResult<()> {
+    pub fn set_route_action(&self, entry: &RouteEntry, action: RouteAction) -> SaiResult<()> {
         if entry.vrf_id.is_null() {
             return Err(SaiError::invalid_parameter("VRF ID is null"));
         }
@@ -271,11 +264,7 @@ impl RouteApi {
     }
 
     /// Sets the next-hop for a route.
-    pub fn set_route_next_hop(
-        &self,
-        entry: &RouteEntry,
-        next_hop: NextHopOid,
-    ) -> SaiResult<()> {
+    pub fn set_route_next_hop(&self, entry: &RouteEntry, next_hop: NextHopOid) -> SaiResult<()> {
         if entry.vrf_id.is_null() {
             return Err(SaiError::invalid_parameter("VRF ID is null"));
         }
@@ -311,10 +300,7 @@ mod tests {
 
     #[test]
     fn test_nhg_entry_ref_count() {
-        let mut entry = NextHopGroupEntry::new(
-            NextHopGroupOid::NULL,
-            NextHopGroupType::Ecmp,
-        );
+        let mut entry = NextHopGroupEntry::new(NextHopGroupOid::NULL, NextHopGroupType::Ecmp);
 
         assert_eq!(entry.ref_count(), 0);
         assert!(entry.is_unreferenced());
@@ -330,10 +316,7 @@ mod tests {
 
     #[test]
     fn test_nhg_entry_underflow_protection() {
-        let mut entry = NextHopGroupEntry::new(
-            NextHopGroupOid::NULL,
-            NextHopGroupType::Ecmp,
-        );
+        let mut entry = NextHopGroupEntry::new(NextHopGroupOid::NULL, NextHopGroupType::Ecmp);
 
         // Should error on underflow
         assert!(entry.decrement_ref().is_err());
@@ -355,10 +338,7 @@ mod tests {
 
         // Forward without nexthop should fail
         let config = RouteConfig {
-            entry: RouteEntry::new(
-                VirtualRouterOid::NULL,
-                "10.0.0.0/24".parse().unwrap(),
-            ),
+            entry: RouteEntry::new(VirtualRouterOid::NULL, "10.0.0.0/24".parse().unwrap()),
             action: RouteAction::Forward,
             next_hop: None,
             next_hop_group: None,

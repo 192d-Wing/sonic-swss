@@ -229,9 +229,10 @@ impl RouteOrch {
     /// For ECMP groups, increments the ref count in synced_nhgs.
     pub fn increase_nhg_ref_count(&mut self, key: &NextHopGroupKey) -> Result<()> {
         // Clone the Arc to avoid borrowing self.callbacks while we mutate self
-        let callbacks = self.callbacks.clone().ok_or_else(|| {
-            RouteError::RefCountError("Callbacks not set".to_string())
-        })?;
+        let callbacks = self
+            .callbacks
+            .clone()
+            .ok_or_else(|| RouteError::RefCountError("Callbacks not set".to_string()))?;
 
         if key.is_empty() {
             // Blackhole/dropped route - no ref count to manage
@@ -272,9 +273,10 @@ impl RouteOrch {
     /// This is the SAFE replacement for C++ `m_syncdNextHopGroups[key].ref_count--`.
     pub fn decrease_nhg_ref_count(&mut self, key: &NextHopGroupKey) -> Result<()> {
         // Clone the Arc to avoid borrowing self.callbacks while we mutate self
-        let callbacks = self.callbacks.clone().ok_or_else(|| {
-            RouteError::RefCountError("Callbacks not set".to_string())
-        })?;
+        let callbacks = self
+            .callbacks
+            .clone()
+            .ok_or_else(|| RouteError::RefCountError("Callbacks not set".to_string()))?;
 
         if key.is_empty() {
             return Ok(());
@@ -342,9 +344,10 @@ impl RouteOrch {
             return Err(RouteError::MaxNhgReached(self.config.max_nhg_count));
         }
 
-        let callbacks = self.callbacks.as_ref().ok_or_else(|| {
-            RouteError::SaiError("Callbacks not set".to_string())
-        })?;
+        let callbacks = self
+            .callbacks
+            .as_ref()
+            .ok_or_else(|| RouteError::SaiError("Callbacks not set".to_string()))?;
 
         // Create in SAI
         let nhg_id = callbacks.sai_create_nhg(&key).await?;
@@ -403,9 +406,10 @@ impl RouteOrch {
 
         let nhg_id = entry.sai_id();
 
-        let callbacks = self.callbacks.as_ref().ok_or_else(|| {
-            RouteError::SaiError("Callbacks not set".to_string())
-        })?;
+        let callbacks = self
+            .callbacks
+            .as_ref()
+            .ok_or_else(|| RouteError::SaiError("Callbacks not set".to_string()))?;
 
         // Remove from SAI
         callbacks.sai_remove_nhg(nhg_id).await?;
@@ -465,9 +469,10 @@ impl RouteOrch {
         nhg_key: NextHopGroupKey,
     ) -> Result<()> {
         // Clone callbacks Arc to avoid borrowing self
-        let callbacks = self.callbacks.clone().ok_or_else(|| {
-            RouteError::SaiError("Callbacks not set".to_string())
-        })?;
+        let callbacks = self
+            .callbacks
+            .clone()
+            .ok_or_else(|| RouteError::SaiError("Callbacks not set".to_string()))?;
 
         // Check VRF exists
         if vrf_id != 0 && !callbacks.vrf_exists(vrf_id) {
@@ -481,14 +486,14 @@ impl RouteOrch {
             // Single next-hop
             let nexthop = nhg_key.iter().next().unwrap();
             if nexthop.is_interface_nexthop() {
-                let rif_id = callbacks.get_router_intf_id(nexthop.alias()).ok_or_else(|| {
-                    RouteError::NextHopNotResolved(nexthop.alias().to_string())
-                })?;
+                let rif_id = callbacks
+                    .get_router_intf_id(nexthop.alias())
+                    .ok_or_else(|| RouteError::NextHopNotResolved(nexthop.alias().to_string()))?;
                 (Some(rif_id), false)
             } else {
-                let nh_id = callbacks.get_next_hop_id(nexthop).ok_or_else(|| {
-                    RouteError::NextHopNotResolved(nexthop.to_string())
-                })?;
+                let nh_id = callbacks
+                    .get_next_hop_id(nexthop)
+                    .ok_or_else(|| RouteError::NextHopNotResolved(nexthop.to_string()))?;
                 (Some(nh_id), false)
             }
         } else {
@@ -554,7 +559,10 @@ impl RouteOrch {
 
             // Add to our table
             let table = self.synced_routes.entry(vrf_id).or_default();
-            table.insert(prefix.clone(), RouteEntry::new(RouteNhg::new(nhg_key.clone())));
+            table.insert(
+                prefix.clone(),
+                RouteEntry::new(RouteNhg::new(nhg_key.clone())),
+            );
 
             audit_log!(
                 AuditRecord::new(AuditCategory::ResourceCreate, "RouteOrch", "add_route")
@@ -577,9 +585,10 @@ impl RouteOrch {
     /// Removes a route.
     pub async fn remove_route(&mut self, vrf_id: RawSaiObjectId, prefix: &IpPrefix) -> Result<()> {
         // Clone the Arc to avoid borrowing self.callbacks while we mutate self
-        let callbacks = self.callbacks.clone().ok_or_else(|| {
-            RouteError::SaiError("Callbacks not set".to_string())
-        })?;
+        let callbacks = self
+            .callbacks
+            .clone()
+            .ok_or_else(|| RouteError::SaiError("Callbacks not set".to_string()))?;
 
         // Get the existing route
         let entry = self
@@ -587,13 +596,15 @@ impl RouteOrch {
             .get(&vrf_id)
             .and_then(|table| table.get(prefix))
             .ok_or_else(|| {
-                audit_log!(
-                    AuditRecord::new(AuditCategory::ResourceDelete, "RouteOrch", "remove_route")
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(&prefix.to_string())
-                        .with_object_type("route")
-                        .with_error(&format!("Route not found: {}/{}", vrf_id, prefix))
-                );
+                audit_log!(AuditRecord::new(
+                    AuditCategory::ResourceDelete,
+                    "RouteOrch",
+                    "remove_route"
+                )
+                .with_outcome(AuditOutcome::Failure)
+                .with_object_id(&prefix.to_string())
+                .with_object_type("route")
+                .with_error(&format!("Route not found: {}/{}", vrf_id, prefix)));
                 RouteError::RouteNotFound(format!("{}/{}", vrf_id, prefix))
             })?;
 
@@ -604,9 +615,7 @@ impl RouteOrch {
 
         if is_default && self.config.default_action_drop {
             // For default routes, just set to DROP instead of removing
-            callbacks
-                .sai_set_route(vrf_id, prefix, None, true)
-                .await?;
+            callbacks.sai_set_route(vrf_id, prefix, None, true).await?;
 
             // Update our table
             let table = self.synced_routes.get_mut(&vrf_id).unwrap();
@@ -615,21 +624,20 @@ impl RouteOrch {
                 self.decrease_nhg_ref_count(&old_nhg_key)?;
             }
 
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceModify, "RouteOrch", "remove_route")
-                    .with_outcome(AuditOutcome::Success)
-                    .with_object_id(&prefix.to_string())
-                    .with_object_type("route")
-                    .with_details(serde_json::json!({
-                        "action": "set_to_drop",
-                        "vrf_id": format!("0x{:x}", vrf_id)
-                    }))
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceModify,
+                "RouteOrch",
+                "remove_route"
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(&prefix.to_string())
+            .with_object_type("route")
+            .with_details(serde_json::json!({
+                "action": "set_to_drop",
+                "vrf_id": format!("0x{:x}", vrf_id)
+            })));
 
-            debug!(
-                "RouteOrch: Set default route {} to DROP",
-                prefix
-            );
+            debug!("RouteOrch: Set default route {} to DROP", prefix);
         } else {
             // Remove the route
             callbacks.sai_remove_route(vrf_id, prefix).await?;
@@ -649,15 +657,17 @@ impl RouteOrch {
                 self.synced_routes.remove(&vrf_id);
             }
 
-            audit_log!(
-                AuditRecord::new(AuditCategory::ResourceDelete, "RouteOrch", "remove_route")
-                    .with_outcome(AuditOutcome::Success)
-                    .with_object_id(&prefix.to_string())
-                    .with_object_type("route")
-                    .with_details(serde_json::json!({
-                        "vrf_id": format!("0x{:x}", vrf_id)
-                    }))
-            );
+            audit_log!(AuditRecord::new(
+                AuditCategory::ResourceDelete,
+                "RouteOrch",
+                "remove_route"
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_id(&prefix.to_string())
+            .with_object_type("route")
+            .with_details(serde_json::json!({
+                "vrf_id": format!("0x{:x}", vrf_id)
+            })));
 
             info!("RouteOrch: Removed route {}/{}", vrf_id, prefix);
         }
@@ -671,7 +681,8 @@ impl RouteOrch {
     /// Adds a task to the consumer for processing.
     pub fn add_task(&mut self, key: String, op: Operation, fields: HashMap<String, String>) {
         let fvs: Vec<(String, String)> = fields.into_iter().collect();
-        self.consumer.add_to_sync(vec![KeyOpFieldsValues::new(key, op, fvs)]);
+        self.consumer
+            .add_to_sync(vec![KeyOpFieldsValues::new(key, op, fvs)]);
     }
 }
 
@@ -789,7 +800,9 @@ fn parse_nexthops(fields: &HashMap<String, String>) -> Result<NextHopGroupKey> {
         if fields.contains_key("blackhole") {
             return Ok(NextHopGroupKey::new());
         }
-        Err(RouteError::InvalidRoute("Missing nexthop field".to_string()))
+        Err(RouteError::InvalidRoute(
+            "Missing nexthop field".to_string(),
+        ))
     }
 }
 
@@ -865,7 +878,12 @@ mod tests {
         }
 
         fn increase_next_hop_ref_count(&self, nexthop: &NextHopKey) {
-            *self.next_hop_refs.lock().unwrap().entry(nexthop.clone()).or_insert(0) += 1;
+            *self
+                .next_hop_refs
+                .lock()
+                .unwrap()
+                .entry(nexthop.clone())
+                .or_insert(0) += 1;
         }
 
         fn decrease_next_hop_ref_count(&self, nexthop: &NextHopKey) {
@@ -875,7 +893,12 @@ mod tests {
         }
 
         fn increase_router_intf_ref_count(&self, alias: &str) {
-            *self.router_intf_refs.lock().unwrap().entry(alias.to_string()).or_insert(0) += 1;
+            *self
+                .router_intf_refs
+                .lock()
+                .unwrap()
+                .entry(alias.to_string())
+                .or_insert(0) += 1;
         }
 
         fn decrease_router_intf_ref_count(&self, alias: &str) {
@@ -914,7 +937,11 @@ mod tests {
             Ok(())
         }
 
-        async fn sai_remove_route(&self, _vrf_id: RawSaiObjectId, _prefix: &IpPrefix) -> Result<()> {
+        async fn sai_remove_route(
+            &self,
+            _vrf_id: RawSaiObjectId,
+            _prefix: &IpPrefix,
+        ) -> Result<()> {
             Ok(())
         }
 
@@ -1120,7 +1147,10 @@ mod tests {
         let result = orch.add_nhg(key.clone()).await;
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), RouteError::NhgAlreadyExists(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            RouteError::NhgAlreadyExists(_)
+        ));
         assert_eq!(orch.nhg_count(), 1);
     }
 
@@ -1264,7 +1294,10 @@ mod tests {
         orch.increase_nhg_ref_count(&key).unwrap();
 
         let refs = callbacks.next_hop_refs.lock().unwrap();
-        assert_eq!(refs.get(&make_nexthop("192.168.1.1", "Ethernet0")), Some(&1));
+        assert_eq!(
+            refs.get(&make_nexthop("192.168.1.1", "Ethernet0")),
+            Some(&1)
+        );
     }
 
     #[test]
@@ -1362,7 +1395,10 @@ mod tests {
 
         // Check ref count was incremented
         let refs = callbacks.next_hop_refs.lock().unwrap();
-        assert_eq!(refs.get(&make_nexthop("192.168.1.1", "Ethernet0")), Some(&1));
+        assert_eq!(
+            refs.get(&make_nexthop("192.168.1.1", "Ethernet0")),
+            Some(&1)
+        );
     }
 
     #[tokio::test]
@@ -1434,7 +1470,10 @@ mod tests {
 
         let result = orch.add_route(0x9999, prefix, nhg_key).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), RouteError::VrfNotFound(0x9999)));
+        assert!(matches!(
+            result.unwrap_err(),
+            RouteError::VrfNotFound(0x9999)
+        ));
     }
 
     #[tokio::test]
@@ -1448,7 +1487,10 @@ mod tests {
 
         let result = orch.add_route(0, prefix, nhg_key).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), RouteError::NextHopNotResolved(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            RouteError::NextHopNotResolved(_)
+        ));
     }
 
     #[tokio::test]
@@ -1464,15 +1506,25 @@ mod tests {
         let nhg_key2 = NextHopGroupKey::single(make_nexthop("192.168.1.2", "Ethernet4"));
 
         // Add route with first NH
-        orch.add_route(0, prefix.clone(), nhg_key1.clone()).await.unwrap();
+        orch.add_route(0, prefix.clone(), nhg_key1.clone())
+            .await
+            .unwrap();
 
         // Update to second NH
-        orch.add_route(0, prefix.clone(), nhg_key2.clone()).await.unwrap();
+        orch.add_route(0, prefix.clone(), nhg_key2.clone())
+            .await
+            .unwrap();
 
         // Old NH ref should be decremented, new NH ref should be incremented
         let refs = callbacks.next_hop_refs.lock().unwrap();
-        assert_eq!(refs.get(&make_nexthop("192.168.1.1", "Ethernet0")), Some(&0));
-        assert_eq!(refs.get(&make_nexthop("192.168.1.2", "Ethernet4")), Some(&1));
+        assert_eq!(
+            refs.get(&make_nexthop("192.168.1.1", "Ethernet0")),
+            Some(&0)
+        );
+        assert_eq!(
+            refs.get(&make_nexthop("192.168.1.2", "Ethernet4")),
+            Some(&1)
+        );
     }
 
     #[tokio::test]
@@ -1486,14 +1538,21 @@ mod tests {
         let nhg_key = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
 
         // Add route
-        orch.add_route(0, prefix.clone(), nhg_key.clone()).await.unwrap();
+        orch.add_route(0, prefix.clone(), nhg_key.clone())
+            .await
+            .unwrap();
 
         // Update with same NH
-        orch.add_route(0, prefix.clone(), nhg_key.clone()).await.unwrap();
+        orch.add_route(0, prefix.clone(), nhg_key.clone())
+            .await
+            .unwrap();
 
         // Ref count should still be 1 (not incremented again)
         let refs = callbacks.next_hop_refs.lock().unwrap();
-        assert_eq!(refs.get(&make_nexthop("192.168.1.1", "Ethernet0")), Some(&1));
+        assert_eq!(
+            refs.get(&make_nexthop("192.168.1.1", "Ethernet0")),
+            Some(&1)
+        );
     }
 
     #[tokio::test]
@@ -1515,7 +1574,10 @@ mod tests {
 
         // Ref count should be decremented
         let refs = callbacks.next_hop_refs.lock().unwrap();
-        assert_eq!(refs.get(&make_nexthop("192.168.1.1", "Ethernet0")), Some(&0));
+        assert_eq!(
+            refs.get(&make_nexthop("192.168.1.1", "Ethernet0")),
+            Some(&0)
+        );
     }
 
     #[tokio::test]
@@ -1541,7 +1603,9 @@ mod tests {
         let prefix = make_prefix("10.0.0.0", 24);
         let nhg_key = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
 
-        orch.add_route(0x1234, prefix.clone(), nhg_key).await.unwrap();
+        orch.add_route(0x1234, prefix.clone(), nhg_key)
+            .await
+            .unwrap();
         orch.remove_route(0x1234, &prefix).await.unwrap();
 
         // VRF ref count should be decremented
@@ -1573,7 +1637,10 @@ mod tests {
 
         // Ref count should be decremented
         let refs = callbacks.next_hop_refs.lock().unwrap();
-        assert_eq!(refs.get(&make_nexthop("192.168.1.1", "Ethernet0")), Some(&0));
+        assert_eq!(
+            refs.get(&make_nexthop("192.168.1.1", "Ethernet0")),
+            Some(&0)
+        );
     }
 
     #[tokio::test]
@@ -1590,7 +1657,9 @@ mod tests {
             make_nexthop("192.168.1.2", "Ethernet4"),
         ]);
 
-        orch.add_route(0, prefix.clone(), nhg_key.clone()).await.unwrap();
+        orch.add_route(0, prefix.clone(), nhg_key.clone())
+            .await
+            .unwrap();
         assert!(orch.has_nhg(&nhg_key));
 
         orch.remove_route(0, &prefix).await.unwrap();
@@ -1618,12 +1687,16 @@ mod tests {
         ]);
 
         // Add first route
-        orch.add_route(0, prefix1.clone(), nhg_key.clone()).await.unwrap();
+        orch.add_route(0, prefix1.clone(), nhg_key.clone())
+            .await
+            .unwrap();
         assert_eq!(orch.nhg_count(), 1);
         assert_eq!(orch.get_nhg(&nhg_key).unwrap().ref_count(), 1);
 
         // Add second route with same NHG
-        orch.add_route(0, prefix2.clone(), nhg_key.clone()).await.unwrap();
+        orch.add_route(0, prefix2.clone(), nhg_key.clone())
+            .await
+            .unwrap();
         assert_eq!(orch.nhg_count(), 1); // Still only one NHG
         assert_eq!(orch.get_nhg(&nhg_key).unwrap().ref_count(), 2);
 
@@ -1670,7 +1743,10 @@ mod tests {
 
         let result = orch.add_route(0, prefix, nhg_key).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), RouteError::NextHopNotResolved(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            RouteError::NextHopNotResolved(_)
+        ));
     }
 
     // ===== Duplicate route handling tests =====
@@ -1693,7 +1769,9 @@ mod tests {
         assert_eq!(route1.nhg.nhg_key.len(), 1);
 
         // Update with different NH
-        orch.add_route(0, prefix.clone(), nhg_key2.clone()).await.unwrap();
+        orch.add_route(0, prefix.clone(), nhg_key2.clone())
+            .await
+            .unwrap();
         let route2 = orch.get_route(0, &prefix).unwrap();
         assert_eq!(route2.nhg.nhg_key, nhg_key2);
     }
@@ -1740,7 +1818,9 @@ mod tests {
 
         assert!(orch.get_route(0, &prefix).is_none());
 
-        orch.add_route(0, prefix.clone(), nhg_key.clone()).await.unwrap();
+        orch.add_route(0, prefix.clone(), nhg_key.clone())
+            .await
+            .unwrap();
         let route = orch.get_route(0, &prefix).unwrap();
         assert_eq!(route.nhg.nhg_key, nhg_key);
     }
@@ -1759,8 +1839,12 @@ mod tests {
         let nhg_key2 = NextHopGroupKey::single(make_nexthop("192.168.1.2", "Ethernet4"));
 
         // Same prefix in different VRFs
-        orch.add_route(0, prefix.clone(), nhg_key1.clone()).await.unwrap();
-        orch.add_route(0x1234, prefix.clone(), nhg_key2.clone()).await.unwrap();
+        orch.add_route(0, prefix.clone(), nhg_key1.clone())
+            .await
+            .unwrap();
+        orch.add_route(0x1234, prefix.clone(), nhg_key2.clone())
+            .await
+            .unwrap();
 
         let route1 = orch.get_route(0, &prefix).unwrap();
         let route2 = orch.get_route(0x1234, &prefix).unwrap();
@@ -1782,7 +1866,9 @@ mod tests {
         let prefix = make_prefix("10.0.0.0", 24);
         let nhg_key = NextHopGroupKey::single(make_nexthop("192.168.1.1", "Ethernet0"));
 
-        orch.add_route(0x1234, prefix.clone(), nhg_key).await.unwrap();
+        orch.add_route(0x1234, prefix.clone(), nhg_key)
+            .await
+            .unwrap();
         assert!(orch.synced_routes.contains_key(&0x1234));
 
         orch.remove_route(0x1234, &prefix).await.unwrap();

@@ -13,9 +13,11 @@ mod orch;
 mod types;
 
 pub use ffi::{register_buffer_orch, unregister_buffer_orch};
-pub use orch::{BufferOrch, BufferOrchCallbacks, BufferOrchConfig, BufferOrchError, BufferOrchStats};
+pub use orch::{
+    BufferOrch, BufferOrchCallbacks, BufferOrchConfig, BufferOrchError, BufferOrchStats,
+};
 pub use types::{
-    BufferPoolConfig, BufferPoolEntry, BufferPoolMode, BufferPoolType,
-    BufferProfileConfig, BufferProfileEntry, BufferQueueConfig, BufferStats,
-    IngressPriorityGroupEntry, PriorityGroupConfig, ThresholdMode,
+    BufferPoolConfig, BufferPoolEntry, BufferPoolMode, BufferPoolType, BufferProfileConfig,
+    BufferProfileEntry, BufferQueueConfig, BufferStats, IngressPriorityGroupEntry,
+    PriorityGroupConfig, ThresholdMode,
 };

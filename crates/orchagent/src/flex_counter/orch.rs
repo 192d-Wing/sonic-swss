@@ -2,6 +2,8 @@
 //!
 //! This is the main orchestrator for flexible counter configuration in SONiC.
 
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
 use async_trait::async_trait;
 use log::{debug, error, info, warn};
 use sonic_orch_common::{Consumer, KeyOpFieldsValues, Operation, Orch};
@@ -9,8 +11,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
-use crate::audit_log;
 
 use super::group::{FlexCounterGroup, FlexCounterGroupMap};
 use super::state::{
@@ -437,7 +437,11 @@ impl FlexCounterOrch {
         // Process STATUS (enable/disable)
         if let Some(status) = fields.get(fields::STATUS) {
             let enable = status == fields::STATUS_ENABLE;
-            info!("{} counter group {}", if enable { "Enabling" } else { "Disabling" }, group);
+            info!(
+                "{} counter group {}",
+                if enable { "Enabling" } else { "Disabling" },
+                group
+            );
 
             // Generate counter maps based on group type
             if enable {
@@ -458,7 +462,11 @@ impl FlexCounterOrch {
             let record = AuditRecord::new(
                 AuditCategory::ResourceModify,
                 "FlexCounterOrch",
-                format!("{}_group: {}", if enable { "enable" } else { "disable" }, group),
+                format!(
+                    "{}_group: {}",
+                    if enable { "enable" } else { "disable" },
+                    group
+                ),
             )
             .with_outcome(AuditOutcome::Success)
             .with_object_id(format!("{}", group))
@@ -549,7 +557,9 @@ impl FlexCounterOrch {
             FlexCounterGroup::QueueWatermark => {
                 let configs = self.get_queue_configurations();
                 callbacks.generate_queue_map(&configs).await?;
-                callbacks.add_queue_watermark_flex_counters(&configs).await?;
+                callbacks
+                    .add_queue_watermark_flex_counters(&configs)
+                    .await?;
             }
             FlexCounterGroup::WredEcnQueue => {
                 let configs = self.get_queue_configurations();
@@ -619,7 +629,8 @@ impl FlexCounterOrch {
     /// Adds a task to the consumer for processing.
     pub fn add_task(&mut self, key: String, op: Operation, fields: HashMap<String, String>) {
         let fvs: Vec<(String, String)> = fields.into_iter().collect();
-        self.consumer.add_to_sync(vec![KeyOpFieldsValues::new(key, op, fvs)]);
+        self.consumer
+            .add_to_sync(vec![KeyOpFieldsValues::new(key, op, fvs)]);
     }
 }
 
@@ -795,7 +806,10 @@ mod tests {
         let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
 
         let mut fields = HashMap::new();
-        fields.insert(fields::STATUS.to_string(), fields::STATUS_ENABLE.to_string());
+        fields.insert(
+            fields::STATUS.to_string(),
+            fields::STATUS_ENABLE.to_string(),
+        );
 
         orch.add_task("PORT".to_string(), Operation::Set, fields);
 
@@ -870,13 +884,21 @@ mod tests {
 
         // Set initial configuration
         orch.group_map.set_enabled(FlexCounterGroup::Port, true);
-        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 5000);
+        orch.group_map
+            .set_poll_interval(FlexCounterGroup::Port, 5000);
 
-        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(5000));
+        assert_eq!(
+            orch.group_map.poll_interval(FlexCounterGroup::Port),
+            Some(5000)
+        );
 
         // Update configuration
-        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 10000);
-        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(10000));
+        orch.group_map
+            .set_poll_interval(FlexCounterGroup::Port, 10000);
+        assert_eq!(
+            orch.group_map.poll_interval(FlexCounterGroup::Port),
+            Some(10000)
+        );
     }
 
     #[test]
@@ -911,13 +933,25 @@ mod tests {
         let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
 
         // Set different polling intervals for different groups
-        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 1000);
-        orch.group_map.set_poll_interval(FlexCounterGroup::Queue, 5000);
-        orch.group_map.set_poll_interval(FlexCounterGroup::Rif, 10000);
+        orch.group_map
+            .set_poll_interval(FlexCounterGroup::Port, 1000);
+        orch.group_map
+            .set_poll_interval(FlexCounterGroup::Queue, 5000);
+        orch.group_map
+            .set_poll_interval(FlexCounterGroup::Rif, 10000);
 
-        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(1000));
-        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Queue), Some(5000));
-        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Rif), Some(10000));
+        assert_eq!(
+            orch.group_map.poll_interval(FlexCounterGroup::Port),
+            Some(1000)
+        );
+        assert_eq!(
+            orch.group_map.poll_interval(FlexCounterGroup::Queue),
+            Some(5000)
+        );
+        assert_eq!(
+            orch.group_map.poll_interval(FlexCounterGroup::Rif),
+            Some(10000)
+        );
     }
 
     #[test]
@@ -934,16 +968,28 @@ mod tests {
         let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
 
         // Set initial interval
-        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 2000);
-        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(2000));
+        orch.group_map
+            .set_poll_interval(FlexCounterGroup::Port, 2000);
+        assert_eq!(
+            orch.group_map.poll_interval(FlexCounterGroup::Port),
+            Some(2000)
+        );
 
         // Update interval
-        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 8000);
-        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(8000));
+        orch.group_map
+            .set_poll_interval(FlexCounterGroup::Port, 8000);
+        assert_eq!(
+            orch.group_map.poll_interval(FlexCounterGroup::Port),
+            Some(8000)
+        );
 
         // Update again
-        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 15000);
-        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(15000));
+        orch.group_map
+            .set_poll_interval(FlexCounterGroup::Port, 15000);
+        assert_eq!(
+            orch.group_map.poll_interval(FlexCounterGroup::Port),
+            Some(15000)
+        );
     }
 
     #[test]
@@ -951,12 +997,20 @@ mod tests {
         let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
 
         // Set bulk chunk size
-        orch.group_map.set_bulk_chunk_size(FlexCounterGroup::Port, 100);
-        assert_eq!(orch.group_map.bulk_chunk_size(FlexCounterGroup::Port), Some(100));
+        orch.group_map
+            .set_bulk_chunk_size(FlexCounterGroup::Port, 100);
+        assert_eq!(
+            orch.group_map.bulk_chunk_size(FlexCounterGroup::Port),
+            Some(100)
+        );
 
         // Update bulk chunk size
-        orch.group_map.set_bulk_chunk_size(FlexCounterGroup::Port, 200);
-        assert_eq!(orch.group_map.bulk_chunk_size(FlexCounterGroup::Port), Some(200));
+        orch.group_map
+            .set_bulk_chunk_size(FlexCounterGroup::Port, 200);
+        assert_eq!(
+            orch.group_map.bulk_chunk_size(FlexCounterGroup::Port),
+            Some(200)
+        );
 
         // Clear bulk chunk size
         orch.group_map.clear_bulk_chunk_size(FlexCounterGroup::Port);
@@ -968,14 +1022,25 @@ mod tests {
         let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
 
         // Track groups with bulk chunk size
-        orch.group_map.set_bulk_chunk_size(FlexCounterGroup::Port, 50);
-        orch.state.groups_with_bulk_chunk_size.insert(FlexCounterGroup::Port);
+        orch.group_map
+            .set_bulk_chunk_size(FlexCounterGroup::Port, 50);
+        orch.state
+            .groups_with_bulk_chunk_size
+            .insert(FlexCounterGroup::Port);
 
-        assert!(orch.state.groups_with_bulk_chunk_size.contains(&FlexCounterGroup::Port));
+        assert!(orch
+            .state
+            .groups_with_bulk_chunk_size
+            .contains(&FlexCounterGroup::Port));
 
         // Remove from tracking
-        orch.state.groups_with_bulk_chunk_size.remove(&FlexCounterGroup::Port);
-        assert!(!orch.state.groups_with_bulk_chunk_size.contains(&FlexCounterGroup::Port));
+        orch.state
+            .groups_with_bulk_chunk_size
+            .remove(&FlexCounterGroup::Port);
+        assert!(!orch
+            .state
+            .groups_with_bulk_chunk_size
+            .contains(&FlexCounterGroup::Port));
     }
 
     // Counter Object Tracking Tests
@@ -1244,7 +1309,10 @@ mod tests {
         let mut orch = FlexCounterOrch::new(FlexCounterOrchConfig::default());
 
         let mut fields1 = HashMap::new();
-        fields1.insert(fields::STATUS.to_string(), fields::STATUS_ENABLE.to_string());
+        fields1.insert(
+            fields::STATUS.to_string(),
+            fields::STATUS_ENABLE.to_string(),
+        );
 
         let mut fields2 = HashMap::new();
         fields2.insert(fields::POLL_INTERVAL.to_string(), "5000".to_string());
@@ -1284,11 +1352,15 @@ mod tests {
         // Enable port counters
         orch.group_map.set_enabled(FlexCounterGroup::Port, true);
         orch.update_state_flags(FlexCounterGroup::Port, true);
-        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 10000);
+        orch.group_map
+            .set_poll_interval(FlexCounterGroup::Port, 10000);
 
         assert!(orch.port_counters_enabled());
         assert!(orch.group_map.is_enabled(FlexCounterGroup::Port));
-        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(10000));
+        assert_eq!(
+            orch.group_map.poll_interval(FlexCounterGroup::Port),
+            Some(10000)
+        );
 
         // Disable port counters
         orch.group_map.set_enabled(FlexCounterGroup::Port, false);
@@ -1310,7 +1382,8 @@ mod tests {
         // Enable queue counters
         orch.group_map.set_enabled(FlexCounterGroup::Queue, true);
         orch.update_state_flags(FlexCounterGroup::Queue, true);
-        orch.group_map.set_poll_interval(FlexCounterGroup::Queue, 5000);
+        orch.group_map
+            .set_poll_interval(FlexCounterGroup::Queue, 5000);
 
         assert!(orch.queue_counters_enabled());
 
@@ -1327,24 +1400,44 @@ mod tests {
 
         // Configure multiple groups with different settings
         orch.group_map.set_enabled(FlexCounterGroup::Port, true);
-        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 1000);
-        orch.group_map.set_bulk_chunk_size(FlexCounterGroup::Port, 50);
+        orch.group_map
+            .set_poll_interval(FlexCounterGroup::Port, 1000);
+        orch.group_map
+            .set_bulk_chunk_size(FlexCounterGroup::Port, 50);
 
         orch.group_map.set_enabled(FlexCounterGroup::Queue, true);
-        orch.group_map.set_poll_interval(FlexCounterGroup::Queue, 5000);
-        orch.group_map.set_bulk_chunk_size(FlexCounterGroup::Queue, 100);
+        orch.group_map
+            .set_poll_interval(FlexCounterGroup::Queue, 5000);
+        orch.group_map
+            .set_bulk_chunk_size(FlexCounterGroup::Queue, 100);
 
         orch.group_map.set_enabled(FlexCounterGroup::Rif, true);
-        orch.group_map.set_poll_interval(FlexCounterGroup::Rif, 10000);
+        orch.group_map
+            .set_poll_interval(FlexCounterGroup::Rif, 10000);
 
         // Verify each group has correct config
-        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(1000));
-        assert_eq!(orch.group_map.bulk_chunk_size(FlexCounterGroup::Port), Some(50));
+        assert_eq!(
+            orch.group_map.poll_interval(FlexCounterGroup::Port),
+            Some(1000)
+        );
+        assert_eq!(
+            orch.group_map.bulk_chunk_size(FlexCounterGroup::Port),
+            Some(50)
+        );
 
-        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Queue), Some(5000));
-        assert_eq!(orch.group_map.bulk_chunk_size(FlexCounterGroup::Queue), Some(100));
+        assert_eq!(
+            orch.group_map.poll_interval(FlexCounterGroup::Queue),
+            Some(5000)
+        );
+        assert_eq!(
+            orch.group_map.bulk_chunk_size(FlexCounterGroup::Queue),
+            Some(100)
+        );
 
-        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Rif), Some(10000));
+        assert_eq!(
+            orch.group_map.poll_interval(FlexCounterGroup::Rif),
+            Some(10000)
+        );
         assert_eq!(orch.group_map.bulk_chunk_size(FlexCounterGroup::Rif), None);
     }
 
@@ -1354,15 +1447,20 @@ mod tests {
 
         // Create and enable a group
         orch.group_map.set_enabled(FlexCounterGroup::Port, true);
-        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 5000);
+        orch.group_map
+            .set_poll_interval(FlexCounterGroup::Port, 5000);
         orch.update_state_flags(FlexCounterGroup::Port, true);
 
         assert!(orch.group_map.is_enabled(FlexCounterGroup::Port));
         assert!(orch.port_counters_enabled());
 
         // Update configuration
-        orch.group_map.set_poll_interval(FlexCounterGroup::Port, 10000);
-        assert_eq!(orch.group_map.poll_interval(FlexCounterGroup::Port), Some(10000));
+        orch.group_map
+            .set_poll_interval(FlexCounterGroup::Port, 10000);
+        assert_eq!(
+            orch.group_map.poll_interval(FlexCounterGroup::Port),
+            Some(10000)
+        );
 
         // Disable group
         orch.group_map.set_enabled(FlexCounterGroup::Port, false);

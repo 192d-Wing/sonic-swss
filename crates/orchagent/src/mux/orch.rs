@@ -1,11 +1,12 @@
 //! MUX cable orchestration logic.
 
 use super::types::{
-    MuxPortConfig, MuxPortEntry, MuxState, MuxStateChange, MuxStats, MuxNeighborEntry, MuxNeighborConfig,
+    MuxNeighborConfig, MuxNeighborEntry, MuxPortConfig, MuxPortEntry, MuxState, MuxStateChange,
+    MuxStats,
 };
+use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::Arc;
-use sonic_sai::types::RawSaiObjectId;
 
 use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
 use crate::audit_log;
@@ -84,11 +85,7 @@ pub trait MuxOrchCallbacks: Send + Sync {
     fn remove_mux_tunnel(&self, tunnel_oid: RawSaiObjectId) -> Result<()>;
 
     /// Creates an ACL handler for MUX traffic.
-    fn create_mux_acl(
-        &self,
-        port_name: &str,
-        direction: &str,
-    ) -> Result<RawSaiObjectId>;
+    fn create_mux_acl(&self, port_name: &str, direction: &str) -> Result<RawSaiObjectId>;
 
     /// Removes a MUX ACL handler.
     fn remove_mux_acl(&self, acl_oid: RawSaiObjectId) -> Result<()>;
@@ -160,17 +157,17 @@ impl MuxOrch {
     /// Adds a MUX port to the orchestrator.
     pub fn add_port(&mut self, port_name: String, config: MuxPortConfig) -> Result<()> {
         if self.ports.contains_key(&port_name) {
-            let audit_record = AuditRecord::new(
-                AuditCategory::ResourceCreate,
-                "MuxOrch",
-                "set_mux_port",
-            )
-            .with_outcome(AuditOutcome::Failure)
-            .with_object_id(&port_name)
-            .with_object_type("mux_port")
-            .with_error("Port already exists");
+            let audit_record =
+                AuditRecord::new(AuditCategory::ResourceCreate, "MuxOrch", "set_mux_port")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(&port_name)
+                    .with_object_type("mux_port")
+                    .with_error("Port already exists");
             audit_log!(audit_record);
-            return Err(MuxOrchError::PortNotFound(format!("Port {} already exists", port_name)));
+            return Err(MuxOrchError::PortNotFound(format!(
+                "Port {} already exists",
+                port_name
+            )));
         }
 
         let mut entry = MuxPortEntry::new(port_name.clone(), config);
@@ -212,15 +209,12 @@ impl MuxOrch {
                     if entry.tunnel_oid != 0 {
                         let _ = callbacks.remove_mux_tunnel(entry.tunnel_oid);
                     }
-                    let audit_record = AuditRecord::new(
-                        AuditCategory::ResourceCreate,
-                        "MuxOrch",
-                        "set_mux_port",
-                    )
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(&port_name)
-                    .with_object_type("mux_port")
-                    .with_error(&format!("ACL creation failed: {}", e));
+                    let audit_record =
+                        AuditRecord::new(AuditCategory::ResourceCreate, "MuxOrch", "set_mux_port")
+                            .with_outcome(AuditOutcome::Failure)
+                            .with_object_id(&port_name)
+                            .with_object_type("mux_port")
+                            .with_error(&format!("ACL creation failed: {}", e));
                     audit_log!(audit_record);
                     return Err(e);
                 }
@@ -229,15 +223,12 @@ impl MuxOrch {
             // Write initial state to state DB
             if let Err(e) = callbacks.write_state_db(&port_name, MuxState::Unknown) {
                 self.stats.errors += 1;
-                let audit_record = AuditRecord::new(
-                    AuditCategory::ResourceCreate,
-                    "MuxOrch",
-                    "set_mux_port",
-                )
-                .with_outcome(AuditOutcome::Failure)
-                .with_object_id(&port_name)
-                .with_object_type("mux_port")
-                .with_error(&format!("State DB write failed: {}", e));
+                let audit_record =
+                    AuditRecord::new(AuditCategory::ResourceCreate, "MuxOrch", "set_mux_port")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(&port_name)
+                        .with_object_type("mux_port")
+                        .with_error(&format!("State DB write failed: {}", e));
                 audit_log!(audit_record);
                 return Err(e);
             }
@@ -245,19 +236,16 @@ impl MuxOrch {
             callbacks.on_port_added(&entry);
         }
 
-        let audit_record = AuditRecord::new(
-            AuditCategory::ResourceCreate,
-            "MuxOrch",
-            "set_mux_port",
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(&port_name)
-        .with_object_type("mux_port")
-        .with_details(serde_json::json!({
-            "port_name": port_name,
-            "tunnel_oid": format!("0x{:x}", entry.tunnel_oid),
-            "acl_oid": format!("0x{:x}", entry.acl_handler_oid),
-        }));
+        let audit_record =
+            AuditRecord::new(AuditCategory::ResourceCreate, "MuxOrch", "set_mux_port")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(&port_name)
+                .with_object_type("mux_port")
+                .with_details(serde_json::json!({
+                    "port_name": port_name,
+                    "tunnel_oid": format!("0x{:x}", entry.tunnel_oid),
+                    "acl_oid": format!("0x{:x}", entry.acl_handler_oid),
+                }));
         audit_log!(audit_record);
 
         self.ports.insert(port_name, entry);
@@ -266,35 +254,28 @@ impl MuxOrch {
 
     /// Removes a MUX port from the orchestrator.
     pub fn remove_port(&mut self, port_name: &str) -> Result<()> {
-        let entry = self.ports.remove(port_name)
-            .ok_or_else(|| {
-                let audit_record = AuditRecord::new(
-                    AuditCategory::ResourceDelete,
-                    "MuxOrch",
-                    "set_mux_port",
-                )
-                .with_outcome(AuditOutcome::Failure)
-                .with_object_id(port_name)
-                .with_object_type("mux_port")
-                .with_error("Port not found");
-                audit_log!(audit_record);
-                MuxOrchError::PortNotFound(port_name.to_string())
-            })?;
+        let entry = self.ports.remove(port_name).ok_or_else(|| {
+            let audit_record =
+                AuditRecord::new(AuditCategory::ResourceDelete, "MuxOrch", "set_mux_port")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(port_name)
+                    .with_object_type("mux_port")
+                    .with_error("Port not found");
+            audit_log!(audit_record);
+            MuxOrchError::PortNotFound(port_name.to_string())
+        })?;
 
         if let Some(ref callbacks) = self.callbacks {
             // Remove SAI objects
             if entry.acl_handler_oid != 0 {
                 if let Err(e) = callbacks.remove_mux_acl(entry.acl_handler_oid) {
                     self.stats.errors += 1;
-                    let audit_record = AuditRecord::new(
-                        AuditCategory::ResourceDelete,
-                        "MuxOrch",
-                        "set_mux_port",
-                    )
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(port_name)
-                    .with_object_type("mux_port")
-                    .with_error(&format!("ACL removal failed: {}", e));
+                    let audit_record =
+                        AuditRecord::new(AuditCategory::ResourceDelete, "MuxOrch", "set_mux_port")
+                            .with_outcome(AuditOutcome::Failure)
+                            .with_object_id(port_name)
+                            .with_object_type("mux_port")
+                            .with_error(&format!("ACL removal failed: {}", e));
                     audit_log!(audit_record);
                     return Err(e);
                 }
@@ -303,15 +284,12 @@ impl MuxOrch {
             if entry.tunnel_oid != 0 {
                 if let Err(e) = callbacks.remove_mux_tunnel(entry.tunnel_oid) {
                     self.stats.errors += 1;
-                    let audit_record = AuditRecord::new(
-                        AuditCategory::ResourceDelete,
-                        "MuxOrch",
-                        "set_mux_port",
-                    )
-                    .with_outcome(AuditOutcome::Failure)
-                    .with_object_id(port_name)
-                    .with_object_type("mux_port")
-                    .with_error(&format!("Tunnel removal failed: {}", e));
+                    let audit_record =
+                        AuditRecord::new(AuditCategory::ResourceDelete, "MuxOrch", "set_mux_port")
+                            .with_outcome(AuditOutcome::Failure)
+                            .with_object_id(port_name)
+                            .with_object_type("mux_port")
+                            .with_error(&format!("Tunnel removal failed: {}", e));
                     audit_log!(audit_record);
                     return Err(e);
                 }
@@ -320,15 +298,12 @@ impl MuxOrch {
             // Remove from state DB
             if let Err(e) = callbacks.remove_state_db(port_name) {
                 self.stats.errors += 1;
-                let audit_record = AuditRecord::new(
-                    AuditCategory::ResourceDelete,
-                    "MuxOrch",
-                    "set_mux_port",
-                )
-                .with_outcome(AuditOutcome::Failure)
-                .with_object_id(port_name)
-                .with_object_type("mux_port")
-                .with_error(&format!("State DB removal failed: {}", e));
+                let audit_record =
+                    AuditRecord::new(AuditCategory::ResourceDelete, "MuxOrch", "set_mux_port")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(port_name)
+                        .with_object_type("mux_port")
+                        .with_error(&format!("State DB removal failed: {}", e));
                 audit_log!(audit_record);
                 return Err(e);
             }
@@ -336,19 +311,16 @@ impl MuxOrch {
             callbacks.on_port_removed(port_name);
         }
 
-        let audit_record = AuditRecord::new(
-            AuditCategory::ResourceDelete,
-            "MuxOrch",
-            "set_mux_port",
-        )
-        .with_outcome(AuditOutcome::Success)
-        .with_object_id(port_name)
-        .with_object_type("mux_port")
-        .with_details(serde_json::json!({
-            "port_name": port_name,
-            "tunnel_oid_removed": format!("0x{:x}", entry.tunnel_oid),
-            "acl_oid_removed": format!("0x{:x}", entry.acl_handler_oid),
-        }));
+        let audit_record =
+            AuditRecord::new(AuditCategory::ResourceDelete, "MuxOrch", "set_mux_port")
+                .with_outcome(AuditOutcome::Success)
+                .with_object_id(port_name)
+                .with_object_type("mux_port")
+                .with_details(serde_json::json!({
+                    "port_name": port_name,
+                    "tunnel_oid_removed": format!("0x{:x}", entry.tunnel_oid),
+                    "acl_oid_removed": format!("0x{:x}", entry.acl_handler_oid),
+                }));
         audit_log!(audit_record);
 
         Ok(())
@@ -356,7 +328,8 @@ impl MuxOrch {
 
     /// Transitions a port to a new state (active/standby).
     pub fn set_port_state(&mut self, port_name: &str, new_state: MuxState) -> Result<()> {
-        let entry = self.get_port_mut(port_name)
+        let entry = self
+            .get_port_mut(port_name)
             .ok_or_else(|| MuxOrchError::PortNotFound(port_name.to_string()))?;
 
         let old_state = entry.state;
@@ -364,19 +337,20 @@ impl MuxOrch {
         // Validate state transition
         if !Self::is_valid_transition(old_state, new_state) {
             self.stats.errors += 1;
-            let audit_record = AuditRecord::new(
-                AuditCategory::ResourceModify,
-                "MuxOrch",
-                "update_mux_state",
-            )
-            .with_outcome(AuditOutcome::Failure)
-            .with_object_id(port_name)
-            .with_object_type("mux_port")
-            .with_error(&format!("Cannot transition from {:?} to {:?}", old_state, new_state));
+            let audit_record =
+                AuditRecord::new(AuditCategory::ResourceModify, "MuxOrch", "update_mux_state")
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(port_name)
+                    .with_object_type("mux_port")
+                    .with_error(&format!(
+                        "Cannot transition from {:?} to {:?}",
+                        old_state, new_state
+                    ));
             audit_log!(audit_record);
-            return Err(MuxOrchError::StateTransitionFailed(
-                format!("Cannot transition from {:?} to {:?}", old_state, new_state)
-            ));
+            return Err(MuxOrchError::StateTransitionFailed(format!(
+                "Cannot transition from {:?} to {:?}",
+                old_state, new_state
+            )));
         }
 
         entry.set_state(new_state);
@@ -385,15 +359,12 @@ impl MuxOrch {
             // Update state DB
             if let Err(e) = callbacks.write_state_db(port_name, new_state) {
                 self.stats.errors += 1;
-                let audit_record = AuditRecord::new(
-                    AuditCategory::ResourceModify,
-                    "MuxOrch",
-                    "update_mux_state",
-                )
-                .with_outcome(AuditOutcome::Failure)
-                .with_object_id(port_name)
-                .with_object_type("mux_port")
-                .with_error(&format!("State DB write failed: {}", e));
+                let audit_record =
+                    AuditRecord::new(AuditCategory::ResourceModify, "MuxOrch", "update_mux_state")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(port_name)
+                        .with_object_type("mux_port")
+                        .with_error(&format!("State DB write failed: {}", e));
                 audit_log!(audit_record);
                 return Err(e);
             }
@@ -402,7 +373,7 @@ impl MuxOrch {
             match new_state {
                 MuxState::Active => self.stats.stats.active_transitions += 1,
                 MuxState::Standby => self.stats.stats.standby_transitions += 1,
-                MuxState::Unknown => {},
+                MuxState::Unknown => {}
             }
 
             self.stats.stats.state_changes += 1;
@@ -419,19 +390,16 @@ impl MuxOrch {
                 MuxState::Unknown => "Unknown",
             };
 
-            let audit_record = AuditRecord::new(
-                AuditCategory::ResourceModify,
-                "MuxOrch",
-                "update_mux_state",
-            )
-            .with_outcome(AuditOutcome::Success)
-            .with_object_id(port_name)
-            .with_object_type("mux_port")
-            .with_details(serde_json::json!({
-                "port_name": port_name,
-                "old_state": old_state_str,
-                "new_state": state_str,
-            }));
+            let audit_record =
+                AuditRecord::new(AuditCategory::ResourceModify, "MuxOrch", "update_mux_state")
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_id(port_name)
+                    .with_object_type("mux_port")
+                    .with_details(serde_json::json!({
+                        "port_name": port_name,
+                        "old_state": old_state_str,
+                        "new_state": state_str,
+                    }));
             audit_log!(audit_record);
 
             // Notify subscribers
@@ -445,15 +413,13 @@ impl MuxOrch {
     /// Adds a neighbor entry for MUX peer discovery.
     pub fn add_neighbor(&mut self, neighbor_key: String, config: MuxNeighborConfig) -> Result<()> {
         if self.neighbors.contains_key(&neighbor_key) {
-            return Err(MuxOrchError::NeighborNotFound(
-                format!("Neighbor {} already exists", neighbor_key)
-            ));
+            return Err(MuxOrchError::NeighborNotFound(format!(
+                "Neighbor {} already exists",
+                neighbor_key
+            )));
         }
 
-        let entry = MuxNeighborEntry::new(
-            config.neighbor.clone(),
-            config,
-        );
+        let entry = MuxNeighborEntry::new(config.neighbor.clone(), config);
 
         self.neighbors.insert(neighbor_key, entry);
         Ok(())
@@ -461,7 +427,8 @@ impl MuxOrch {
 
     /// Removes a neighbor entry.
     pub fn remove_neighbor(&mut self, neighbor_key: &str) -> Result<()> {
-        self.neighbors.remove(neighbor_key)
+        self.neighbors
+            .remove(neighbor_key)
             .ok_or_else(|| MuxOrchError::NeighborNotFound(neighbor_key.to_string()))?;
         Ok(())
     }
@@ -579,7 +546,10 @@ mod tests {
         let config2 = config1.clone();
 
         assert_eq!(config1.enable_active_active, config2.enable_active_active);
-        assert_eq!(config1.state_change_timeout_ms, config2.state_change_timeout_ms);
+        assert_eq!(
+            config1.state_change_timeout_ms,
+            config2.state_change_timeout_ms
+        );
     }
 
     #[test]
@@ -656,7 +626,8 @@ mod tests {
         let mut orch = MuxOrch::new(MuxOrchConfig::default());
         let config = MuxPortConfig::default();
 
-        orch.add_port("Ethernet0".to_string(), config.clone()).unwrap();
+        orch.add_port("Ethernet0".to_string(), config.clone())
+            .unwrap();
 
         let result = orch.add_port("Ethernet0".to_string(), config);
         assert!(result.is_err());
@@ -692,7 +663,9 @@ mod tests {
         orch.add_port("Ethernet0".to_string(), config).unwrap();
 
         // Manually set state to Active first (before testing transition)
-        orch.get_port_mut("Ethernet0").unwrap().set_state(MuxState::Active);
+        orch.get_port_mut("Ethernet0")
+            .unwrap()
+            .set_state(MuxState::Active);
 
         // Transition from Active to Standby
         let result = orch.set_port_state("Ethernet0", MuxState::Standby);
@@ -710,7 +683,9 @@ mod tests {
         let config = MuxPortConfig::default();
 
         orch.add_port("Ethernet0".to_string(), config).unwrap();
-        orch.get_port_mut("Ethernet0").unwrap().set_state(MuxState::Standby);
+        orch.get_port_mut("Ethernet0")
+            .unwrap()
+            .set_state(MuxState::Standby);
 
         // Transition from Standby to Active
         let result = orch.set_port_state("Ethernet0", MuxState::Active);
@@ -728,7 +703,9 @@ mod tests {
         let config = MuxPortConfig::default();
 
         orch.add_port("Ethernet0".to_string(), config).unwrap();
-        orch.get_port_mut("Ethernet0").unwrap().set_state(MuxState::Active);
+        orch.get_port_mut("Ethernet0")
+            .unwrap()
+            .set_state(MuxState::Active);
 
         // Transition to Unknown (recovery state)
         let result = orch.set_port_state("Ethernet0", MuxState::Unknown);
@@ -744,7 +721,9 @@ mod tests {
         let config = MuxPortConfig::default();
 
         orch.add_port("Ethernet0".to_string(), config).unwrap();
-        orch.get_port_mut("Ethernet0").unwrap().set_state(MuxState::Active);
+        orch.get_port_mut("Ethernet0")
+            .unwrap()
+            .set_state(MuxState::Active);
 
         // Try to transition to same state
         let result = orch.set_port_state("Ethernet0", MuxState::Active);
@@ -788,15 +767,21 @@ mod tests {
         let mut orch = MuxOrch::new(MuxOrchConfig::default());
         let config = MuxPortConfig::default();
 
-        orch.add_port("Ethernet0".to_string(), config.clone()).unwrap();
-        orch.add_port("Ethernet4".to_string(), config.clone()).unwrap();
+        orch.add_port("Ethernet0".to_string(), config.clone())
+            .unwrap();
+        orch.add_port("Ethernet4".to_string(), config.clone())
+            .unwrap();
         orch.add_port("Ethernet8".to_string(), config).unwrap();
 
         assert_eq!(orch.port_count(), 3);
 
         // Set different states
-        orch.get_port_mut("Ethernet0").unwrap().set_state(MuxState::Active);
-        orch.get_port_mut("Ethernet4").unwrap().set_state(MuxState::Standby);
+        orch.get_port_mut("Ethernet0")
+            .unwrap()
+            .set_state(MuxState::Active);
+        orch.get_port_mut("Ethernet4")
+            .unwrap()
+            .set_state(MuxState::Standby);
         // Ethernet8 stays Unknown
 
         let port0 = orch.get_port("Ethernet0").unwrap();
@@ -831,8 +816,10 @@ mod tests {
         let mut orch = MuxOrch::new(MuxOrchConfig::default());
         let config = MuxPortConfig::default();
 
-        orch.add_port("Ethernet0".to_string(), config.clone()).unwrap();
-        orch.add_port("Ethernet4".to_string(), config.clone()).unwrap();
+        orch.add_port("Ethernet0".to_string(), config.clone())
+            .unwrap();
+        orch.add_port("Ethernet4".to_string(), config.clone())
+            .unwrap();
         orch.add_port("Ethernet8".to_string(), config).unwrap();
 
         let mut ports_list: Vec<_> = orch.ports().map(|(name, _)| name.clone()).collect();
@@ -850,7 +837,9 @@ mod tests {
         orch.add_port("Ethernet0".to_string(), config).unwrap();
 
         // First set to Standby (without triggering callbacks)
-        orch.get_port_mut("Ethernet0").unwrap().set_state(MuxState::Standby);
+        orch.get_port_mut("Ethernet0")
+            .unwrap()
+            .set_state(MuxState::Standby);
 
         // Now transition from Standby to Active (triggers statistics)
         let result = orch.set_port_state("Ethernet0", MuxState::Active);
@@ -865,23 +854,50 @@ mod tests {
     #[test]
     fn test_valid_state_transitions() {
         // Unknown -> Active
-        assert!(MuxOrch::is_valid_transition(MuxState::Unknown, MuxState::Active));
+        assert!(MuxOrch::is_valid_transition(
+            MuxState::Unknown,
+            MuxState::Active
+        ));
         // Unknown -> Standby
-        assert!(MuxOrch::is_valid_transition(MuxState::Unknown, MuxState::Standby));
+        assert!(MuxOrch::is_valid_transition(
+            MuxState::Unknown,
+            MuxState::Standby
+        ));
         // Active -> Standby
-        assert!(MuxOrch::is_valid_transition(MuxState::Active, MuxState::Standby));
+        assert!(MuxOrch::is_valid_transition(
+            MuxState::Active,
+            MuxState::Standby
+        ));
         // Standby -> Active
-        assert!(MuxOrch::is_valid_transition(MuxState::Standby, MuxState::Active));
+        assert!(MuxOrch::is_valid_transition(
+            MuxState::Standby,
+            MuxState::Active
+        ));
         // Any -> Unknown (recovery)
-        assert!(MuxOrch::is_valid_transition(MuxState::Active, MuxState::Unknown));
-        assert!(MuxOrch::is_valid_transition(MuxState::Standby, MuxState::Unknown));
+        assert!(MuxOrch::is_valid_transition(
+            MuxState::Active,
+            MuxState::Unknown
+        ));
+        assert!(MuxOrch::is_valid_transition(
+            MuxState::Standby,
+            MuxState::Unknown
+        ));
     }
 
     #[test]
     fn test_invalid_state_transitions() {
         // Same state
-        assert!(!MuxOrch::is_valid_transition(MuxState::Active, MuxState::Active));
-        assert!(!MuxOrch::is_valid_transition(MuxState::Standby, MuxState::Standby));
-        assert!(!MuxOrch::is_valid_transition(MuxState::Unknown, MuxState::Unknown));
+        assert!(!MuxOrch::is_valid_transition(
+            MuxState::Active,
+            MuxState::Active
+        ));
+        assert!(!MuxOrch::is_valid_transition(
+            MuxState::Standby,
+            MuxState::Standby
+        ));
+        assert!(!MuxOrch::is_valid_transition(
+            MuxState::Unknown,
+            MuxState::Unknown
+        ));
     }
 }

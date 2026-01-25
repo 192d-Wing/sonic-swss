@@ -1,7 +1,7 @@
 //! FFI exports for FgNhgOrch.
 
-use std::cell::RefCell;
 use super::orch::{FgNhgOrch, FgNhgOrchConfig};
+use std::cell::RefCell;
 
 thread_local! {
     static FG_NHG_ORCH: RefCell<Option<Box<FgNhgOrch>>> = const { RefCell::new(None) };

@@ -119,39 +119,37 @@ impl IntfsOrch {
     }
 
     /// Add IP address to an interface
-    pub fn add_ip_address(&mut self, intf_name: &str, ip_prefix: sonic_types::IpPrefix) -> Result<(), IntfsOrchError> {
+    pub fn add_ip_address(
+        &mut self,
+        intf_name: &str,
+        ip_prefix: sonic_types::IpPrefix,
+    ) -> Result<(), IntfsOrchError> {
         match self.interfaces.get_mut(intf_name) {
             Some(entry) => {
                 let ip_str = ip_prefix.to_string();
                 entry.ip_addresses.insert(ip_prefix);
 
-                let audit_record = AuditRecord::new(
-                    AuditCategory::ResourceCreate,
-                    "IntfsOrch",
-                    "add_ip_address",
-                )
-                .with_outcome(AuditOutcome::Success)
-                .with_object_id(intf_name)
-                .with_object_type("interface")
-                .with_details(serde_json::json!({
-                    "interface_name": intf_name,
-                    "ip_prefix": ip_str,
-                    "total_addresses": entry.ip_addresses.len(),
-                }));
+                let audit_record =
+                    AuditRecord::new(AuditCategory::ResourceCreate, "IntfsOrch", "add_ip_address")
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_id(intf_name)
+                        .with_object_type("interface")
+                        .with_details(serde_json::json!({
+                            "interface_name": intf_name,
+                            "ip_prefix": ip_str,
+                            "total_addresses": entry.ip_addresses.len(),
+                        }));
                 audit_log!(audit_record);
                 Ok(())
             }
             None => {
                 let err = IntfsOrchError::InterfaceNotFound(intf_name.to_string());
-                let audit_record = AuditRecord::new(
-                    AuditCategory::ResourceCreate,
-                    "IntfsOrch",
-                    "add_ip_address",
-                )
-                .with_outcome(AuditOutcome::Failure)
-                .with_object_id(intf_name)
-                .with_object_type("interface")
-                .with_error("Interface not found");
+                let audit_record =
+                    AuditRecord::new(AuditCategory::ResourceCreate, "IntfsOrch", "add_ip_address")
+                        .with_outcome(AuditOutcome::Failure)
+                        .with_object_id(intf_name)
+                        .with_object_type("interface")
+                        .with_error("Interface not found");
                 audit_log!(audit_record);
                 Err(err)
             }
@@ -159,7 +157,11 @@ impl IntfsOrch {
     }
 
     /// Remove IP address from an interface
-    pub fn remove_ip_address(&mut self, intf_name: &str, ip_prefix: sonic_types::IpPrefix) -> Result<(), IntfsOrchError> {
+    pub fn remove_ip_address(
+        &mut self,
+        intf_name: &str,
+        ip_prefix: sonic_types::IpPrefix,
+    ) -> Result<(), IntfsOrchError> {
         match self.interfaces.get_mut(intf_name) {
             Some(entry) => {
                 let ip_str = ip_prefix.to_string();
@@ -253,40 +255,38 @@ impl IntfsOrch {
     /// Decrease reference count for an interface
     pub fn decrease_ref_count(&mut self, intf_name: &str) -> Result<u32, IntfsOrchError> {
         match self.interfaces.get_mut(intf_name) {
-            Some(entry) => {
-                match entry.remove_ref() {
-                    Ok(new_count) => {
-                        let audit_record = AuditRecord::new(
-                            AuditCategory::ResourceModify,
-                            "IntfsOrch",
-                            "decrease_ref_count",
-                        )
-                        .with_outcome(AuditOutcome::Success)
-                        .with_object_id(intf_name)
-                        .with_object_type("interface")
-                        .with_details(serde_json::json!({
-                            "interface_name": intf_name,
-                            "new_ref_count": new_count,
-                            "action": "reference_count_decreased",
-                        }));
-                        audit_log!(audit_record);
-                        Ok(new_count)
-                    }
-                    Err(e) => {
-                        let audit_record = AuditRecord::new(
-                            AuditCategory::ResourceModify,
-                            "IntfsOrch",
-                            "decrease_ref_count",
-                        )
-                        .with_outcome(AuditOutcome::Failure)
-                        .with_object_id(intf_name)
-                        .with_object_type("interface")
-                        .with_error(&e);
-                        audit_log!(audit_record);
-                        Err(IntfsOrchError::InterfaceNotFound(e))
-                    }
+            Some(entry) => match entry.remove_ref() {
+                Ok(new_count) => {
+                    let audit_record = AuditRecord::new(
+                        AuditCategory::ResourceModify,
+                        "IntfsOrch",
+                        "decrease_ref_count",
+                    )
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_id(intf_name)
+                    .with_object_type("interface")
+                    .with_details(serde_json::json!({
+                        "interface_name": intf_name,
+                        "new_ref_count": new_count,
+                        "action": "reference_count_decreased",
+                    }));
+                    audit_log!(audit_record);
+                    Ok(new_count)
                 }
-            }
+                Err(e) => {
+                    let audit_record = AuditRecord::new(
+                        AuditCategory::ResourceModify,
+                        "IntfsOrch",
+                        "decrease_ref_count",
+                    )
+                    .with_outcome(AuditOutcome::Failure)
+                    .with_object_id(intf_name)
+                    .with_object_type("interface")
+                    .with_error(&e);
+                    audit_log!(audit_record);
+                    Err(IntfsOrchError::InterfaceNotFound(e))
+                }
+            },
             None => {
                 let err = IntfsOrchError::InterfaceNotFound(intf_name.to_string());
                 let audit_record = AuditRecord::new(
@@ -360,7 +360,10 @@ mod tests {
         let orch1 = IntfsOrch::new(config1);
         let orch2 = IntfsOrch::new(config2);
 
-        assert_eq!(orch1.stats.interfaces_created, orch2.stats.interfaces_created);
+        assert_eq!(
+            orch1.stats.interfaces_created,
+            orch2.stats.interfaces_created
+        );
     }
 
     #[test]
@@ -414,7 +417,8 @@ mod tests {
             vrf_id: 0,
             proxy_arp: false,
         };
-        orch.interfaces.insert("Ethernet0".to_string(), entry.clone());
+        orch.interfaces
+            .insert("Ethernet0".to_string(), entry.clone());
 
         let result = orch.get_interface("Ethernet0");
         assert!(result.is_some());
@@ -632,29 +636,43 @@ mod tests {
     fn test_intfs_entry_with_ipv4_addresses() {
         let mut entry = IntfsEntry::default();
 
-        entry.ip_addresses.insert(IpPrefix::from_str("192.168.1.1/24").unwrap());
-        entry.ip_addresses.insert(IpPrefix::from_str("10.0.0.1/8").unwrap());
+        entry
+            .ip_addresses
+            .insert(IpPrefix::from_str("192.168.1.1/24").unwrap());
+        entry
+            .ip_addresses
+            .insert(IpPrefix::from_str("10.0.0.1/8").unwrap());
 
         assert_eq!(entry.ip_addresses.len(), 2);
-        assert!(entry.ip_addresses.contains(&IpPrefix::from_str("192.168.1.1/24").unwrap()));
+        assert!(entry
+            .ip_addresses
+            .contains(&IpPrefix::from_str("192.168.1.1/24").unwrap()));
     }
 
     #[test]
     fn test_intfs_entry_with_ipv6_addresses() {
         let mut entry = IntfsEntry::default();
 
-        entry.ip_addresses.insert(IpPrefix::from_str("2001:db8::1/64").unwrap());
+        entry
+            .ip_addresses
+            .insert(IpPrefix::from_str("2001:db8::1/64").unwrap());
 
         assert_eq!(entry.ip_addresses.len(), 1);
-        assert!(entry.ip_addresses.contains(&IpPrefix::from_str("2001:db8::1/64").unwrap()));
+        assert!(entry
+            .ip_addresses
+            .contains(&IpPrefix::from_str("2001:db8::1/64").unwrap()));
     }
 
     #[test]
     fn test_intfs_entry_with_mixed_ip_addresses() {
         let mut entry = IntfsEntry::default();
 
-        entry.ip_addresses.insert(IpPrefix::from_str("192.168.1.1/24").unwrap());
-        entry.ip_addresses.insert(IpPrefix::from_str("2001:db8::1/64").unwrap());
+        entry
+            .ip_addresses
+            .insert(IpPrefix::from_str("192.168.1.1/24").unwrap());
+        entry
+            .ip_addresses
+            .insert(IpPrefix::from_str("2001:db8::1/64").unwrap());
 
         assert_eq!(entry.ip_addresses.len(), 2);
     }
@@ -665,7 +683,9 @@ mod tests {
         entry1.ref_count = 10;
         entry1.vrf_id = 0x5678;
         entry1.proxy_arp = true;
-        entry1.ip_addresses.insert(IpPrefix::from_str("192.168.1.1/24").unwrap());
+        entry1
+            .ip_addresses
+            .insert(IpPrefix::from_str("192.168.1.1/24").unwrap());
 
         let entry2 = entry1.clone();
 
@@ -700,7 +720,12 @@ mod tests {
     fn test_rif_type_all_variants() {
         use super::super::types::RifType;
 
-        let types = vec![RifType::Port, RifType::Vlan, RifType::SubPort, RifType::Loopback];
+        let types = vec![
+            RifType::Port,
+            RifType::Vlan,
+            RifType::SubPort,
+            RifType::Loopback,
+        ];
         assert_eq!(types.len(), 4);
     }
 
@@ -748,7 +773,8 @@ mod tests {
     fn test_intfs_orch_case_sensitive_interface_names() {
         let mut orch = IntfsOrch::new(IntfsOrchConfig::default());
 
-        orch.interfaces.insert("Ethernet0".to_string(), IntfsEntry::default());
+        orch.interfaces
+            .insert("Ethernet0".to_string(), IntfsEntry::default());
 
         assert!(orch.get_interface("Ethernet0").is_some());
         assert!(orch.get_interface("ethernet0").is_none());

@@ -143,21 +143,13 @@ mod tests {
 
     #[test]
     fn test_vsid_validation() {
-        let config = NvgreTunnelMapConfig::new(
-            "tunnel1".to_string(),
-            "map1".to_string(),
-            100,
-            1000,
-        );
+        let config =
+            NvgreTunnelMapConfig::new("tunnel1".to_string(), "map1".to_string(), 100, 1000);
         assert!(config.validate_vsid().is_ok());
 
         // Test VSID = 0
-        let config_zero = NvgreTunnelMapConfig::new(
-            "tunnel1".to_string(),
-            "map1".to_string(),
-            100,
-            0,
-        );
+        let config_zero =
+            NvgreTunnelMapConfig::new("tunnel1".to_string(), "map1".to_string(), 100, 0);
         assert!(config_zero.validate_vsid().is_err());
 
         // Test VSID > max

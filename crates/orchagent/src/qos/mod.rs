@@ -16,6 +16,6 @@ mod types;
 pub use ffi::{register_qos_orch, unregister_qos_orch};
 pub use orch::{QosOrch, QosOrchCallbacks, QosOrchConfig, QosOrchError, QosOrchStats};
 pub use types::{
-    MeterType, QosMapEntry, QosMapType, QosStats, SchedulerConfig,
-    SchedulerEntry, SchedulerType, TcToQueueMapEntry, WredProfile,
+    MeterType, QosMapEntry, QosMapType, QosStats, SchedulerConfig, SchedulerEntry, SchedulerType,
+    TcToQueueMapEntry, WredProfile,
 };

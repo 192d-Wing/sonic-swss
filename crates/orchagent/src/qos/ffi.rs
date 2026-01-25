@@ -1,7 +1,7 @@
 //! FFI exports for QosOrch.
 
-use std::cell::RefCell;
 use super::orch::{QosOrch, QosOrchConfig};
+use std::cell::RefCell;
 
 thread_local! {
     static QOS_ORCH: RefCell<Option<Box<QosOrch>>> = const { RefCell::new(None) };

@@ -16,6 +16,6 @@ mod types;
 pub use ffi::{register_vxlan_orch, unregister_vxlan_orch};
 pub use orch::{VxlanOrch, VxlanOrchCallbacks, VxlanOrchConfig, VxlanOrchError, VxlanOrchStats};
 pub use types::{
-    Vni, VxlanEncapType, VxlanStats, VxlanTunnelConfig, VxlanTunnelEntry,
-    VxlanTunnelKey, VxlanVlanMapEntry, VxlanVlanMapKey, VxlanVrfMapEntry, VxlanVrfMapKey,
+    Vni, VxlanEncapType, VxlanStats, VxlanTunnelConfig, VxlanTunnelEntry, VxlanTunnelKey,
+    VxlanVlanMapEntry, VxlanVlanMapKey, VxlanVrfMapEntry, VxlanVrfMapKey,
 };

@@ -60,10 +60,7 @@ pub struct Srv6LocalSidEntry {
 
 impl Srv6LocalSidEntry {
     pub fn new(config: Srv6LocalSidConfig) -> Self {
-        Self {
-            config,
-            sid_oid: 0,
-        }
+        Self { config, sid_oid: 0 }
     }
 }
 
@@ -110,10 +107,7 @@ pub struct Srv6NextHopEntry {
 
 impl Srv6NextHopEntry {
     pub fn new(config: Srv6NextHopConfig) -> Self {
-        Self {
-            config,
-            nh_oid: 0,
-        }
+        Self { config, nh_oid: 0 }
     }
 }
 

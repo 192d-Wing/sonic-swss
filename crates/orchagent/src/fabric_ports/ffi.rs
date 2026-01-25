@@ -1,9 +1,9 @@
 //! FFI exports for FabricPortsOrch.
 
-use std::cell::RefCell;
-use sonic_sai::types::RawSaiObjectId;
 use super::orch::{FabricPortsOrch, FabricPortsOrchCallbacks, FabricPortsOrchConfig, Result};
 use super::types::{FabricPortState, IsolationState, LinkStatus};
+use sonic_sai::types::RawSaiObjectId;
+use std::cell::RefCell;
 
 /// FFI stub callbacks that do nothing (for C++ interop).
 struct FfiFabricPortsCallbacks;
@@ -33,12 +33,7 @@ impl FabricPortsOrchCallbacks for FfiFabricPortsCallbacks {
         Ok(())
     }
 
-    fn on_link_status_changed(
-        &self,
-        _lane: u32,
-        _old_status: LinkStatus,
-        _new_status: LinkStatus,
-    ) {
+    fn on_link_status_changed(&self, _lane: u32, _old_status: LinkStatus, _new_status: LinkStatus) {
     }
     fn on_port_isolated(&self, _lane: u32, _reason: IsolationState) {}
     fn on_port_recovered(&self, _lane: u32) {}
@@ -54,7 +49,9 @@ pub extern "C" fn register_fabric_ports_orch() -> bool {
         if orch.borrow().is_some() {
             return false;
         }
-        *orch.borrow_mut() = Some(Box::new(FabricPortsOrch::new(FabricPortsOrchConfig::default())));
+        *orch.borrow_mut() = Some(Box::new(FabricPortsOrch::new(
+            FabricPortsOrchConfig::default(),
+        )));
         true
     })
 }

@@ -1,8 +1,8 @@
 //! FFI exports for PfcWdOrch.
 
+use super::orch::{PfcWdOrch, PfcWdOrchConfig};
 use std::cell::RefCell;
 use std::ffi::{c_char, CStr};
-use super::orch::{PfcWdOrch, PfcWdOrchConfig};
 
 thread_local! {
     static PFCWD_ORCH: RefCell<Option<Box<PfcWdOrch>>> = const { RefCell::new(None) };

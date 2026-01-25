@@ -2,7 +2,6 @@
 ///
 /// This module provides common functionality used by both ControlNetlinkActor
 /// and DataNetlinkActor to avoid code duplication.
-
 use netlink_sys::Socket;
 
 #[cfg(not(test))]
@@ -86,10 +85,7 @@ pub fn resolve_family_id(socket: &mut Socket, family_name: &str) -> Result<u16, 
     loop {
         match socket.recv_from(&mut drain_buf, libc::MSG_DONTWAIT) {
             Ok((n, _addr)) if n > 0 => {
-                debug!(
-                    "resolve_family_id: Drained {} stale bytes from socket",
-                    n
-                );
+                debug!("resolve_family_id: Drained {} stale bytes from socket", n);
                 continue;
             }
             _ => break,
@@ -127,10 +123,7 @@ pub fn resolve_family_id(socket: &mut Socket, family_name: &str) -> Result<u16, 
 
     let kernel_addr = SocketAddr::new(0, 0);
     let sent_bytes = socket.send_to(&buf[..], &kernel_addr, 0)?;
-    debug!(
-        "resolve_family_id: Sent {} bytes to kernel",
-        sent_bytes
-    );
+    debug!("resolve_family_id: Sent {} bytes to kernel", sent_bytes);
 
     // Receive response using raw recv syscall to avoid netlink-sys buffer issues
     let mut response_buf = vec![0u8; 8192];
@@ -199,13 +192,15 @@ pub fn resolve_family_id(socket: &mut Socket, family_name: &str) -> Result<u16, 
     }
 
     // Parse the response
-    let response = NetlinkMessage::<GenlMessage<GenlCtrl>>::deserialize(&response_buf[..bytes_read])
-        .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Failed to parse response: {:?}", e),
-            )
-        })?;
+    let response = NetlinkMessage::<GenlMessage<GenlCtrl>>::deserialize(
+        &response_buf[..bytes_read],
+    )
+    .map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Failed to parse response: {:?}", e),
+        )
+    })?;
 
     match response.payload {
         NetlinkPayload::InnerMessage(genlmsg) => {
@@ -314,13 +309,15 @@ pub fn resolve_multicast_group(
     }
 
     // Parse the response
-    let response = NetlinkMessage::<GenlMessage<GenlCtrl>>::deserialize(&response_buf[..bytes_read])
-        .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Failed to parse response: {:?}", e),
-            )
-        })?;
+    let response = NetlinkMessage::<GenlMessage<GenlCtrl>>::deserialize(
+        &response_buf[..bytes_read],
+    )
+    .map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Failed to parse response: {:?}", e),
+        )
+    })?;
 
     match response.payload {
         NetlinkPayload::InnerMessage(genlmsg) => {
@@ -342,10 +339,7 @@ pub fn resolve_multicast_group(
                         for group_attr in group_nlas {
                             match group_attr {
                                 McastGrpAttrs::Name(name) => {
-                                    debug!(
-                                        "resolve_multicast_group: Found group name '{}'",
-                                        name
-                                    );
+                                    debug!("resolve_multicast_group: Found group name '{}'", name);
                                     if name == group_name {
                                         found_name = Some(name.clone());
                                     }

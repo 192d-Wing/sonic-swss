@@ -225,7 +225,10 @@ impl IpPrefix {
             )));
         }
 
-        Ok(IpPrefix { address, prefix_len })
+        Ok(IpPrefix {
+            address,
+            prefix_len,
+        })
     }
 
     /// Returns the network address of this prefix.

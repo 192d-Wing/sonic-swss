@@ -2,12 +2,12 @@
 //!
 //! Manages buffer watermark statistics and clearing.
 
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
 use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
-use crate::audit_log;
 
 use super::types::{
     ClearRequest, QueueIds, QueueType, WatermarkConfig, WatermarkGroup, WatermarkStatus,
@@ -356,7 +356,11 @@ impl WatermarkOrch {
         let all_ids = self.queue_ids.all.clone();
 
         self.clear_watermarks(table, "SAI_QUEUE_STAT_SHARED_WATERMARK_BYTES", &unicast_ids);
-        self.clear_watermarks(table, "SAI_QUEUE_STAT_SHARED_WATERMARK_BYTES", &multicast_ids);
+        self.clear_watermarks(
+            table,
+            "SAI_QUEUE_STAT_SHARED_WATERMARK_BYTES",
+            &multicast_ids,
+        );
         self.clear_watermarks(table, "SAI_QUEUE_STAT_SHARED_WATERMARK_BYTES", &all_ids);
 
         // Clear buffer pool watermarks
@@ -663,7 +667,12 @@ mod tests {
                 true
             }
 
-            fn clear_watermark(&self, _table: WatermarkTable, _stat_name: &str, _obj_id: RawSaiObjectId) {
+            fn clear_watermark(
+                &self,
+                _table: WatermarkTable,
+                _stat_name: &str,
+                _obj_id: RawSaiObjectId,
+            ) {
                 *self.clear_count.lock().unwrap() += 1;
             }
         }
@@ -680,7 +689,8 @@ mod tests {
         orch.add_queue_id(QueueType::Unicast, 2);
 
         // Clear unicast queue watermarks
-        orch.handle_clear_request(WatermarkTable::User, ClearRequest::QueueSharedUnicast).unwrap();
+        orch.handle_clear_request(WatermarkTable::User, ClearRequest::QueueSharedUnicast)
+            .unwrap();
 
         assert_eq!(*callbacks.clear_count.lock().unwrap(), 2);
         assert_eq!(orch.stats().clears_processed, 1);
@@ -722,7 +732,12 @@ mod tests {
                 true
             }
 
-            fn clear_watermark(&self, _table: WatermarkTable, _stat_name: &str, obj_id: RawSaiObjectId) {
+            fn clear_watermark(
+                &self,
+                _table: WatermarkTable,
+                _stat_name: &str,
+                obj_id: RawSaiObjectId,
+            ) {
                 self.cleared_objects.lock().unwrap().push(obj_id);
             }
         }
@@ -740,7 +755,8 @@ mod tests {
         orch.add_pg_id(202);
 
         // Clear PG shared watermarks (peak values)
-        orch.handle_clear_request(WatermarkTable::Persistent, ClearRequest::PgShared).unwrap();
+        orch.handle_clear_request(WatermarkTable::Persistent, ClearRequest::PgShared)
+            .unwrap();
 
         let cleared = callbacks.cleared_objects.lock().unwrap();
         assert_eq!(cleared.len(), 3);
@@ -779,9 +795,12 @@ mod tests {
         orch.add_pg_id(100);
 
         // Perform multiple clear operations
-        orch.handle_clear_request(WatermarkTable::User, ClearRequest::QueueSharedUnicast).unwrap();
-        orch.handle_clear_request(WatermarkTable::User, ClearRequest::PgShared).unwrap();
-        orch.handle_clear_request(WatermarkTable::Persistent, ClearRequest::BufferPool).unwrap();
+        orch.handle_clear_request(WatermarkTable::User, ClearRequest::QueueSharedUnicast)
+            .unwrap();
+        orch.handle_clear_request(WatermarkTable::User, ClearRequest::PgShared)
+            .unwrap();
+        orch.handle_clear_request(WatermarkTable::Persistent, ClearRequest::BufferPool)
+            .unwrap();
 
         assert_eq!(orch.stats().clears_processed, 3);
     }
@@ -878,7 +897,12 @@ mod tests {
                 self.pools.clone()
             }
 
-            fn clear_watermark_by_name(&self, _table: WatermarkTable, _stat_name: &str, name: &str) {
+            fn clear_watermark_by_name(
+                &self,
+                _table: WatermarkTable,
+                _stat_name: &str,
+                name: &str,
+            ) {
                 self.cleared.lock().unwrap().push(name.to_string());
             }
         }
@@ -898,7 +922,8 @@ mod tests {
         orch.set_callbacks(callbacks.clone());
 
         // Clear buffer pool watermarks
-        orch.handle_clear_request(WatermarkTable::User, ClearRequest::BufferPool).unwrap();
+        orch.handle_clear_request(WatermarkTable::User, ClearRequest::BufferPool)
+            .unwrap();
 
         let cleared = callbacks.cleared.lock().unwrap();
         assert_eq!(cleared.len(), 4);
@@ -931,11 +956,12 @@ mod tests {
         let mut orch = WatermarkOrch::new(WatermarkOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let result = orch.handle_clear_request(WatermarkTable::User, ClearRequest::QueueSharedUnicast);
+        let result =
+            orch.handle_clear_request(WatermarkTable::User, ClearRequest::QueueSharedUnicast);
 
         assert!(result.is_err());
         match result {
-            Err(WatermarkOrchError::PortsNotReady) => {},
+            Err(WatermarkOrchError::PortsNotReady) => {}
             _ => panic!("Expected PortsNotReady error"),
         }
     }
@@ -951,7 +977,12 @@ mod tests {
                 true
             }
 
-            fn clear_watermark(&self, _table: WatermarkTable, _stat_name: &str, _obj_id: RawSaiObjectId) {
+            fn clear_watermark(
+                &self,
+                _table: WatermarkTable,
+                _stat_name: &str,
+                _obj_id: RawSaiObjectId,
+            ) {
                 *self.clear_count.lock().unwrap() += 1;
             }
         }
@@ -964,7 +995,8 @@ mod tests {
         orch.set_callbacks(callbacks.clone());
 
         // Clear without adding any IDs - should succeed but clear nothing
-        let result = orch.handle_clear_request(WatermarkTable::User, ClearRequest::QueueSharedUnicast);
+        let result =
+            orch.handle_clear_request(WatermarkTable::User, ClearRequest::QueueSharedUnicast);
         assert!(result.is_ok());
         assert_eq!(*callbacks.clear_count.lock().unwrap(), 0);
     }
@@ -1056,13 +1088,27 @@ mod tests {
         orch.add_pg_id(100);
 
         // Test all clear request types
-        assert!(orch.handle_clear_request(WatermarkTable::User, ClearRequest::PgHeadroom).is_ok());
-        assert!(orch.handle_clear_request(WatermarkTable::User, ClearRequest::PgShared).is_ok());
-        assert!(orch.handle_clear_request(WatermarkTable::User, ClearRequest::QueueSharedUnicast).is_ok());
-        assert!(orch.handle_clear_request(WatermarkTable::User, ClearRequest::QueueSharedMulticast).is_ok());
-        assert!(orch.handle_clear_request(WatermarkTable::User, ClearRequest::QueueSharedAll).is_ok());
-        assert!(orch.handle_clear_request(WatermarkTable::User, ClearRequest::BufferPool).is_ok());
-        assert!(orch.handle_clear_request(WatermarkTable::User, ClearRequest::HeadroomPool).is_ok());
+        assert!(orch
+            .handle_clear_request(WatermarkTable::User, ClearRequest::PgHeadroom)
+            .is_ok());
+        assert!(orch
+            .handle_clear_request(WatermarkTable::User, ClearRequest::PgShared)
+            .is_ok());
+        assert!(orch
+            .handle_clear_request(WatermarkTable::User, ClearRequest::QueueSharedUnicast)
+            .is_ok());
+        assert!(orch
+            .handle_clear_request(WatermarkTable::User, ClearRequest::QueueSharedMulticast)
+            .is_ok());
+        assert!(orch
+            .handle_clear_request(WatermarkTable::User, ClearRequest::QueueSharedAll)
+            .is_ok());
+        assert!(orch
+            .handle_clear_request(WatermarkTable::User, ClearRequest::BufferPool)
+            .is_ok());
+        assert!(orch
+            .handle_clear_request(WatermarkTable::User, ClearRequest::HeadroomPool)
+            .is_ok());
 
         assert_eq!(orch.stats().clears_processed, 7);
     }
@@ -1078,7 +1124,12 @@ mod tests {
                 true
             }
 
-            fn clear_watermark(&self, table: WatermarkTable, _stat_name: &str, _obj_id: RawSaiObjectId) {
+            fn clear_watermark(
+                &self,
+                table: WatermarkTable,
+                _stat_name: &str,
+                _obj_id: RawSaiObjectId,
+            ) {
                 *self.last_table.lock().unwrap() = Some(table);
             }
         }
@@ -1092,14 +1143,26 @@ mod tests {
         orch.add_pg_id(100);
 
         // Test different table types
-        orch.handle_clear_request(WatermarkTable::Periodic, ClearRequest::PgShared).unwrap();
-        assert_eq!(*callbacks.last_table.lock().unwrap(), Some(WatermarkTable::Periodic));
+        orch.handle_clear_request(WatermarkTable::Periodic, ClearRequest::PgShared)
+            .unwrap();
+        assert_eq!(
+            *callbacks.last_table.lock().unwrap(),
+            Some(WatermarkTable::Periodic)
+        );
 
-        orch.handle_clear_request(WatermarkTable::Persistent, ClearRequest::PgShared).unwrap();
-        assert_eq!(*callbacks.last_table.lock().unwrap(), Some(WatermarkTable::Persistent));
+        orch.handle_clear_request(WatermarkTable::Persistent, ClearRequest::PgShared)
+            .unwrap();
+        assert_eq!(
+            *callbacks.last_table.lock().unwrap(),
+            Some(WatermarkTable::Persistent)
+        );
 
-        orch.handle_clear_request(WatermarkTable::User, ClearRequest::PgShared).unwrap();
-        assert_eq!(*callbacks.last_table.lock().unwrap(), Some(WatermarkTable::User));
+        orch.handle_clear_request(WatermarkTable::User, ClearRequest::PgShared)
+            .unwrap();
+        assert_eq!(
+            *callbacks.last_table.lock().unwrap(),
+            Some(WatermarkTable::User)
+        );
     }
 
     #[test]

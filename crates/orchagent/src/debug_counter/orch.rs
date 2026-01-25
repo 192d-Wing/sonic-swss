@@ -1,11 +1,13 @@
 //! Debug counter orchestration logic.
 
-use super::types::{DebugCounterConfig, DebugCounterEntry, DebugCounterType, DropReason, FreeCounter};
+use super::types::{
+    DebugCounterConfig, DebugCounterEntry, DebugCounterType, DropReason, FreeCounter,
+};
+use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
+use crate::audit_log;
 use sonic_sai::types::RawSaiObjectId;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::audit::{AuditRecord, AuditCategory, AuditOutcome};
-use crate::audit_log;
 
 #[derive(Debug, Clone)]
 pub enum DebugCounterOrchError {
@@ -33,11 +35,26 @@ pub struct DebugCounterOrchStats {
 }
 
 pub trait DebugCounterOrchCallbacks: Send + Sync {
-    fn create_debug_counter(&self, counter_type: DebugCounterType) -> Result<RawSaiObjectId, String>;
+    fn create_debug_counter(
+        &self,
+        counter_type: DebugCounterType,
+    ) -> Result<RawSaiObjectId, String>;
     fn remove_debug_counter(&self, oid: RawSaiObjectId) -> Result<(), String>;
-    fn add_drop_reason_to_counter(&self, counter_id: RawSaiObjectId, drop_reason: &str) -> Result<(), String>;
-    fn remove_drop_reason_from_counter(&self, counter_id: RawSaiObjectId, drop_reason: &str) -> Result<(), String>;
-    fn register_flex_counter(&self, counter_id: RawSaiObjectId, counter_name: &str) -> Result<(), String>;
+    fn add_drop_reason_to_counter(
+        &self,
+        counter_id: RawSaiObjectId,
+        drop_reason: &str,
+    ) -> Result<(), String>;
+    fn remove_drop_reason_from_counter(
+        &self,
+        counter_id: RawSaiObjectId,
+        drop_reason: &str,
+    ) -> Result<(), String>;
+    fn register_flex_counter(
+        &self,
+        counter_id: RawSaiObjectId,
+        counter_name: &str,
+    ) -> Result<(), String>;
     fn unregister_flex_counter(&self, counter_name: &str) -> Result<(), String>;
     fn get_available_drop_reasons(&self, is_ingress: bool) -> Vec<String>;
 }
@@ -77,7 +94,10 @@ impl DebugCounterOrch {
         self.debug_counters.get_mut(name)
     }
 
-    pub fn create_debug_counter(&mut self, config: DebugCounterConfig) -> Result<(), DebugCounterOrchError> {
+    pub fn create_debug_counter(
+        &mut self,
+        config: DebugCounterConfig,
+    ) -> Result<(), DebugCounterOrchError> {
         if self.debug_counters.contains_key(&config.name) {
             let record = AuditRecord::new(
                 AuditCategory::ErrorCondition,
@@ -94,19 +114,23 @@ impl DebugCounterOrch {
         }
 
         let callbacks = Arc::clone(
-            self.callbacks.as_ref()
+            self.callbacks
+                .as_ref()
                 .ok_or_else(|| DebugCounterOrchError::SaiError("No callbacks set".to_string()))?,
         );
 
-        let counter_id = callbacks.create_debug_counter(config.counter_type)
+        let counter_id = callbacks
+            .create_debug_counter(config.counter_type)
             .map_err(DebugCounterOrchError::SaiError)?;
 
-        let mut entry = DebugCounterEntry::new(config.name.clone(), config.counter_type, counter_id);
+        let mut entry =
+            DebugCounterEntry::new(config.name.clone(), config.counter_type, counter_id);
         entry.description = config.description.clone();
 
         // Add drop reasons
         for reason in &config.drop_reasons {
-            callbacks.add_drop_reason_to_counter(counter_id, reason)
+            callbacks
+                .add_drop_reason_to_counter(counter_id, reason)
                 .map_err(DebugCounterOrchError::SaiError)?;
             entry.add_drop_reason(reason.clone());
             self.stats.drop_reasons_added += 1;
@@ -114,7 +138,8 @@ impl DebugCounterOrch {
 
         // Register with flex counter if enabled
         if self.config.enable_flex_counter {
-            callbacks.register_flex_counter(counter_id, &config.name)
+            callbacks
+                .register_flex_counter(counter_id, &config.name)
                 .map_err(DebugCounterOrchError::FlexCounterError)?;
             self.stats.flex_counter_registrations += 1;
         }
@@ -142,23 +167,24 @@ impl DebugCounterOrch {
     }
 
     pub fn remove_debug_counter(&mut self, name: &str) -> Result<(), DebugCounterOrchError> {
-        let entry = self.debug_counters.remove(name)
-            .ok_or_else(|| {
-                let record = AuditRecord::new(
-                    AuditCategory::ErrorCondition,
-                    "DebugCounterOrch",
-                    format!("remove_counter_failed: {}", name),
-                )
-                .with_outcome(AuditOutcome::Failure)
-                .with_object_id(name)
-                .with_object_type("debug_counter")
-                .with_error("Counter not found");
-                audit_log!(record);
+        let entry = self.debug_counters.remove(name).ok_or_else(|| {
+            let record = AuditRecord::new(
+                AuditCategory::ErrorCondition,
+                "DebugCounterOrch",
+                format!("remove_counter_failed: {}", name),
+            )
+            .with_outcome(AuditOutcome::Failure)
+            .with_object_id(name)
+            .with_object_type("debug_counter")
+            .with_error("Counter not found");
+            audit_log!(record);
 
-                DebugCounterOrchError::CounterNotFound(name.to_string())
-            })?;
+            DebugCounterOrchError::CounterNotFound(name.to_string())
+        })?;
 
-        let callbacks = self.callbacks.as_ref()
+        let callbacks = self
+            .callbacks
+            .as_ref()
             .ok_or_else(|| DebugCounterOrchError::SaiError("No callbacks set".to_string()))?;
 
         // Unregister from flex counter if enabled
@@ -172,7 +198,8 @@ impl DebugCounterOrch {
         }
 
         // Remove counter
-        callbacks.remove_debug_counter(entry.counter_id)
+        callbacks
+            .remove_debug_counter(entry.counter_id)
             .map_err(DebugCounterOrchError::SaiError)?;
 
         let record = AuditRecord::new(
@@ -194,16 +221,24 @@ impl DebugCounterOrch {
         Ok(())
     }
 
-    pub fn add_drop_reason(&mut self, counter_name: &str, drop_reason: &str) -> Result<(), DebugCounterOrchError> {
-        let entry = self.debug_counters.get_mut(counter_name)
+    pub fn add_drop_reason(
+        &mut self,
+        counter_name: &str,
+        drop_reason: &str,
+    ) -> Result<(), DebugCounterOrchError> {
+        let entry = self
+            .debug_counters
+            .get_mut(counter_name)
             .ok_or_else(|| DebugCounterOrchError::CounterNotFound(counter_name.to_string()))?;
 
         let callbacks = Arc::clone(
-            self.callbacks.as_ref()
+            self.callbacks
+                .as_ref()
                 .ok_or_else(|| DebugCounterOrchError::SaiError("No callbacks set".to_string()))?,
         );
 
-        callbacks.add_drop_reason_to_counter(entry.counter_id, drop_reason)
+        callbacks
+            .add_drop_reason_to_counter(entry.counter_id, drop_reason)
             .map_err(DebugCounterOrchError::SaiError)?;
 
         entry.add_drop_reason(drop_reason.to_string());
@@ -212,18 +247,29 @@ impl DebugCounterOrch {
         Ok(())
     }
 
-    pub fn remove_drop_reason(&mut self, counter_name: &str, drop_reason: &str) -> Result<(), DebugCounterOrchError> {
-        let entry = self.debug_counters.get_mut(counter_name)
+    pub fn remove_drop_reason(
+        &mut self,
+        counter_name: &str,
+        drop_reason: &str,
+    ) -> Result<(), DebugCounterOrchError> {
+        let entry = self
+            .debug_counters
+            .get_mut(counter_name)
             .ok_or_else(|| DebugCounterOrchError::CounterNotFound(counter_name.to_string()))?;
 
         if !entry.drop_reasons.contains(drop_reason) {
-            return Err(DebugCounterOrchError::DropReasonNotFound(drop_reason.to_string()));
+            return Err(DebugCounterOrchError::DropReasonNotFound(
+                drop_reason.to_string(),
+            ));
         }
 
-        let callbacks = self.callbacks.as_ref()
+        let callbacks = self
+            .callbacks
+            .as_ref()
             .ok_or_else(|| DebugCounterOrchError::SaiError("No callbacks set".to_string()))?;
 
-        callbacks.remove_drop_reason_from_counter(entry.counter_id, drop_reason)
+        callbacks
+            .remove_drop_reason_from_counter(entry.counter_id, drop_reason)
             .map_err(DebugCounterOrchError::SaiError)?;
 
         entry.remove_drop_reason(drop_reason);
@@ -240,12 +286,18 @@ impl DebugCounterOrch {
         Ok(())
     }
 
-    pub fn reconcile_drop_reasons(&mut self, counter_name: &str) -> Result<(), DebugCounterOrchError> {
-        let entry = self.debug_counters.get(counter_name)
+    pub fn reconcile_drop_reasons(
+        &mut self,
+        counter_name: &str,
+    ) -> Result<(), DebugCounterOrchError> {
+        let entry = self
+            .debug_counters
+            .get(counter_name)
             .ok_or_else(|| DebugCounterOrchError::CounterNotFound(counter_name.to_string()))?;
 
         let callbacks = Arc::clone(
-            self.callbacks.as_ref()
+            self.callbacks
+                .as_ref()
                 .ok_or_else(|| DebugCounterOrchError::SaiError("No callbacks set".to_string()))?,
         );
 
@@ -304,7 +356,10 @@ mod tests {
     struct MockCallbacks;
 
     impl DebugCounterOrchCallbacks for MockCallbacks {
-        fn create_debug_counter(&self, _counter_type: DebugCounterType) -> Result<RawSaiObjectId, String> {
+        fn create_debug_counter(
+            &self,
+            _counter_type: DebugCounterType,
+        ) -> Result<RawSaiObjectId, String> {
             Ok(0x1000)
         }
 
@@ -312,15 +367,27 @@ mod tests {
             Ok(())
         }
 
-        fn add_drop_reason_to_counter(&self, _counter_id: RawSaiObjectId, _drop_reason: &str) -> Result<(), String> {
+        fn add_drop_reason_to_counter(
+            &self,
+            _counter_id: RawSaiObjectId,
+            _drop_reason: &str,
+        ) -> Result<(), String> {
             Ok(())
         }
 
-        fn remove_drop_reason_from_counter(&self, _counter_id: RawSaiObjectId, _drop_reason: &str) -> Result<(), String> {
+        fn remove_drop_reason_from_counter(
+            &self,
+            _counter_id: RawSaiObjectId,
+            _drop_reason: &str,
+        ) -> Result<(), String> {
             Ok(())
         }
 
-        fn register_flex_counter(&self, _counter_id: RawSaiObjectId, _counter_name: &str) -> Result<(), String> {
+        fn register_flex_counter(
+            &self,
+            _counter_id: RawSaiObjectId,
+            _counter_name: &str,
+        ) -> Result<(), String> {
             Ok(())
         }
 
@@ -338,7 +405,8 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let mut config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let mut config =
+            DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
         config.add_drop_reason("L3_ANY".to_string());
 
         assert!(orch.create_debug_counter(config).is_ok());
@@ -352,7 +420,8 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let config =
+            DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
         orch.create_debug_counter(config).unwrap();
 
         assert!(orch.add_drop_reason("counter1", "L3_ANY").is_ok());
@@ -367,7 +436,8 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let mut config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let mut config =
+            DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
         config.add_drop_reason("L3_ANY".to_string());
         orch.create_debug_counter(config).unwrap();
 
@@ -385,7 +455,8 @@ mod tests {
         let mut orch = DebugCounterOrch::new(config);
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let counter_config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::SwitchIngressDrops);
+        let counter_config =
+            DebugCounterConfig::new("counter1".to_string(), DebugCounterType::SwitchIngressDrops);
         assert!(orch.create_debug_counter(counter_config).is_ok());
         assert_eq!(orch.stats().flex_counter_registrations, 1);
     }
@@ -395,7 +466,8 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let mut config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let mut config =
+            DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
         config.add_drop_reason("L3_ANY".to_string());
         config.add_drop_reason("INVALID_REASON".to_string());
         orch.create_debug_counter(config).unwrap();
@@ -410,7 +482,10 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config = DebugCounterConfig::new("port_counter".to_string(), DebugCounterType::PortIngressDrops);
+        let config = DebugCounterConfig::new(
+            "port_counter".to_string(),
+            DebugCounterType::PortIngressDrops,
+        );
         assert!(orch.create_debug_counter(config).is_ok());
 
         let entry = orch.get_counter("port_counter").unwrap();
@@ -423,7 +498,10 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config = DebugCounterConfig::new("switch_counter".to_string(), DebugCounterType::SwitchIngressDrops);
+        let config = DebugCounterConfig::new(
+            "switch_counter".to_string(),
+            DebugCounterType::SwitchIngressDrops,
+        );
         assert!(orch.create_debug_counter(config).is_ok());
 
         let entry = orch.get_counter("switch_counter").unwrap();
@@ -436,8 +514,14 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let ingress_config = DebugCounterConfig::new("ingress_counter".to_string(), DebugCounterType::PortIngressDrops);
-        let egress_config = DebugCounterConfig::new("egress_counter".to_string(), DebugCounterType::PortEgressDrops);
+        let ingress_config = DebugCounterConfig::new(
+            "ingress_counter".to_string(),
+            DebugCounterType::PortIngressDrops,
+        );
+        let egress_config = DebugCounterConfig::new(
+            "egress_counter".to_string(),
+            DebugCounterType::PortEgressDrops,
+        );
 
         assert!(orch.create_debug_counter(ingress_config).is_ok());
         assert!(orch.create_debug_counter(egress_config).is_ok());
@@ -457,7 +541,10 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let mut config = DebugCounterConfig::new("multi_reason_counter".to_string(), DebugCounterType::PortIngressDrops);
+        let mut config = DebugCounterConfig::new(
+            "multi_reason_counter".to_string(),
+            DebugCounterType::PortIngressDrops,
+        );
         config.add_drop_reason("L3_ANY".to_string());
         config.add_drop_reason("L2_ANY".to_string());
         config.add_drop_reason("ACL_ANY".to_string());
@@ -474,13 +561,19 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config = DebugCounterConfig::new("described_counter".to_string(), DebugCounterType::SwitchIngressDrops)
-            .with_description("Counter for monitoring L3 drops".to_string());
+        let config = DebugCounterConfig::new(
+            "described_counter".to_string(),
+            DebugCounterType::SwitchIngressDrops,
+        )
+        .with_description("Counter for monitoring L3 drops".to_string());
 
         assert!(orch.create_debug_counter(config).is_ok());
 
         let entry = orch.get_counter("described_counter").unwrap();
-        assert_eq!(entry.description, Some("Counter for monitoring L3 drops".to_string()));
+        assert_eq!(
+            entry.description,
+            Some("Counter for monitoring L3 drops".to_string())
+        );
     }
 
     #[test]
@@ -497,7 +590,11 @@ mod tests {
 
         for (name, counter_type) in types {
             let config = DebugCounterConfig::new(name.to_string(), counter_type);
-            assert!(orch.create_debug_counter(config).is_ok(), "Failed to create counter: {}", name);
+            assert!(
+                orch.create_debug_counter(config).is_ok(),
+                "Failed to create counter: {}",
+                name
+            );
         }
 
         assert_eq!(orch.counter_count(), 4);
@@ -511,7 +608,8 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let config =
+            DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
         orch.create_debug_counter(config).unwrap();
 
         let drop_reasons = vec!["L3_ANY", "L2_ANY", "ACL_ANY", "TTL", "VLAN"];
@@ -529,7 +627,8 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let mut config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let mut config =
+            DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
         config.add_drop_reason("L3_ANY".to_string());
         config.add_drop_reason("L2_ANY".to_string());
         config.add_drop_reason("ACL_ANY".to_string());
@@ -548,7 +647,8 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let mut config = DebugCounterConfig::new("l2_counter".to_string(), DebugCounterType::PortIngressDrops);
+        let mut config =
+            DebugCounterConfig::new("l2_counter".to_string(), DebugCounterType::PortIngressDrops);
         config.add_drop_reason("STP".to_string());
         config.add_drop_reason("VLAN_TAG_NOT_ALLOWED".to_string());
         config.add_drop_reason("L2_ANY".to_string());
@@ -564,7 +664,10 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let mut config = DebugCounterConfig::new("l3_counter".to_string(), DebugCounterType::SwitchIngressDrops);
+        let mut config = DebugCounterConfig::new(
+            "l3_counter".to_string(),
+            DebugCounterType::SwitchIngressDrops,
+        );
         config.add_drop_reason("L3_ANY".to_string());
         config.add_drop_reason("EXCEEDS_L3_MTU".to_string());
         config.add_drop_reason("IP_HEADER_ERROR".to_string());
@@ -584,7 +687,10 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config = DebugCounterConfig::new("counter_to_remove".to_string(), DebugCounterType::PortIngressDrops);
+        let config = DebugCounterConfig::new(
+            "counter_to_remove".to_string(),
+            DebugCounterType::PortIngressDrops,
+        );
         orch.create_debug_counter(config).unwrap();
 
         assert_eq!(orch.counter_count(), 1);
@@ -601,7 +707,7 @@ mod tests {
         for i in 1..=5 {
             let mut config = DebugCounterConfig::new(
                 format!("counter_{}", i),
-                DebugCounterType::PortIngressDrops
+                DebugCounterType::PortIngressDrops,
             );
             config.add_drop_reason(format!("REASON_{}", i));
             assert!(orch.create_debug_counter(config).is_ok());
@@ -622,7 +728,10 @@ mod tests {
 
         assert!(!orch.counter_exists("nonexistent"));
 
-        let config = DebugCounterConfig::new("existing_counter".to_string(), DebugCounterType::PortIngressDrops);
+        let config = DebugCounterConfig::new(
+            "existing_counter".to_string(),
+            DebugCounterType::PortIngressDrops,
+        );
         orch.create_debug_counter(config).unwrap();
 
         assert!(orch.counter_exists("existing_counter"));
@@ -636,7 +745,8 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let config =
+            DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
         orch.create_debug_counter(config).unwrap();
 
         let entry = orch.get_counter("counter1").unwrap();
@@ -654,7 +764,10 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config = DebugCounterConfig::new("mutable_counter".to_string(), DebugCounterType::SwitchIngressDrops);
+        let config = DebugCounterConfig::new(
+            "mutable_counter".to_string(),
+            DebugCounterType::SwitchIngressDrops,
+        );
         orch.create_debug_counter(config).unwrap();
 
         if let Some(entry) = orch.get_counter_mut("mutable_counter") {
@@ -672,7 +785,8 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let mut config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let mut config =
+            DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
         config.add_drop_reason("L3_ANY".to_string());
         orch.create_debug_counter(config).unwrap();
 
@@ -690,12 +804,14 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let mut config1 = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let mut config1 =
+            DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
         config1.add_drop_reason("L3_ANY".to_string());
         config1.add_drop_reason("L2_ANY".to_string());
         orch.create_debug_counter(config1).unwrap();
 
-        let config2 = DebugCounterConfig::new("counter2".to_string(), DebugCounterType::SwitchIngressDrops);
+        let config2 =
+            DebugCounterConfig::new("counter2".to_string(), DebugCounterType::SwitchIngressDrops);
         orch.create_debug_counter(config2).unwrap();
 
         assert_eq!(orch.stats().counters_created, 2);
@@ -719,8 +835,10 @@ mod tests {
         let mut orch = DebugCounterOrch::new(config);
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let counter_config1 = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
-        let counter_config2 = DebugCounterConfig::new("counter2".to_string(), DebugCounterType::SwitchIngressDrops);
+        let counter_config1 =
+            DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let counter_config2 =
+            DebugCounterConfig::new("counter2".to_string(), DebugCounterType::SwitchIngressDrops);
 
         orch.create_debug_counter(counter_config1).unwrap();
         orch.create_debug_counter(counter_config2).unwrap();
@@ -735,10 +853,14 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config1 = DebugCounterConfig::new("duplicate".to_string(), DebugCounterType::PortIngressDrops);
+        let config1 =
+            DebugCounterConfig::new("duplicate".to_string(), DebugCounterType::PortIngressDrops);
         assert!(orch.create_debug_counter(config1).is_ok());
 
-        let config2 = DebugCounterConfig::new("duplicate".to_string(), DebugCounterType::SwitchIngressDrops);
+        let config2 = DebugCounterConfig::new(
+            "duplicate".to_string(),
+            DebugCounterType::SwitchIngressDrops,
+        );
         let result = orch.create_debug_counter(config2);
 
         assert!(result.is_err());
@@ -766,7 +888,8 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let config =
+            DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
         orch.create_debug_counter(config).unwrap();
 
         let result = orch.remove_drop_reason("counter1", "NONEXISTENT_REASON");
@@ -797,7 +920,10 @@ mod tests {
     }
 
     impl DebugCounterOrchCallbacks for MockCallbacksWithFailure {
-        fn create_debug_counter(&self, _counter_type: DebugCounterType) -> Result<RawSaiObjectId, String> {
+        fn create_debug_counter(
+            &self,
+            _counter_type: DebugCounterType,
+        ) -> Result<RawSaiObjectId, String> {
             if self.fail_create {
                 Err("SAI creation failed".to_string())
             } else {
@@ -809,15 +935,27 @@ mod tests {
             Ok(())
         }
 
-        fn add_drop_reason_to_counter(&self, _counter_id: RawSaiObjectId, _drop_reason: &str) -> Result<(), String> {
+        fn add_drop_reason_to_counter(
+            &self,
+            _counter_id: RawSaiObjectId,
+            _drop_reason: &str,
+        ) -> Result<(), String> {
             Ok(())
         }
 
-        fn remove_drop_reason_from_counter(&self, _counter_id: RawSaiObjectId, _drop_reason: &str) -> Result<(), String> {
+        fn remove_drop_reason_from_counter(
+            &self,
+            _counter_id: RawSaiObjectId,
+            _drop_reason: &str,
+        ) -> Result<(), String> {
             Ok(())
         }
 
-        fn register_flex_counter(&self, _counter_id: RawSaiObjectId, _counter_name: &str) -> Result<(), String> {
+        fn register_flex_counter(
+            &self,
+            _counter_id: RawSaiObjectId,
+            _counter_name: &str,
+        ) -> Result<(), String> {
             Ok(())
         }
 
@@ -835,12 +973,13 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacksWithFailure { fail_create: true }));
 
-        let config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let config =
+            DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
         let result = orch.create_debug_counter(config);
 
         assert!(result.is_err());
         match result {
-            Err(DebugCounterOrchError::SaiError(_)) => {},
+            Err(DebugCounterOrchError::SaiError(_)) => {}
             _ => panic!("Expected SaiError"),
         }
         assert_eq!(orch.counter_count(), 0);
@@ -851,7 +990,8 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         // Don't set callbacks
 
-        let config = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let config =
+            DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
         let result = orch.create_debug_counter(config);
 
         assert!(result.is_err());
@@ -868,7 +1008,10 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let config = DebugCounterConfig::new("empty_counter".to_string(), DebugCounterType::PortIngressDrops);
+        let config = DebugCounterConfig::new(
+            "empty_counter".to_string(),
+            DebugCounterType::PortIngressDrops,
+        );
         assert!(orch.create_debug_counter(config).is_ok());
 
         let entry = orch.get_counter("empty_counter").unwrap();
@@ -880,17 +1023,34 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let mut config = DebugCounterConfig::new("full_counter".to_string(), DebugCounterType::SwitchIngressDrops);
+        let mut config = DebugCounterConfig::new(
+            "full_counter".to_string(),
+            DebugCounterType::SwitchIngressDrops,
+        );
 
         // Add many drop reasons
         let reasons = vec![
-            "L2_ANY", "L3_ANY", "ACL_ANY", "TUNNEL_ANY",
-            "STP", "VLAN_TAG_NOT_ALLOWED", "INGRESS_VLAN_FILTER",
-            "FDB_SA_MISS", "FDB_SA_MOVE", "FDB_DA_MISS",
-            "EXCEEDS_L3_MTU", "TTL", "L3_LOOPBACK",
-            "NON_ROUTABLE", "NO_L3_HEADER", "IP_HEADER_ERROR",
-            "UC_DIP_MC_DMAC", "DIP_LOOPBACK", "SIP_LOOPBACK",
-            "SIP_MC", "DIP_LINK_LOCAL"
+            "L2_ANY",
+            "L3_ANY",
+            "ACL_ANY",
+            "TUNNEL_ANY",
+            "STP",
+            "VLAN_TAG_NOT_ALLOWED",
+            "INGRESS_VLAN_FILTER",
+            "FDB_SA_MISS",
+            "FDB_SA_MOVE",
+            "FDB_DA_MISS",
+            "EXCEEDS_L3_MTU",
+            "TTL",
+            "L3_LOOPBACK",
+            "NON_ROUTABLE",
+            "NO_L3_HEADER",
+            "IP_HEADER_ERROR",
+            "UC_DIP_MC_DMAC",
+            "DIP_LOOPBACK",
+            "SIP_LOOPBACK",
+            "SIP_MC",
+            "DIP_LINK_LOCAL",
         ];
 
         for reason in &reasons {
@@ -920,10 +1080,12 @@ mod tests {
         let mut orch = DebugCounterOrch::new(DebugCounterOrchConfig::default());
         orch.set_callbacks(Arc::new(MockCallbacks));
 
-        let mut config1 = DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
+        let mut config1 =
+            DebugCounterConfig::new("counter1".to_string(), DebugCounterType::PortIngressDrops);
         config1.add_drop_reason("L3_ANY".to_string());
 
-        let mut config2 = DebugCounterConfig::new("counter2".to_string(), DebugCounterType::SwitchIngressDrops);
+        let mut config2 =
+            DebugCounterConfig::new("counter2".to_string(), DebugCounterType::SwitchIngressDrops);
         config2.add_drop_reason("L3_ANY".to_string());
 
         assert!(orch.create_debug_counter(config1).is_ok());
@@ -959,7 +1121,7 @@ mod tests {
         for i in 1..=3 {
             let mut config = DebugCounterConfig::new(
                 format!("counter_{}", i),
-                DebugCounterType::PortIngressDrops
+                DebugCounterType::PortIngressDrops,
             );
             config.add_drop_reason("L3_ANY".to_string());
             orch.create_debug_counter(config).unwrap();
@@ -967,7 +1129,8 @@ mod tests {
 
         // Remove all drop reasons
         for i in 1..=3 {
-            orch.remove_drop_reason(&format!("counter_{}", i), "L3_ANY").unwrap();
+            orch.remove_drop_reason(&format!("counter_{}", i), "L3_ANY")
+                .unwrap();
         }
 
         assert_eq!(orch.get_free_counters().len(), 3);
@@ -975,7 +1138,9 @@ mod tests {
         // Verify counter names in free counters
         let free_counters = orch.get_free_counters();
         for i in 1..=3 {
-            assert!(free_counters.iter().any(|fc| fc.name == format!("counter_{}", i)));
+            assert!(free_counters
+                .iter()
+                .any(|fc| fc.name == format!("counter_{}", i)));
         }
     }
 }

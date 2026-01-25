@@ -10,10 +10,10 @@ use super::types::{
     ChassisStats, FabricPortEntry, FabricPortKey, RawSaiObjectId, SystemPortConfig,
     SystemPortEntry, SystemPortKey,
 };
+use crate::audit_log;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
-use crate::audit_log;
 
 /// Result type for ChassisOrch operations.
 pub type Result<T> = std::result::Result<T, ChassisOrchError>;
@@ -195,22 +195,19 @@ impl<C: ChassisOrchCallbacks> ChassisOrch<C> {
 
     /// Remove a system port.
     pub fn remove_system_port(&mut self, key: &SystemPortKey) -> Result<()> {
-        let entry = self
-            .system_ports
-            .remove(key)
-            .ok_or_else(|| {
-                audit_log!(
-                    resource_id: &format!("system_port_{}", key.system_port_id),
-                    action: "remove_system_port",
-                    category: "ResourceDelete",
-                    outcome: "FAIL",
-                    details: serde_json::json!({
-                        "error": "System port not found",
-                        "system_port_id": key.system_port_id,
-                    })
-                );
-                ChassisOrchError::SystemPortNotFound(key.clone())
-            })?;
+        let entry = self.system_ports.remove(key).ok_or_else(|| {
+            audit_log!(
+                resource_id: &format!("system_port_{}", key.system_port_id),
+                action: "remove_system_port",
+                category: "ResourceDelete",
+                outcome: "FAIL",
+                details: serde_json::json!({
+                    "error": "System port not found",
+                    "system_port_id": key.system_port_id,
+                })
+            );
+            ChassisOrchError::SystemPortNotFound(key.clone())
+        })?;
 
         if let Some(ref callbacks) = self.callbacks {
             callbacks.remove_system_port(entry.sai_oid)?;
@@ -314,22 +311,19 @@ impl<C: ChassisOrchCallbacks> ChassisOrch<C> {
 
     /// Set fabric port isolation state.
     pub fn set_fabric_port_isolate(&mut self, key: &FabricPortKey, isolate: bool) -> Result<()> {
-        let entry = self
-            .fabric_ports
-            .get_mut(key)
-            .ok_or_else(|| {
-                audit_log!(
-                    resource_id: &format!("fabric_port_{}", key.fabric_port_id),
-                    action: "update_fabric_port",
-                    category: "ResourceModify",
-                    outcome: "FAIL",
-                    details: serde_json::json!({
-                        "error": "Fabric port not found",
-                        "fabric_port_id": key.fabric_port_id,
-                    })
-                );
-                ChassisOrchError::FabricPortNotFound(key.clone())
-            })?;
+        let entry = self.fabric_ports.get_mut(key).ok_or_else(|| {
+            audit_log!(
+                resource_id: &format!("fabric_port_{}", key.fabric_port_id),
+                action: "update_fabric_port",
+                category: "ResourceModify",
+                outcome: "FAIL",
+                details: serde_json::json!({
+                    "error": "Fabric port not found",
+                    "fabric_port_id": key.fabric_port_id,
+                })
+            );
+            ChassisOrchError::FabricPortNotFound(key.clone())
+        })?;
 
         if entry.isolate == isolate {
             return Ok(()); // No change needed
@@ -465,7 +459,8 @@ mod tests {
 
     #[test]
     fn test_chassis_orch_new() {
-        let orch: ChassisOrch<MockChassisCallbacks> = ChassisOrch::new(ChassisOrchConfig::default());
+        let orch: ChassisOrch<MockChassisCallbacks> =
+            ChassisOrch::new(ChassisOrchConfig::default());
         assert_eq!(orch.system_port_count(), 0);
         assert_eq!(orch.stats.stats.system_ports_created, 0);
         assert_eq!(orch.stats.stats.fabric_ports_created, 0);
@@ -474,7 +469,8 @@ mod tests {
 
     #[test]
     fn test_get_system_port_not_found() {
-        let orch: ChassisOrch<MockChassisCallbacks> = ChassisOrch::new(ChassisOrchConfig::default());
+        let orch: ChassisOrch<MockChassisCallbacks> =
+            ChassisOrch::new(ChassisOrchConfig::default());
         let key = SystemPortKey::new(100);
 
         let result = orch.get_system_port(&key);
@@ -552,7 +548,10 @@ mod tests {
         let key = SystemPortKey::new(999);
 
         let result = orch.remove_system_port(&key);
-        assert!(matches!(result, Err(ChassisOrchError::SystemPortNotFound(_))));
+        assert!(matches!(
+            result,
+            Err(ChassisOrchError::SystemPortNotFound(_))
+        ));
     }
 
     #[test]
@@ -580,7 +579,8 @@ mod tests {
 
     #[test]
     fn test_stats_returns_reference() {
-        let orch: ChassisOrch<MockChassisCallbacks> = ChassisOrch::new(ChassisOrchConfig::default());
+        let orch: ChassisOrch<MockChassisCallbacks> =
+            ChassisOrch::new(ChassisOrchConfig::default());
         let stats = orch.stats();
 
         assert_eq!(stats.errors, 0);
@@ -748,7 +748,10 @@ mod tests {
         let key = FabricPortKey::new(999);
 
         let result = orch.remove_fabric_port(&key);
-        assert!(matches!(result, Err(ChassisOrchError::FabricPortNotFound(_))));
+        assert!(matches!(
+            result,
+            Err(ChassisOrchError::FabricPortNotFound(_))
+        ));
     }
 
     #[test]

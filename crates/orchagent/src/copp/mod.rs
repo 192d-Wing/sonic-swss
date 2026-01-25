@@ -16,4 +16,6 @@ mod types;
 
 pub use ffi::{register_copp_orch, unregister_copp_orch};
 pub use orch::{CoppOrch, CoppOrchCallbacks, CoppOrchConfig, CoppOrchError, CoppOrchStats, Result};
-pub use types::{CoppStats, CoppTrapAction, CoppTrapConfig, CoppTrapEntry, CoppTrapKey, RawSaiObjectId};
+pub use types::{
+    CoppStats, CoppTrapAction, CoppTrapConfig, CoppTrapEntry, CoppTrapKey, RawSaiObjectId,
+};

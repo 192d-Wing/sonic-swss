@@ -1,7 +1,7 @@
 //! FFI exports for MacsecOrch.
 
-use std::cell::RefCell;
 use super::orch::{MacsecOrch, MacsecOrchConfig};
+use std::cell::RefCell;
 
 thread_local! {
     static MACSEC_ORCH: RefCell<Option<Box<MacsecOrch>>> = const { RefCell::new(None) };

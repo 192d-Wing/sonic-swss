@@ -28,8 +28,20 @@ pub struct NatEntryKey {
 }
 
 impl NatEntryKey {
-    pub fn new(src_ip: Ipv4Addr, dst_ip: Ipv4Addr, protocol: NatProtocol, src_port: u16, dst_port: u16) -> Self {
-        Self { src_ip, dst_ip, protocol, src_port, dst_port }
+    pub fn new(
+        src_ip: Ipv4Addr,
+        dst_ip: Ipv4Addr,
+        protocol: NatProtocol,
+        src_port: u16,
+        dst_port: u16,
+    ) -> Self {
+        Self {
+            src_ip,
+            dst_ip,
+            protocol,
+            src_port,
+            dst_port,
+        }
     }
 }
 

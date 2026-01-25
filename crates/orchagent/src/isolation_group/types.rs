@@ -211,10 +211,22 @@ mod tests {
 
     #[test]
     fn test_isolation_group_type_parse() {
-        assert_eq!(IsolationGroupType::parse("port"), Some(IsolationGroupType::Port));
-        assert_eq!(IsolationGroupType::parse("PORT"), Some(IsolationGroupType::Port));
-        assert_eq!(IsolationGroupType::parse("bridge-port"), Some(IsolationGroupType::BridgePort));
-        assert_eq!(IsolationGroupType::parse("BRIDGE_PORT"), Some(IsolationGroupType::BridgePort));
+        assert_eq!(
+            IsolationGroupType::parse("port"),
+            Some(IsolationGroupType::Port)
+        );
+        assert_eq!(
+            IsolationGroupType::parse("PORT"),
+            Some(IsolationGroupType::Port)
+        );
+        assert_eq!(
+            IsolationGroupType::parse("bridge-port"),
+            Some(IsolationGroupType::BridgePort)
+        );
+        assert_eq!(
+            IsolationGroupType::parse("BRIDGE_PORT"),
+            Some(IsolationGroupType::BridgePort)
+        );
         assert_eq!(IsolationGroupType::parse("invalid"), None);
     }
 
@@ -234,11 +246,8 @@ mod tests {
 
     #[test]
     fn test_isolation_group_entry() {
-        let mut entry = IsolationGroupEntry::new(
-            "group1".to_string(),
-            IsolationGroupType::Port,
-            0x1234,
-        );
+        let mut entry =
+            IsolationGroupEntry::new("group1".to_string(), IsolationGroupType::Port, 0x1234);
 
         // Add members
         assert!(entry.add_member("Ethernet0".to_string(), 0x5000));

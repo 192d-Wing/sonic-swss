@@ -261,7 +261,10 @@ pub unsafe extern "C" fn rust_crm_orch_inc_acl_table_used(
     CRM_ORCH.with(|cell| {
         cell.borrow_mut()
             .as_mut()
-            .map(|orch| orch.increment_acl_table_used(resource_type, table_id).is_ok())
+            .map(|orch| {
+                orch.increment_acl_table_used(resource_type, table_id)
+                    .is_ok()
+            })
             .unwrap_or(false)
     })
 }
@@ -293,7 +296,10 @@ pub unsafe extern "C" fn rust_crm_orch_dec_acl_table_used(
     CRM_ORCH.with(|cell| {
         cell.borrow_mut()
             .as_mut()
-            .map(|orch| orch.decrement_acl_table_used(resource_type, table_id).is_ok())
+            .map(|orch| {
+                orch.decrement_acl_table_used(resource_type, table_id)
+                    .is_ok()
+            })
             .unwrap_or(false)
     })
 }
@@ -373,7 +379,10 @@ pub unsafe extern "C" fn rust_crm_orch_inc_dash_acl_used(
     CRM_ORCH.with(|cell| {
         cell.borrow_mut()
             .as_mut()
-            .map(|orch| orch.increment_dash_acl_used(resource_type, group_id).is_ok())
+            .map(|orch| {
+                orch.increment_dash_acl_used(resource_type, group_id)
+                    .is_ok()
+            })
             .unwrap_or(false)
     })
 }
@@ -405,7 +414,10 @@ pub unsafe extern "C" fn rust_crm_orch_dec_dash_acl_used(
     CRM_ORCH.with(|cell| {
         cell.borrow_mut()
             .as_mut()
-            .map(|orch| orch.decrement_dash_acl_used(resource_type, group_id).is_ok())
+            .map(|orch| {
+                orch.decrement_dash_acl_used(resource_type, group_id)
+                    .is_ok()
+            })
             .unwrap_or(false)
     })
 }
@@ -654,8 +666,14 @@ mod tests {
         let table_id: RawSaiObjectId = 0x1234;
 
         unsafe {
-            assert!(rust_crm_orch_inc_acl_table_used(resource.as_ptr(), table_id));
-            assert!(rust_crm_orch_dec_acl_table_used(resource.as_ptr(), table_id));
+            assert!(rust_crm_orch_inc_acl_table_used(
+                resource.as_ptr(),
+                table_id
+            ));
+            assert!(rust_crm_orch_dec_acl_table_used(
+                resource.as_ptr(),
+                table_id
+            ));
         }
 
         unregister_crm_orch();

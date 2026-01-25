@@ -17,6 +17,6 @@ mod types;
 pub use ffi::{register_nat_orch, unregister_nat_orch};
 pub use orch::{NatOrch, NatOrchCallbacks, NatOrchConfig, NatOrchError, NatOrchStats};
 pub use types::{
-    NatAclEntry, NatAclKey, NatEntry, NatEntryConfig, NatEntryKey,
-    NatPoolConfig, NatPoolEntry, NatPoolKey, NatProtocol, NatStats, NatType,
+    NatAclEntry, NatAclKey, NatEntry, NatEntryConfig, NatEntryKey, NatPoolConfig, NatPoolEntry,
+    NatPoolKey, NatProtocol, NatStats, NatType,
 };

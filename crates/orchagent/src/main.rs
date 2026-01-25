@@ -1,7 +1,7 @@
 //! SONiC Orchagent entry point.
 
 use clap::Parser;
-use log::{info, error};
+use log::{error, info};
 use std::process::ExitCode;
 
 /// SONiC Switch Orchestration Agent
@@ -34,9 +34,8 @@ fn main() -> ExitCode {
     let args = Args::parse();
 
     // Initialize logging
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or(&args.log_level)
-    ).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&args.log_level))
+        .init();
 
     info!("Starting SONiC orchagent (Rust)");
     info!("Batch size: {}", args.batch_size);

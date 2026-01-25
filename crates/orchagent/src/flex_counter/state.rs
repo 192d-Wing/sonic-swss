@@ -198,7 +198,10 @@ pub fn parse_index_range(s: &str) -> Option<(usize, usize)> {
 
 /// Parses a port list like "Ethernet0,Ethernet4,Ethernet8" into individual port names.
 pub fn parse_port_list(s: &str) -> Vec<&str> {
-    s.split(',').map(|p| p.trim()).filter(|p| !p.is_empty()).collect()
+    s.split(',')
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect()
 }
 
 #[cfg(test)]

@@ -14,5 +14,9 @@ mod state;
 
 pub use ffi::{register_flex_counter_orch, unregister_flex_counter_orch};
 pub use group::{FlexCounterGroup, FlexCounterGroupMap};
-pub use orch::{fields, FlexCounterCallbacks, FlexCounterError, FlexCounterOrch, FlexCounterOrchConfig};
-pub use state::{FlexCounterPgStates, FlexCounterQueueStates, PgConfigurations, QueueConfigurations};
+pub use orch::{
+    fields, FlexCounterCallbacks, FlexCounterError, FlexCounterOrch, FlexCounterOrchConfig,
+};
+pub use state::{
+    FlexCounterPgStates, FlexCounterQueueStates, PgConfigurations, QueueConfigurations,
+};
