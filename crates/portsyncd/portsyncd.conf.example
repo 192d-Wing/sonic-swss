@@ -1,0 +1,225 @@
+# SONiC Port Synchronization Daemon (Rust) Configuration File
+#
+# Location: /etc/sonic/portsyncd.conf
+# Format: TOML (Tom's Obvious, Minimal Language)
+#
+# Phase 6 Week 4 configuration template with metrics persistence and retention policies
+#
+# Copy this file to /etc/sonic/portsyncd.conf and customize for your environment
+
+# ============================================================================
+# DATABASE CONFIGURATION
+# ============================================================================
+[database]
+
+# Redis connection settings
+redis_host = "127.0.0.1"      # Redis server hostname/IP (default: 127.0.0.1)
+redis_port = 6379              # Redis server port (default: 6379)
+
+# Database numbers for different SONiC databases
+config_db_number = 4            # CONFIG_DB number (default: 4)
+state_db_number = 6             # STATE_DB number (default: 6)
+
+# Connection parameters
+connection_timeout_secs = 5     # Timeout for Redis connections in seconds (default: 5)
+retry_interval_secs = 2         # Interval between connection retry attempts (default: 2)
+
+# ============================================================================
+# PERFORMANCE CONFIGURATION
+# ============================================================================
+[performance]
+
+# Event processing parameters
+max_event_queue = 1000          # Maximum event queue depth (default: 1000)
+batch_timeout_ms = 100          # Batch processing timeout in milliseconds (default: 100)
+
+# Latency targets
+max_latency_us = 10000          # Maximum acceptable latency in microseconds (default: 10000)
+
+# Success rate requirements
+min_success_rate = 99.0         # Minimum success rate percentage (0-100, default: 99.0)
+
+# ============================================================================
+# HEALTH CHECK CONFIGURATION
+# ============================================================================
+[health]
+
+# Stall detection
+max_stall_seconds = 10          # Max stall duration before unhealthy (default: 10)
+
+# Failure thresholds
+max_failure_rate_percent = 5.0  # Max failure rate percentage (0-100, default: 5.0)
+
+# Synchronization requirements
+min_port_sync_rate = 90.0       # Minimum port sync rate percentage (0-100, default: 90.0)
+
+# Watchdog configuration
+enable_watchdog = true          # Enable systemd watchdog notifications (default: true)
+watchdog_interval_secs = 15     # Watchdog notification interval in seconds (default: 15)
+
+# ============================================================================
+# METRICS PERSISTENCE & EXPORT CONFIGURATION (Phase 6 Week 4)
+# ============================================================================
+[metrics]
+
+# Enable/disable metrics persistence
+enabled = true                  # Enable metrics persistence and export (default: true)
+
+# Persistence parameters
+save_interval_secs = 300        # Auto-save metrics interval in seconds (default: 300 = 5 minutes)
+retention_days = 30             # Keep metrics for N days (default: 30)
+max_file_size_mb = 100          # Rotate file when it exceeds N MB (default: 100)
+
+# Export format selection
+export_format = "prometheus"    # Format: "prometheus", "json", or "both" (default: "prometheus")
+
+# Storage location for metrics files
+storage_path = "/var/lib/sonic/portsyncd/metrics"
+
+# ============================================================================
+# EXAMPLES AND NOTES
+# ============================================================================
+
+# Example 1: Development environment with frequent metric exports
+# [metrics]
+# enabled = true
+# save_interval_secs = 60      # Save metrics every minute
+# retention_days = 7           # Keep metrics for 1 week
+# max_file_size_mb = 50        # Rotate at 50 MB
+# export_format = "both"       # Export both Prometheus and JSON
+
+# Example 2: High-performance environment
+# [performance]
+# max_event_queue = 5000       # Higher queue depth
+# batch_timeout_ms = 50        # Faster batching
+# min_success_rate = 99.5      # Stricter requirements
+
+# Example 3: Conservative health checks
+# [health]
+# max_stall_seconds = 5        # Faster stall detection
+# max_failure_rate_percent = 2.0  # Lower failure threshold
+# min_port_sync_rate = 95.0    # Higher sync requirement
+
+# ============================================================================
+# VALIDATION RULES
+# ============================================================================
+
+# Database section:
+# - redis_port: Must be > 0 and < 65536
+# - connection_timeout_secs: Must be > 0
+# - retry_interval_secs: Must be > 0
+
+# Performance section:
+# - min_success_rate: Must be 0-100
+# - max_latency_us: Must be > 0
+
+# Health section:
+# - max_failure_rate_percent: Must be 0-100
+# - min_port_sync_rate: Must be 0-100
+# - watchdog_interval_secs: Must be > 0
+
+# Metrics section:
+# - save_interval_secs: Must be > 0
+# - retention_days: Must be > 0
+# - max_file_size_mb: Must be > 0
+# - export_format: Must be "prometheus", "json", or "both"
+# - storage_path: Must be writable by portsyncd process
+
+# ============================================================================
+# DEPLOYMENT GUIDE
+# ============================================================================
+
+# 1. Installation
+#    cp portsyncd.conf.example /etc/sonic/portsyncd.conf
+#    chown root:root /etc/sonic/portsyncd.conf
+#    chmod 644 /etc/sonic/portsyncd.conf
+
+# 2. Directory Setup (for metrics storage)
+#    mkdir -p /var/lib/sonic/portsyncd/metrics
+#    chown portsyncd:portsyncd /var/lib/sonic/portsyncd/metrics
+#    chmod 750 /var/lib/sonic/portsyncd/metrics
+
+# 3. Systemd Integration
+#    cp portsyncd.service /etc/systemd/system/portsyncd.service
+#    systemctl daemon-reload
+#    systemctl enable portsyncd
+#    systemctl start portsyncd
+
+# 4. Verify Installation
+#    systemctl status portsyncd
+#    journalctl -u portsyncd -f          # Monitor logs
+
+# 5. Check Metrics Export
+#    curl http://127.0.0.1:9090/metrics # If enabled via metrics_server
+
+# ============================================================================
+# TROUBLESHOOTING
+# ============================================================================
+
+# Issue: Metrics file permission denied
+# Solution: Ensure /var/lib/sonic/portsyncd/metrics is writable:
+#   sudo chown portsyncd:portsyncd /var/lib/sonic/portsyncd/metrics
+#   sudo chmod 750 /var/lib/sonic/portsyncd/metrics
+
+# Issue: Redis connection timeouts
+# Solution: Verify Redis is running and accessible:
+#   redis-cli ping          # Should respond with PONG
+#   netstat -tlnp | grep 6379
+
+# Issue: High CPU usage from metrics processing
+# Solution: Increase save_interval_secs or disable metrics:
+#   save_interval_secs = 600    # 10 minutes instead of 5
+#   enabled = false              # Disable if not needed
+
+# Issue: Disk full from metrics files
+# Solution: Reduce retention or file size limits:
+#   retention_days = 7          # Keep fewer days
+#   max_file_size_mb = 50       # Rotate more frequently
+
+# ============================================================================
+# MONITORING & ALERTING
+# ============================================================================
+
+# Recommended Prometheus alerts for portsyncd metrics:
+
+# Alert 1: High EOIU timeout rate
+# expr: portsyncd_eoiu_timeouts > 0.5 * portsyncd_eoiu_detected
+# Indicates: EOIU signals are not completing normally
+
+# Alert 2: Corruption recovery failures
+# expr: portsyncd_corruptions_detected > portsyncd_state_recoveries
+# Indicates: Corrupted state cannot be recovered
+
+# Alert 3: Cold start anomaly
+# expr: rate(portsyncd_cold_starts[5m]) > 0.1
+# Indicates: Too many cold starts (more than 1 per 10 minutes)
+
+# Alert 4: Sync duration increasing
+# expr: rate(portsyncd_initial_sync_duration_seconds_sum[5m]) > 50
+# Indicates: Sync operations taking longer than expected
+
+# ============================================================================
+# PERFORMANCE TUNING GUIDELINES
+# ============================================================================
+
+# For high-port-count switches (> 50 ports):
+# [performance]
+# max_event_queue = 5000
+# batch_timeout_ms = 50
+# [metrics]
+# save_interval_secs = 600      # Save less frequently
+
+# For low-latency requirements (< 5ms):
+# [performance]
+# max_latency_us = 5000
+# batch_timeout_ms = 10
+# [health]
+# max_stall_seconds = 5
+
+# For long-term metrics storage:
+# [metrics]
+# retention_days = 90
+# max_file_size_mb = 500
+# storage_path = "/mnt/large-disk/portsyncd/metrics"
+
+# ============================================================================
