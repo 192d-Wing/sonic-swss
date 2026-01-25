@@ -1,6 +1,7 @@
 # portsyncd Deployment Guide
 
-Complete guide for deploying and operating portsyncd in production SONiC switches.
+Complete guide for deploying and operating portsyncd in production SONiC
+switches.
 
 ## Pre-Deployment Checklist
 

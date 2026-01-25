@@ -2,7 +2,9 @@
 
 ## Overview
 
-Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with secure HTTP server and mTLS authentication support. The implementation provides production-grade operational visibility for the portsyncd daemon.
+Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with
+secure HTTP server and mTLS authentication support. The implementation provides
+production-grade operational visibility for the portsyncd daemon.
 
 ## Deliverables
 
@@ -13,7 +15,8 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 - **MetricsCollector struct** with thread-safe metric collection
 - **14 Prometheus metrics**:
   - 3 Counters (events_processed, events_failed, port_flaps)
-  - 5 Gauges (queue_depth, memory_bytes, health_status, redis_connected, netlink_connected)
+  - 5 Gauges (queue_depth, memory_bytes, health_status, redis_connected,
+    netlink_connected)
   - 2 Histograms (event_latency_seconds, redis_latency_seconds)
 - **Public API**:
   - `new()` → Creates collector
@@ -62,7 +65,8 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 
 - Added `pub mod metrics_server;`
 - Added re-exports:
-  - `pub use metrics_server::{MetricsServer, MetricsServerConfig, spawn_metrics_server};`
+  - `pub use metrics_server::{MetricsServer, MetricsServerConfig,
+    spawn_metrics_server};`
 - Existing `pub use metrics::MetricsCollector;` unchanged
 
 #### src/main.rs (Modified)
@@ -108,7 +112,8 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 
 1. `test_metrics_server_config_creation` - Config without TLS
 2. `test_metrics_server_config_validation_without_mtls` - Validation succeeds
-3. `test_metrics_server_config_validation_with_mtls_missing_cert` - Validation fails
+3. `test_metrics_server_config_validation_with_mtls_missing_cert` - Validation
+   fails
 4. `test_metrics_server_creation` - Server instantiation
 
 #### tests/metrics_integration.rs - Integration Tests (7 tests)
@@ -155,7 +160,7 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 ### Counters (Cumulative - Never Decrease)
 
 | Metric | Description | Labels |
-|--------|-------------|--------|
+| -------- | ------------- | -------- |
 | `portsyncd_events_processed_total` | Successful event completions | None |
 | `portsyncd_events_failed_total` | Failed event processing attempts | None |
 | `portsyncd_port_flaps_total` | Per-port flap count | `port` |
@@ -163,7 +168,7 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 ### Gauges (Current State - Can Increase/Decrease)
 
 | Metric | Description | Range | Labels |
-|--------|-------------|-------|--------|
+| -------- | ------------- | ------- | -------- |
 | `portsyncd_queue_depth` | Current event queue depth | 0+ | None |
 | `portsyncd_memory_bytes` | Process memory usage | 0+ | None |
 | `portsyncd_health_status` | Health status | 0.0-1.0 | None |
@@ -173,7 +178,7 @@ Phase 6 Week 1 successfully implements Prometheus-Direct metrics export with sec
 ### Histograms (Distribution - Bucketed)
 
 | Metric | Description | Buckets | Labels |
-|--------|-------------|---------|--------|
+| -------- | ------------- | --------- | -------- |
 | `portsyncd_event_latency_seconds` | Event processing latency | 1ms, 5ms, 10ms, 50ms, 100ms, 500ms, 1s, +Inf | None |
 | `portsyncd_redis_latency_seconds` | Redis operation latency | 1ms, 5ms, 10ms, 50ms, 100ms, +Inf | None |
 
@@ -191,7 +196,7 @@ curl http://localhost:9090/metrics
 
 **Response Headers:**
 
-```
+```text
 HTTP/1.1 200 OK
 Content-Type: text/plain; version=0.0.4
 Content-Length: 2345
@@ -199,7 +204,7 @@ Content-Length: 2345
 
 **Response Body:**
 
-```
+```text
 # HELP portsyncd_events_processed_total Total events processed successfully
 # TYPE portsyncd_events_processed_total counter
 portsyncd_events_processed_total 1234
@@ -257,7 +262,7 @@ server.start().await?;
 ## Performance Characteristics
 
 | Metric | Overhead | Notes |
-|--------|----------|-------|
+| -------- | ---------- | ------- |
 | Memory | ~5MB | Per MetricsCollector instance |
 | CPU | <1% | During normal operation |
 | Event Recording | <1μs | Atomic operations, no locks |
@@ -317,7 +322,7 @@ server.start().await?;
 ## Files Summary
 
 | File | Type | Lines | Tests | Status |
-|------|------|-------|-------|--------|
+| ------ | ------ | ------- | ------- | -------- |
 | src/metrics.rs | New | 159 | 14 | ✅ |
 | src/metrics_server.rs | New | 180 | 4 | ✅ |
 | tests/metrics_integration.rs | New | 170 | 7 | ✅ |

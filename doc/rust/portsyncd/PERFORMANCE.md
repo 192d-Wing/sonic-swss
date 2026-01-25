@@ -13,7 +13,7 @@ portsyncd is designed for high-performance port synchronization with:
 
 ### Steady-State Performance (1000 events)
 
-```
+```text
 Configuration:
   ├─ Event rate: 1000 eps (1ms per event)
   ├─ Duration: As long as needed
@@ -31,7 +31,7 @@ Status: PASSED ✓
 
 ### Burst Processing (5000 rapid events)
 
-```
+```text
 Configuration:
   ├─ Event rate: Burst, minimal delay
   ├─ Event count: 5000
@@ -49,7 +49,7 @@ Status: PASSED ✓
 
 ### Failure Resilience (1000 events with 5% failures)
 
-```
+```text
 Configuration:
   ├─ Total events: 1000
   ├─ Failure rate: 5% (50 events)
@@ -67,7 +67,7 @@ Status: PASSED ✓
 
 ### Memory Efficiency (10,000 events)
 
-```
+```text
 Configuration:
   ├─ Events tracked: 10,000
   ├─ Metrics storage: Per-event latency
@@ -85,7 +85,7 @@ Status: PASSED ✓
 
 ### Sustained Load (1 second, ~1000 eps)
 
-```
+```text
 Configuration:
   ├─ Duration: 1 second
   ├─ Event rate: ~1000 eps
@@ -103,7 +103,7 @@ Status: PASSED ✓
 
 ### Workload Scaling
 
-```
+```text
 Small Workload (100 events):
   ├─ Average latency: 500 µs
   ├─ Throughput: 2000 eps
@@ -121,7 +121,7 @@ Observation:
 
 ### Latency Distribution (1000 events with varying delays)
 
-```
+```text
 Configuration:
   ├─ Baseline: 1ms per event
   ├─ Occasional slowdowns:
@@ -142,7 +142,7 @@ Observation:
 
 ### Latency Comparison
 
-```
+```text
 Operation                    Rust          C++           Delta
 ─────────────────────────────────────────────────────────────
 Event reception to parsing   50-200 µs     50-180 µs     +2%
@@ -157,7 +157,7 @@ Status: PASSED ✓ - Rust is within 5% of C++
 
 ### Memory Comparison
 
-```
+```text
 Component                Rust          C++          Savings
 ──────────────────────────────────────────────────────────
 Redis connection         ~500 bytes    ~2KB         -75%
@@ -173,7 +173,7 @@ Status: PASSED ✓ - 50% lower memory footprint
 
 ### CPU Usage Comparison
 
-```
+```text
 Metric                       Rust    C++     Note
 ─────────────────────────────────────────────────────
 Single-core CPU @ 1000 eps   8%      9%      Rust async efficient
@@ -239,7 +239,7 @@ Cache misses/sec             1000    2000    Rust: Better locality
 
 #### 1. Reduce Latency
 
-**Priority 1: Reduce Event Flood**
+##### Priority 1: Reduce Event Flood
 
 ```bash
 # Limit maximum ports
@@ -248,7 +248,7 @@ max_event_queue = 1000  # Increase queue size
 batch_timeout_ms = 50   # Process events faster
 ```
 
-**Priority 2: Optimize Redis**
+##### Priority 2: Optimize Redis
 
 ```bash
 # On Redis host:
@@ -256,7 +256,7 @@ redis-cli CONFIG SET maxmemory 2gb
 redis-cli CONFIG SET maxmemory-policy allkeys-lru
 ```
 
-**Priority 3: Tune Systemd**
+##### Priority 3: Tune Systemd
 
 ```ini
 # In portsyncd.service:
@@ -268,21 +268,21 @@ MemoryAccounting=true
 
 #### 2. Reduce Memory
 
-**Strategy 1: Disable Metrics in Production**
+##### Strategy 1: Disable Metrics in Production
 
 ```rust
 // In main.rs, comment out metrics initialization
 // Performance tracking still works, just not in-memory storage
 ```
 
-**Strategy 2: Increase Batch Timeout**
+##### Strategy 2: Increase Batch Timeout
 
 ```toml
 [performance]
 batch_timeout_ms = 200  # Process less frequently
 ```
 
-**Strategy 3: Reduce State Cache**
+##### Strategy 3: Reduce State Cache
 
 ```bash
 # In port_sync.rs, reduce port state cache size
@@ -290,7 +290,7 @@ batch_timeout_ms = 200  # Process less frequently
 
 #### 3. Increase Throughput
 
-**Strategy 1: Batch Database Operations**
+##### Strategy 1: Batch Database Operations
 
 ```rust
 // Group multiple HSET operations into pipeline
@@ -298,7 +298,7 @@ batch_timeout_ms = 200  # Process less frequently
 // Pipelines could batch N events per RTT
 ```
 
-**Strategy 2: Connection Pooling**
+##### Strategy 2: Connection Pooling
 
 ```rust
 // RedisAdapter already uses ConnectionManager
@@ -307,7 +307,7 @@ redis::aio::ConnectionManager::new(client).await
 // Already configured for optimal pooling
 ```
 
-**Strategy 3: Async Task Prioritization**
+##### Strategy 3: Async Task Prioritization
 
 ```ini
 # In systemd service:
@@ -429,7 +429,7 @@ cargo bench --bench portsyncd_bench
 
 ### Interpreting Results
 
-```
+```text
 test redis_adapter::write_latency ... bench:   1,234 ns/iter
                                            +/- 45 ns
 

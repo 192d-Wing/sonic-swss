@@ -2,7 +2,10 @@
 
 ## API Overview
 
-Phase 6 Week 3 completes the warm restart infrastructure with comprehensive timeout detection, state file lifecycle management, corruption recovery, and metrics tracking. This document describes the public API and configuration options.
+Phase 6 Week 3 completes the warm restart infrastructure with comprehensive
+timeout detection, state file lifecycle management, corruption recovery, and
+metrics tracking. This document describes the public API and configuration
+options.
 
 ## WarmRestartManager API
 
@@ -19,6 +22,7 @@ manager.initialize()?;
 ```
 
 **Initialization Result**:
+
 - `WarmRestartState::ColdStart`: No saved state file found
 - `WarmRestartState::WarmStart`: Valid state file loaded
 - Automatically records `warm_restart_count` or `cold_start_count` in metrics
@@ -57,6 +61,7 @@ manager.check_initial_sync_timeout()?;
 ```
 
 **Timeout Behavior**:
+
 - Default: 10 seconds (configurable via `PORTSYNCD_EOIU_TIMEOUT_SECS`)
 - If EOIU signal never arrives, timeout will auto-complete initial sync
 - Fail-secure: EOIU timeout is not an error condition
@@ -80,6 +85,7 @@ manager.clear_ports();
 ```
 
 **PortState Fields**:
+
 - `name`: Interface name (e.g., "Ethernet0")
 - `admin_state`: Admin enabled (1 = enabled, 0 = disabled)
 - `oper_state`: Operational state (1 = up, 0 = down)
@@ -185,6 +191,7 @@ detector.reset();
 ```
 
 **EOIU Detection States**:
+
 - `Waiting`: No EOIU detected yet
 - `Detected`: EOIU signal found
 - `Complete`: EOIU processed, ignore further signals
@@ -204,6 +211,7 @@ impl LinkSync {
 ```
 
 **Usage**:
+
 ```rust
 if let Some(metrics) = link_sync.metrics() {
     println!("Warm restarts: {}", metrics.warm_restart_count);
@@ -222,6 +230,7 @@ export PORTSYNCD_EOIU_TIMEOUT_SECS=10  # Default: 10 seconds
 ```
 
 **Behavior**:
+
 - If EOIU signal arrives before timeout: normal completion
 - If timeout reached before EOIU: auto-complete initial sync
 - Set to 0 to disable timeout (wait indefinitely - not recommended)
@@ -259,6 +268,7 @@ pub enum PortsyncError {
 ```
 
 **Best Practices**:
+
 1. Always check `initialize()` result before using manager
 2. Use `load_state_with_recovery()` for production (automatic failover)
 3. Regular calls to `check_initial_sync_timeout()` in event loop
@@ -278,7 +288,7 @@ The implementation follows NIST 800-53 SC-24 (Fail-Secure):
 ## Performance Characteristics
 
 | Operation | Latency | Notes |
-|-----------|---------|-------|
+| ----------- | --------- | ------- |
 | `initialize()` | <1ms | Local file I/O |
 | `save_state()` | <5ms | JSON serialization + write |
 | `load_state()` | <5ms | JSON deserialization |
@@ -341,6 +351,7 @@ fn main() -> Result<()> {
 ## Testing
 
 All APIs are fully tested with:
+
 - 205+ unit tests covering all functions
 - 29 integration tests covering realistic scenarios
 - 100% error path coverage
@@ -350,6 +361,7 @@ All APIs are fully tested with:
 ## Migration from C++ portsyncd
 
 The Rust implementation maintains API compatibility with the C++ version:
+
 - Same state machine semantics
 - Same failure recovery behavior
 - Same metric tracking
@@ -358,6 +370,7 @@ The Rust implementation maintains API compatibility with the C++ version:
 ## Future Enhancements
 
 Planned for Phase 6 Week 4+:
+
 1. Persistent metrics storage (InfluxDB/Prometheus)
 2. Configurable retention policies
 3. Metrics export endpoint

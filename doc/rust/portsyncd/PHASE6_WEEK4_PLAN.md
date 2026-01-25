@@ -2,11 +2,14 @@
 
 ## Overview
 
-Build upon Phase 6 Week 3's foundation to implement persistent metrics storage, configurable retention policies, and Prometheus-compatible metrics export. This adds production-grade observability and metrics persistence across daemon restarts.
+Build upon Phase 6 Week 3's foundation to implement persistent metrics storage,
+configurable retention policies, and Prometheus-compatible metrics export. This
+adds production-grade observability and metrics persistence across daemon
+restarts.
 
 ## Architecture
 
-```
+```text
 Phase 6 Week 4 Components:
 
 WarmRestartManager
@@ -121,7 +124,7 @@ AnalyticsAggregator (NEW)
   - `export_json(&self) -> Result<String>` - JSON format
 - Export format:
 
-  ```
+  ```text
   # HELP portsyncd_warm_restarts Total warm restart events
   # TYPE portsyncd_warm_restarts counter
   portsyncd_warm_restarts 5
@@ -395,7 +398,7 @@ AnalyticsAggregator (NEW)
 ## Risks & Mitigation
 
 | Risk | Mitigation |
-|------|-----------|
+| ------ | ----------- |
 | File I/O performance | Async writes, batching |
 | Config parsing complexity | Use serde, comprehensive validation |
 | Prometheus format correctness | Reference official spec, validate output |
@@ -404,7 +407,8 @@ AnalyticsAggregator (NEW)
 
 ## References
 
-- Prometheus Exposition Format: <https://prometheus.io/docs/instrumenting/exposition_formats/>
+- Prometheus Exposition Format:
+  <https://prometheus.io/docs/instrumenting/exposition_formats/>
 - Systemd Service Documentation
 - TOML Config Format
 - JSON Serialization in Rust (serde)

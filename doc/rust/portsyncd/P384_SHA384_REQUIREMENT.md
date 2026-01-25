@@ -2,7 +2,9 @@
 
 ## Executive Summary
 
-The portsyncd metrics endpoint enforces **P-384 (secp384r1) or stronger elliptic curves** and **SHA-384 or stronger hash algorithms** for maximum cryptographic strength.
+The portsyncd metrics endpoint enforces **P-384 (secp384r1) or stronger elliptic
+curves** and **SHA-384 or stronger hash algorithms** for maximum cryptographic
+strength.
 
 **Status**: ✅ ENFORCED AT CONFIGURATION LEVEL
 **Test Results**: 154/154 tests passing
@@ -15,13 +17,13 @@ The portsyncd metrics endpoint enforces **P-384 (secp384r1) or stronger elliptic
 ### Elliptic Curve Strength Comparison
 
 | Curve | Bits | Security | NIST | CNSA 2.0 | Portsyncd |
-|-------|------|----------|------|----------|-----------|
+| ------- | ------ | ---------- | ------ | ---------- | ----------- |
 | P-256 | 256 | 128-bit | ✅ Approved | ✅ Allowed | ❌ **REJECTED** |
 | P-384 | 384 | 192-bit | ✅ Approved | ✅ Allowed | ✅ **REQUIRED** |
 | P-521 | 521 | 260-bit | ✅ Approved | ✅ Allowed | ✅ **ACCEPTED** |
 | Curve25519 | 256 | 128-bit | ✗ Non-standard | ❌ Not CNSA | ❌ **REJECTED** |
 
-### Decision Rationale
+### Decision Rationale (SHA-384)
 
 **P-384 (384-bit) provides**:
 
@@ -44,7 +46,7 @@ The portsyncd metrics endpoint enforces **P-384 (secp384r1) or stronger elliptic
 ### Hash Algorithm Strength Comparison
 
 | Algorithm | Bits | Output | NIST | CNSA 2.0 | Portsyncd |
-|-----------|------|--------|------|----------|-----------|
+| ----------- | ------ | -------- | ------ | ---------- | ----------- |
 | SHA-256 | 256 | 32 bytes | ✅ Approved | ✅ Allowed | ❌ **REJECTED** |
 | SHA-384 | 384 | 48 bytes | ✅ Approved | ✅ Allowed | ✅ **REQUIRED** |
 | SHA-512 | 512 | 64 bytes | ✅ Approved | ✅ Allowed | ✅ **ACCEPTED** |
@@ -73,7 +75,7 @@ The portsyncd metrics endpoint enforces **P-384 (secp384r1) or stronger elliptic
 
 ### Server Certificate (Mandatory P-384+, SHA-384+)
 
-```
+```text
 Subject: CN=portsyncd.example.com
 Issuer: CN=portsyncd-metrics-ca
 
@@ -98,7 +100,7 @@ Example Invalid (REJECTED):
 
 ### Private Key (Mandatory P-384+)
 
-```
+```text
 ✅ REQUIRED:
   • Curve: P-384 (secp384r1) or P-521 (secp521r1)
   • Strength: 384-bit or 521-bit minimum
@@ -112,7 +114,7 @@ Example Invalid (REJECTED):
 
 ### CA Certificate (Mandatory P-384+, SHA-384+)
 
-```
+```text
 Subject: CN=portsyncd-metrics-ca
 Issuer: CN=portsyncd-metrics-ca (self-signed)
 
@@ -423,7 +425,7 @@ EOF
 ## Summary Table
 
 | Component | Requirement | Minimum | Portsyncd Enforces |
-|-----------|-------------|---------|-------------------|
+| ----------- | ------------- | --------- | ------------------- |
 | **Curve** | Elliptic Curve | P-384 (secp384r1) | ✅ P-384+ only |
 | **Signature Hash** | Server cert | SHA-384 | ✅ SHA-384+ only |
 | **Signature Hash** | Client cert | SHA-384 | ✅ SHA-384+ only |
@@ -465,7 +467,7 @@ By enforcing P-384+ and SHA-384+, portsyncd metrics are protected against:
 ## Compliance Standards
 
 | Standard | P-256 | P-384 | P-521 | Portsyncd |
-|----------|-------|-------|-------|-----------|
+| ---------- | ------- | ------- | ------- | ----------- |
 | FIPS 140-2 | ✅ | ✅ | ✅ | ✅ P-384+ |
 | NIST SP 800-56A | ✅ | ✅ | ✅ | ✅ P-384+ |
 | NSA CNSA 2.0 | ✅ | ✅ | ✅ | ✅ P-384+ |

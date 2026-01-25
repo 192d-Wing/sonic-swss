@@ -4,7 +4,10 @@
 
 **Status**: ✅ COMPLETE
 
-Phase 6 Week 1 has been successfully completed with comprehensive Prometheus metrics collection and HTTP server implementation. The portsyncd daemon now exports operational metrics in Prometheus text format with secure mTLS authentication support.
+Phase 6 Week 1 has been successfully completed with comprehensive Prometheus
+metrics collection and HTTP server implementation. The portsyncd daemon now
+exports operational metrics in Prometheus text format with secure mTLS
+authentication support.
 
 **Test Results**:
 
@@ -36,20 +39,25 @@ Phase 6 Week 1 has been successfully completed with comprehensive Prometheus met
 
 - `portsyncd_events_processed_total` - Successful event completions
 - `portsyncd_events_failed_total` - Failed event processing attempts
-- `portsyncd_port_flaps_total{port=...}` - Per-port flap counts (labeled by port name)
+- `portsyncd_port_flaps_total{port=...}` - Per-port flap counts (labeled by port
+  name)
 
 #### Gauges (Current State)
 
 - `portsyncd_queue_depth` - Current event queue depth
 - `portsyncd_memory_bytes` - Process memory usage
-- `portsyncd_health_status` - Health status (1.0=healthy, 0.5=degraded, 0.0=unhealthy)
-- `portsyncd_redis_connected` - Redis connection status (1=connected, 0=disconnected)
+- `portsyncd_health_status` - Health status (1.0=healthy, 0.5=degraded,
+  0.0=unhealthy)
+- `portsyncd_redis_connected` - Redis connection status (1=connected,
+  0=disconnected)
 - `portsyncd_netlink_connected` - Netlink socket status (1=open, 0=closed)
 
 #### Histograms (Distribution)
 
-- `portsyncd_event_latency_seconds` - Event processing latency (buckets: 1ms, 5ms, 10ms, 50ms, 100ms, 500ms, 1s)
-- `portsyncd_redis_latency_seconds` - Redis operation latency (buckets: 1ms, 5ms, 10ms, 50ms, 100ms)
+- `portsyncd_event_latency_seconds` - Event processing latency (buckets: 1ms,
+  5ms, 10ms, 50ms, 100ms, 500ms, 1s)
+- `portsyncd_redis_latency_seconds` - Redis operation latency (buckets: 1ms,
+  5ms, 10ms, 50ms, 100ms)
 
 **Key Features**:
 
@@ -85,7 +93,8 @@ impl MetricsCollector {
 
 ### 2. Metrics HTTP Server (src/metrics_server.rs)
 
-**Purpose**: Secure HTTP server for metrics endpoint with mTLS authentication support
+**Purpose**: Secure HTTP server for metrics endpoint with mTLS authentication
+support
 
 **Configuration** (MetricsServerConfig):
 
@@ -138,7 +147,10 @@ pub fn spawn_metrics_server(                         // Background task helper
 - Configuration supports certificate rotation
 - Graceful error messages for missing files
 
-**Note**: Current implementation provides plain HTTP with mTLS configuration structure. For full native mTLS termination, deploy behind reverse proxy (nginx/envoy) or add `rustls`/`tokio-rustls` dependencies for in-process TLS termination.
+**Note**: Current implementation provides plain HTTP with mTLS configuration
+structure. For full native mTLS termination, deploy behind reverse proxy
+(nginx/envoy) or add `rustls`/`tokio-rustls` dependencies for in-process TLS
+termination.
 
 **Tests**: 4 unit tests covering:
 
@@ -194,7 +206,7 @@ drop(metrics_server_handle);
 
 Example metrics endpoint response:
 
-```
+```text
 # HELP portsyncd_events_processed_total Total events processed successfully
 # TYPE portsyncd_events_processed_total counter
 portsyncd_events_processed_total 1234
@@ -263,7 +275,8 @@ prometheus = "0.13"  # Prometheus metrics client
 axum = "0.7"         # HTTP server framework (already present for metrics server)
 ```
 
-**Note**: Both dependencies already present in workspace, minimal additional footprint.
+**Note**: Both dependencies already present in workspace, minimal additional
+footprint.
 
 ---
 
@@ -291,8 +304,10 @@ axum = "0.7"         # HTTP server framework (already present for metrics server
 **metrics_server.rs** (4 tests):
 
 - `test_metrics_server_config_creation` - Config creation without TLS
-- `test_metrics_server_config_validation_without_mtls` - Validation passes without TLS
-- `test_metrics_server_config_validation_with_mtls_missing_cert` - Validation catches missing certs
+- `test_metrics_server_config_validation_without_mtls` - Validation passes
+  without TLS
+- `test_metrics_server_config_validation_with_mtls_missing_cert` - Validation
+  catches missing certs
 - `test_metrics_server_creation` - Server instantiation
 
 ### Integration Tests (7 new tests in tests/metrics_integration.rs)
@@ -303,7 +318,8 @@ axum = "0.7"         # HTTP server framework (already present for metrics server
 - `test_metrics_collection_degraded_health` - Tracks degraded health (0.5)
 - `test_metrics_config_with_and_without_mtls` - mTLS configuration options
 - `test_metrics_multiple_port_tracking` - Multiple port flap tracking
-- `test_metrics_event_latency_timer` - Latency histogram with multiple observations
+- `test_metrics_event_latency_timer` - Latency histogram with multiple
+  observations
 
 ### All Test Categories
 
@@ -318,7 +334,7 @@ axum = "0.7"         # HTTP server framework (already present for metrics server
 
 ## Architecture Overview
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
 │ portsyncd Daemon (src/main.rs)                          │
 ├─────────────────────────────────────────────────────────┤
@@ -524,16 +540,21 @@ groups:
 
 ## Summary
 
-Phase 6 Week 1 successfully implements production-grade Prometheus metrics export with:
+Phase 6 Week 1 successfully implements production-grade Prometheus metrics
+export with:
 
-✅ **14 Comprehensive Metrics** covering events, connections, health, and performance
+✅ **14 Comprehensive Metrics** covering events, connections, health, and
+performance
 ✅ **Secure HTTP Server** with mTLS authentication support
 ✅ **Zero Performance Overhead** through thread-safe atomic operations
-✅ **150/150 Tests Passing** (122 unit + 7 metrics + 12 integration + 9 perf/main)
+✅ **150/150 Tests Passing** (122 unit + 7 metrics + 12 integration + 9
+perf/main)
 ✅ **Full Prometheus Ecosystem** integration (Grafana dashboards, alerting rules)
 ✅ **Production Ready** with graceful shutdown and error handling
 
-The daemon now provides complete operational visibility into port synchronization performance, enabling SREs to build dashboards, alerting, and capacity planning strategies.
+The daemon now provides complete operational visibility into port
+synchronization performance, enabling SREs to build dashboards, alerting, and
+capacity planning strategies.
 
 ---
 

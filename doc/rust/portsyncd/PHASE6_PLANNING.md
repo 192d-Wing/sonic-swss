@@ -2,15 +2,19 @@
 
 ## Overview
 
-Phase 6 extends portsyncd with advanced capabilities that add significant operational value beyond the production baseline. Each feature addresses specific deployment challenges and operational requirements.
+Phase 6 extends portsyncd with advanced capabilities that add significant
+operational value beyond the production baseline. Each feature addresses
+specific deployment challenges and operational requirements.
 
 ---
 
 ## Feature 1: Warm Restart Support (EOIU Detection)
 
-### Use Case
+### Use Case (Feature 1)
 
-**Scenario**: A SONiC switch needs to restart the orchestration agent (orchagent) or perform a controlled reboot without losing port connectivity or disrupting traffic.
+**Scenario**: A SONiC switch needs to restart the orchestration agent
+(orchagent) or perform a controlled reboot without losing port connectivity or
+disrupting traffic.
 
 **Problem Without This Feature**:
 
@@ -36,7 +40,7 @@ Phase 6 extends portsyncd with advanced capabilities that add significant operat
   - Warm restart (preserving existing state)
   - Normal runtime port events
 
-### Implementation Details
+### Implementation Details (Feature 1)
 
 ```rust
 // In netlink_socket.rs
@@ -56,7 +60,7 @@ pub fn handle_eoiu(&mut self) {
 }
 ```
 
-### Value Delivered
+### Value Delivered (Feature 1)
 
 **Operational**:
 
@@ -81,7 +85,7 @@ pub fn handle_eoiu(&mut self) {
 
 ### Example Deployment Impact
 
-```
+```text
 Without EOIU:
   12:00:00 - Start warm restart
   12:00:02 - All ports marked as DOWN (traffic loss ~2 seconds)
@@ -95,7 +99,7 @@ With EOIU:
   └─ 0 seconds of traffic disruption per restart
 ```
 
-### Effort Estimate
+### Effort Estimate (Feature 1)
 
 - Implementation: 4-6 hours
 - Testing: 3-4 hours
@@ -106,9 +110,10 @@ With EOIU:
 
 ## Feature 2: Prometheus Metrics Export
 
-### Use Case
+### Use Case (Feature 2)
 
-**Scenario**: Network operators need real-time visibility into portsyncd performance across hundreds of switches in a data center.
+**Scenario**: Network operators need real-time visibility into portsyncd
+performance across hundreds of switches in a data center.
 
 **Problem Without This Feature**:
 
@@ -129,7 +134,7 @@ With EOIU:
 
 **Prometheus Metrics Endpoint**: `/metrics` HTTP endpoint on configurable port
 
-```
+```text
 # HELP portsyncd_event_processing_latency_seconds Event processing latency
 # TYPE portsyncd_event_processing_latency_seconds histogram
 portsyncd_event_processing_latency_seconds_bucket{le="0.001"} 850
@@ -179,7 +184,7 @@ portsyncd_memory_bytes 52428800
 - Restart count
 - EOIU detection count (when EOIU is implemented)
 
-### Implementation Details
+### Implementation Details (Feature 2)
 
 ```rust
 // In Cargo.toml
@@ -202,7 +207,7 @@ async fn metrics_server(metrics: Arc<PrometheusMetrics>) {
 }
 ```
 
-### Value Delivered
+### Value Delivered (Feature 2)
 
 **Operational**:
 
@@ -227,7 +232,7 @@ async fn metrics_server(metrics: Arc<PrometheusMetrics>) {
 
 ### Example Grafana Dashboard
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │ portsyncd Performance Dashboard             │
 ├─────────────────────────────────────────────┤
@@ -246,7 +251,7 @@ async fn metrics_server(metrics: Arc<PrometheusMetrics>) {
 └─────────────────────────────────────────────┘
 ```
 
-### Effort Estimate
+### Effort Estimate (Feature 2)
 
 - Metrics collection: 6-8 hours
 - HTTP server implementation: 3-4 hours
@@ -258,9 +263,11 @@ async fn metrics_server(metrics: Arc<PrometheusMetrics>) {
 
 ## Feature 3: Self-Healing Capabilities
 
-### Use Case
+### Use Case (Feature 3)
 
-**Scenario**: A SONiC switch experiences transient network issues (brief Redis disconnect, temporary netlink glitch) but the operator is unaware and manual intervention is delayed.
+**Scenario**: A SONiC switch experiences transient network issues (brief Redis
+disconnect, temporary netlink glitch) but the operator is unaware and manual
+intervention is delayed.
 
 **Problem Without This Feature**:
 
@@ -328,7 +335,7 @@ async fn metrics_server(metrics: Arc<PrometheusMetrics>) {
    // → Alert but don't crash (allow recovery)
    ```
 
-### Implementation Details
+### Implementation Details (Feature 3)
 
 ```rust
 // In src/self_healing.rs (new module)
@@ -383,7 +390,7 @@ impl SelfHealer {
 }
 ```
 
-### Value Delivered
+### Value Delivered (Feature 3)
 
 **Operational**:
 
@@ -408,7 +415,7 @@ impl SelfHealer {
 
 ### Example Recovery Scenario
 
-```
+```text
 14:23:00 - Redis connection drops (network blip)
   └─ System detects connection loss
 
@@ -425,7 +432,7 @@ impl SelfHealer {
 Total Recovery Time: 3 seconds (vs 15+ min manual)
 ```
 
-### Effort Estimate
+### Effort Estimate (Feature 3)
 
 - Health monitoring: 4-5 hours
 - Connection healing: 3-4 hours
@@ -438,9 +445,10 @@ Total Recovery Time: 3 seconds (vs 15+ min manual)
 
 ## Feature 4: Multi-Instance Support
 
-### Use Case
+### Use Case (Feature 4)
 
-**Scenario**: A large data center has switches with 512+ ports, and a single portsyncd instance can't keep up with the event rate due to CPU constraints.
+**Scenario**: A large data center has switches with 512+ ports, and a single
+portsyncd instance can't keep up with the event rate due to CPU constraints.
 
 **Problem Without This Feature**:
 
@@ -457,9 +465,10 @@ Total Recovery Time: 3 seconds (vs 15+ min manual)
 
 ### What Multi-Instance Adds
 
-**Partitioning Strategy**: Multiple portsyncd instances, each handling subset of ports
+**Partitioning Strategy**: Multiple portsyncd instances, each handling subset of
+ports
 
-```
+```text
 Configuration:
 ┌─────────────────────────────────────────┐
 │ portsyncd.conf                          │
@@ -484,7 +493,7 @@ Distribution (4 instances, 256 ports):
     ...
 ```
 
-### Implementation Details
+### Implementation Details (Feature 4)
 
 ```rust
 // In config_file.rs
@@ -538,7 +547,7 @@ async fn main() {
 }
 ```
 
-### Value Delivered
+### Value Delivered (Feature 4)
 
 **Operational**:
 
@@ -583,7 +592,7 @@ total_instances = 2
 port_partition = { type = "range", start_port = 0, end_port = 127 }
 ```
 
-### Effort Estimate
+### Effort Estimate (Feature 4)
 
 - Configuration parsing: 2-3 hours
 - Port partitioning logic: 3-4 hours
@@ -598,7 +607,7 @@ port_partition = { type = "range", start_port = 0, end_port = 127 }
 ### Impact Analysis
 
 | Feature | Performance | Operational | Business | Complexity |
-|---------|-------------|-------------|----------|------------|
+| --------- | ------------- | ------------- | ---------- | ------------ |
 | **Warm Restart (EOIU)** | Medium | High | High | Medium |
 | **Prometheus Metrics** | Low | High | High | Medium |
 | **Self-Healing** | Medium | Very High | High | High |
@@ -644,7 +653,7 @@ port_partition = { type = "range", start_port = 0, end_port = 127 }
 
 ### Phase 6 Timeline (Estimated)
 
-```
+```text
 Week 1: Prometheus Metrics Export
   └─ Implementation: 14-19 hours
   └─ Metrics collection, HTTP server, Grafana dashboard
@@ -703,9 +712,11 @@ Week 4: Multi-Instance Support
 All Phase 6 features are **optional and backward compatible**:
 
 - **Prometheus Metrics**: Disabled by default, enabled via config
-- **Warm Restart**: Auto-detected (no config required, works on existing deployments)
+- **Warm Restart**: Auto-detected (no config required, works on existing
+  deployments)
 - **Self-Healing**: Disabled by default, can be toggled per environment
-- **Multi-Instance**: Only used when explicitly configured (single instance is default)
+- **Multi-Instance**: Only used when explicitly configured (single instance is
+  default)
 
 **No breaking changes** to existing deployments.
 
@@ -731,12 +742,15 @@ All Phase 6 features are **optional and backward compatible**:
 
 ## Conclusion
 
-Phase 6 transforms portsyncd from a **solid, reliable daemon** into an **intelligent, self-managing system** with:
+Phase 6 transforms portsyncd from a **solid, reliable daemon** into an
+**intelligent, self-managing system** with:
 
 1. **Visibility** (Prometheus) - Know what's happening
 2. **Resilience** (Warm Restart, Self-Healing) - Recover automatically
 3. **Scale** (Multi-Instance) - Handle future growth
 
-Each feature solves real operational problems and delivers measurable business value.
+Each feature solves real operational problems and delivers measurable business
+value.
 
-**Recommendation**: Start with Phase 6 implementation to maximize production value before moving to Phase 7 hardening.
+**Recommendation**: Start with Phase 6 implementation to maximize production
+value before moving to Phase 7 hardening.

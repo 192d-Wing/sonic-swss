@@ -1,17 +1,20 @@
 # portsyncd Crate Architecture: Component Interactions
 
-**Version**: 2.0
-**Date**: January 25, 2026
-**Status**: Production Ready
-**Target Audience**: Rust Developers, Maintainers, Contributors
+**Version**: 2.0.  
+**Date**: January 25, 2026.  
+**Status**: Production Ready.  
+**Target Audience**: Rust Developers, Maintainers, Contributors.  
 
 ---
 
 ## Overview
 
-The portsyncd crate is a production-grade port synchronization daemon for SONiC switches. It monitors kernel netlink events and synchronizes port/interface status to the SONiC distributed database (Redis).
+The portsyncd crate is a production-grade port synchronization daemon for SONiC
+switches. It monitors kernel netlink events and synchronizes port/interface
+status to the SONiC distributed database (Redis).
 
-**Core Purpose**: Listen for kernel RTM_NEWLINK/DELLINK events → Update STATE_DB with current port status
+**Core Purpose**: Listen for kernel RTM_NEWLINK/DELLINK events → Update STATE_DB
+with current port status
 
 **Architecture Style**: Modular, event-driven, with clear separation of concerns
 
@@ -19,84 +22,84 @@ The portsyncd crate is a production-grade port synchronization daemon for SONiC 
 
 ## Module Dependency Graph
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          main.rs (Entry Point)                      │
-│                                                                      │
-│  - Signal handling (SIGTERM, SIGINT)                               │
-│  - Async event loop (tokio runtime)                               │
-│  - Component initialization & orchestration                       │
+│                                                                     │
+│  - Signal handling (SIGTERM, SIGINT)                                │
+│  - Async event loop (tokio runtime)                                 │
+│  - Component initialization & orchestration                         │
 └──────────────────────────────────────────────────────────────────┬──┘
-                                                                  │
-                    ┌─────────────────────────────────────────────┴──────────────────┐
-                    │                                                               │
+                                                                   │
+                    ┌──────────────────────────────────────────────┴──────────────┐
+                    │                                                             │
           ┌─────────▼─────────┐     ┌──────────────────┐    ┌──────────────────┐  │
           │   config module   │     │   error module   │    │ production_db.rs │  │
           │                   │     │                  │    │                  │  │
           │ - Config structs  │     │ - PortsyncError  │    │ - ProductionDB   │  │
           │ - Defaults        │     │ - Result type    │    │ - State machine  │  │
           └─────────┬─────────┘     └──────────────────┘    └────────┬─────────┘  │
-                    │                                                 │            │
-                    └──────────────┬──────────────────────────────────┘            │
+                    │                                                │            │
+                    └──────────────┬─────────────────────────────────┘            │
                                    │                                              │
-                          ┌────────▼────────┐                                    │
-                          │ redis_adapter   │                                    │
-                          │                 │                                    │
-                          │ - Connection    │                                    │
-                          │ - Database ops  │                                    │
-                          │   (GET/SET/etc) │                                    │
-                          └────────┬────────┘                                    │
+                          ┌────────▼────────┐                                     │
+                          │ redis_adapter   │                                     │
+                          │                 │                                     │
+                          │ - Connection    │                                     │
+                          │ - Database ops  │                                     │
+                          │   (GET/SET/etc) │                                     │
+                          └────────┬────────┘                                     │
                                    │                                              │
-                    ┌──────────────┼──────────────┐                              │
-                    │              │              │                              │
-          ┌─────────▼──────┐ ┌───────▼──────┐ ┌──▼──────────┐                   │
-          │ port_sync.rs   │ │ alerting.rs  │ │ metrics.rs  │                   │
-          │                │ │              │ │             │                   │
-          │ - LinkSync     │ │ - AlertRule  │ │ - Collector │                   │
-          │ - Port state   │ │ - Engine     │ │ - Exporter  │                   │
-          │ - Link events  │ │ - State mgmt │ │ - Analysis  │                   │
-          └────────┬───────┘ └───────┬──────┘ └──┬──────────┘                   │
-                   │                 │           │                              │
-                   │                 └────┬──────┘                              │
-                   │                      │                                     │
-          ┌────────▼──────────────────────▼────────┐                           │
-          │    warm_restart.rs                     │                           │
-          │                                        │                           │
-          │ - WarmRestartManager                   │                           │
-          │ - PortState (persistent)               │                           │
-          │ - EOIU detection                       │                           │
-          │ - State recovery                       │                           │
-          └────────┬───────────────────────────────┘                           │
-                   │                                                            │
-          ┌────────▼──────────────────────────────┐                           │
-          │    netlink_socket.rs                  │                           │
-          │                                       │                           │
-          │ - RTM_NEWLINK/DELLINK parsing        │                           │
-          │ - Event reception                    │                           │
-          │ - Attribute extraction               │                           │
-          └────────┬──────────────────────────────┘                           │
-                   │                                                            │
-     ┌─────────────▼───────────────────────────────┐                          │
-     │    eoiu_detector.rs                         │                          │
-     │                                             │                          │
-     │ - EOIU signal detection                    │                          │
-     │ - Initial sync tracking                   │                          │
-     └─────────────┬───────────────────────────────┘                          │
-                   │                                                            │
-     ┌─────────────▼────────────────┐                                         │
-     │ production_features.rs       │                                         │
-     │                              │                                         │
-     │ - HealthMonitor              │                                         │
-     │ - SystemdNotifier            │                                         │
-     │ - ShutdownCoordinator        │                                         │
-     └──────────────────────────────┘                                         │
-                                                                               │
-     ┌──────────────────────────────────────────────┐                         │
-     │ Additional Support Modules:                 │                         │
-     │ - config_file.rs: TOML config parsing      │◄────────────────────────┘
-     │ - trend_analysis.rs: Anomaly detection     │
-     │ - metrics_server.rs: Prometheus /metrics   │
-     │ - promql_queries.rs: PromQL query builder  │
+                    ┌──────────────┼──────────────┐                               │
+                    │              │              │                               │
+          ┌─────────▼──────┐ ┌─────▼────────┐ ┌───▼─────────┐                     │
+          │ port_sync.rs   │ │ alerting.rs  │ │ metrics.rs  │                     │
+          │                │ │              │ │             │                     │
+          │ - LinkSync     │ │ - AlertRule  │ │ - Collector │                     │
+          │ - Port state   │ │ - Engine     │ │ - Exporter  │                     │
+          │ - Link events  │ │ - State mgmt │ │ - Analysis  │                     │
+          └────────┬───────┘ └───────┬──────┘ └──┬──────────┘                     │
+                   │                 │           │                                │
+                   │                 └────┬──────┘                                │
+                   │                      │                                       │
+          ┌────────▼──────────────────────▼────────┐                              │
+          │    warm_restart.rs                     │                              │
+          │                                        │                              │
+          │ - WarmRestartManager                   │                              │
+          │ - PortState (persistent)               │                              │
+          │ - EOIU detection                       │                              │
+          │ - State recovery                       │                              │
+          └────────┬───────────────────────────────┘                              │
+                   │                                                              │
+          ┌────────▼──────────────────────────────┐                               │
+          │    netlink_socket.rs                  │                               │
+          │                                       │                               │
+          │ - RTM_NEWLINK/DELLINK parsing         │                               │
+          │ - Event reception                     │                               │
+          │ - Attribute extraction                │                               │
+          └────────┬──────────────────────────────┘                               │
+                   │                                                              │
+     ┌─────────────▼───────────────────────────────┐                              │
+     │    eoiu_detector.rs                         │                              │
+     │                                             │                              │
+     │ - EOIU signal detection                     │                              │
+     │ - Initial sync tracking                     │                              │
+     └─────────────┬───────────────────────────────┘                              │
+                   │                                                              │
+     ┌─────────────▼────────────────┐                                             │
+     │ production_features.rs       │                                             │
+     │                              │                                             │
+     │ - HealthMonitor              │                                             │
+     │ - SystemdNotifier            │                                             │
+     │ - ShutdownCoordinator        │                                             │
+     └──────────────────────────────┘                                             │
+                                                                                  │
+     ┌──────────────────────────────────────────────┐                             │
+     │ Additional Support Modules:                  │                             │
+     │ - config_file.rs: TOML config parsing        │◄────────────────────────────┘
+     │ - trend_analysis.rs: Anomaly detection       │
+     │ - metrics_server.rs: Prometheus /metrics     │
+     │ - promql_queries.rs: PromQL query builder    │
      └──────────────────────────────────────────────┘
 ```
 
@@ -106,7 +109,7 @@ The portsyncd crate is a production-grade port synchronization daemon for SONiC 
 
 ### 1. Main Event Loop Orchestration
 
-```
+```text
 main.rs::run_daemon()
 │
 ├─► Setup signal handlers (SIGTERM, SIGINT)
@@ -160,7 +163,7 @@ main.rs::run_daemon()
 
 ### 2. Port Synchronization Flow
 
-```
+```text
 NetlinkEvent from kernel (RTM_NEWLINK/DELLINK)
 │
 ├─► NetlinkSocket::receive_event()
@@ -204,7 +207,7 @@ NetlinkEvent from kernel (RTM_NEWLINK/DELLINK)
 
 ### 3. Alerting Engine Integration
 
-```
+```text
 MetricsCollector generates WarmRestartMetrics
 │
 └─► AlertingEngine::evaluate(metrics)
@@ -246,7 +249,7 @@ MetricsCollector generates WarmRestartMetrics
 
 ### 4. Warm Restart Coordination
 
-```
+```text
 Application startup
 │
 ├─► Check if /var/lib/sonic/portsyncd/port_state.json exists
@@ -288,7 +291,7 @@ Application startup
 
 ### 5. Redis Database Abstraction
 
-```
+```text
 RedisAdapter manages three database instances:
 
 ┌──────────────────────────────────────────┐
@@ -298,12 +301,12 @@ RedisAdapter manages three database instances:
 │                                          │
 │ Contents:                                │
 │ - PORT_TABLE: Port configurations        │
-│   └─► {port_name}: (speed, mtu, etc)    │
+│   └─► {port_name}: (speed, mtu, etc)     │
 │ - PORT_INIT_DONE: Initialization flag    │
 │ - PORT_CONFIG_DONE: Config load flag     │
 │                                          │
-│ Operations: Query (HGETALL, HGET)       │
-│            Listen (SUBSCRIBE)           │
+│ Operations: Query (HGETALL, HGET)        │
+│            Listen (SUBSCRIBE)            │
 └──────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────┐
@@ -313,14 +316,14 @@ RedisAdapter manages three database instances:
 │                                          │
 │ Contents:                                │
 │ - PORT_TABLE: Current port status        │
-│   └─► {port_name}: (state, mtu, etc)    │
+│   └─► {port_name}: (state, mtu, etc)     │
 │ - PORT_INIT_DONE: Initialization signal  │
 │ - PORT_CONFIG_DONE: Config load signal   │
 │ - Alert state (future)                   │
 │                                          │
-│ Operations: Update (HSET, HDEL)         │
-│            Publish (PUBLISH)            │
-│            Query (HGET, HGETALL)        │
+│ Operations: Update (HSET, HDEL)          │
+│            Publish (PUBLISH)             │
+│            Query (HGET, HGETALL)         │
 └──────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────┐
@@ -351,7 +354,7 @@ RedisAdapter pattern:
 
 ### 6. Metrics Collection & Export
 
-```
+```text
 MetricsCollector (Arc-wrapped for thread safety)
 │
 ├─► start_event_latency() → Timer
@@ -388,7 +391,7 @@ MetricsCollector (Arc-wrapped for thread safety)
 
 ### 7. Configuration Loading Flow
 
-```
+```text
 main.rs::run_daemon()
 │
 └─► load_port_config(config_db)
@@ -422,13 +425,13 @@ main.rs::run_daemon()
 
 ## Data Flow Diagram: Complete Event Processing
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────────────┐
 │                         KERNEL                                       │
 │                      (netlink socket)                                │
 │                                                                      │
-│  RTM_NEWLINK: Ethernet0 flags=IFF_UP|IFF_RUNNING mtu=9100           │
-└─────────────────────────────────┬──────────────────────────────────┘
+│  RTM_NEWLINK: Ethernet0 flags=IFF_UP|IFF_RUNNING mtu=9100            │
+└─────────────────────────────────┬────────────────────────────────────┘
                                   │
                     ┌─────────────▼──────────────┐
                     │  NetlinkSocket             │
@@ -436,64 +439,64 @@ main.rs::run_daemon()
                     └─────────────┬──────────────┘
                                   │
                     ┌─────────────▼──────────────────────────────┐
-                    │  Parse netlink message attributes:        │
-                    │  - port_name: "Ethernet0"                 │
-                    │  - flags: 0x49 (IFF_UP | IFF_RUNNING)     │
-                    │  - mtu: 9100                              │
-                    │  → LinkStatus::Up                         │
+                    │  Parse netlink message attributes:         │
+                    │  - port_name: "Ethernet0"                  │
+                    │  - flags: 0x49 (IFF_UP | IFF_RUNNING)      │
+                    │  - mtu: 9100                               │
+                    │  → LinkStatus::Up                          │
                     └─────────────┬──────────────────────────────┘
                                   │
                     ┌─────────────▼──────────────────────────────┐
-                    │  WarmRestartManager                       │
-                    │  should_update_db()?                      │
-                    │  └─ Check restart phase                   │
-                    │     └─ May skip update during init        │
+                    │  WarmRestartManager                        │
+                    │  should_update_db()?                       │
+                    │  └─ Check restart phase                    │
+                    │     └─ May skip update during init         │
                     └─────────────┬──────────────────────────────┘
                                   │ (if should update)
                     ┌─────────────▼──────────────────────────────┐
-                    │  LinkSync::handle_event()                 │
-                    │  ├─ Create PortLinkState                  │
-                    │  ├─ Update internal state tracking        │
-                    │  └─ Check if all ports initialized?       │
+                    │  LinkSync::handle_event()                  │
+                    │  ├─ Create PortLinkState                   │
+                    │  ├─ Update internal state tracking         │
+                    │  └─ Check if all ports initialized?        │
                     └─────────────┬──────────────────────────────┘
                                   │
               ┌───────────────────┼───────────────────┐
               │                   │                   │
-    ┌─────────▼─────────┐ ┌───────▼──────┐ ┌────────▼────────┐
+    ┌─────────▼─────────┐ ┌───────▼───────┐ ┌────────▼────────┐
     │  MetricsCollector │ │ AlertingEngine│ │ RedisAdapter    │
     │                   │ │               │ │                 │
     │ Record latency &  │ │ Evaluate rules│ │ Write to APP_DB │
     │ success           │ │ Generate      │ │                 │
     │                   │ │ alerts        │ │ HSET            │
-    └────────┬──────────┘ └───────┬──────┘ │ PORT_TABLE:     │
-             │                    │        │ Ethernet0       │
-             │                    │        │ {state: "ok",   │
-             │                    │        │  oper_status:   │
-             │    ┌───────────────┤        │  "up"}          │
-             │    │               │        │                 │
+    └────────┬──────────┘ └───────┬───────┘ │ PORT_TABLE:     │
+             │                    │         │ Ethernet0       │
+             │                    │         │ {state: "ok",   │
+             │                    │         │  oper_status:   │
+             │    ┌───────────────┤         │  "up"}          │
+             │    │               │         │                 │
              │    │         ┌─────▼─────────┼──────────┐      │
              │    │         │               │          │      │
-             │    │    ┌────▼────────┐  ┌──▼──────────▼──┐   │
-             │    │    │ WarmRestart │  │   AlertingRule │   │
-             │    │    │ Metrics     │  │   Fired!       │   │
-             │    │    │ (updated)   │  │ (if threshold  │   │
-             │    │    │             │  │  exceeded)     │   │
-             │    │    └─────────────┘  └────────────────┘   │
-             │    │                                          │
-             └────┼──────────────────────────────────────────┘
+             │    │    ┌────▼────────┐  ┌───▼──────────▼─┐    │
+             │    │    │ WarmRestart │  │   AlertingRule │    │
+             │    │    │ Metrics     │  │   Fired!       │    │
+             │    │    │ (updated)   │  │ (if threshold  │    │
+             │    │    │             │  │  exceeded)     │    │
+             │    │    └─────────────┘  └────────────────┘    │
+             │    │                                           │
+             └────┼───────────────────────────────────────────┘
                   │
     ┌─────────────▼──────────────────────────────────────────┐
     │         MetricsServer (Prometheus exporter)            │
     │                                                        │
     │  GET /metrics                                          │
-    │  ├─ portsyncd_events_total{...} 1234                  │
-    │  ├─ portsyncd_event_latency_micros{...} 456           │
-    │  ├─ portsyncd_memory_bytes 52428800                   │
-    │  └─ alert_events_fired{...} 5                         │
+    │  ├─ portsyncd_events_total{...} 1234                   │
+    │  ├─ portsyncd_event_latency_micros{...} 456            │
+    │  ├─ portsyncd_memory_bytes 52428800                    │
+    │  └─ alert_events_fired{...} 5                          │
     │                                                        │
-    │  Scraped by Prometheus every 30s                      │
-    │  → Dashboards (Grafana)                               │
-    │  → Alerting system (alert manager)                    │
+    │  Scraped by Prometheus every 30s                       │
+    │  → Dashboards (Grafana)                                │
+    │  → Alerting system (alert manager)                     │
     └────────────────────────────────────────────────────────┘
 ```
 
@@ -502,7 +505,7 @@ main.rs::run_daemon()
 ## Component Dependencies Summary
 
 | Component | Depends On | Provides To | Purpose |
-|-----------|-----------|------------|---------|
+| ----------- | ----------- | ------------ | --------- |
 | **main.rs** | All modules | - | Entry point, orchestration |
 | **port_sync.rs** | config, error, warm_restart | main.rs | Port event handling |
 | **netlink_socket.rs** | error | port_sync.rs | Kernel event parsing |
@@ -524,7 +527,7 @@ main.rs::run_daemon()
 
 ## Thread Safety & Synchronization
 
-```
+```text
 Arc<Mutex<>> patterns (async-safe):
 
 MetricsCollector
@@ -551,7 +554,7 @@ No unsafe code blocks
 
 ## Error Handling Strategy
 
-```
+```text
 PortsyncError enum:
 ├─► Netlink(String) → Parse/socket errors
 ├─► Database(String) → Redis connection/query errors
@@ -572,7 +575,7 @@ Error handling patterns:
 
 ## Initialization Sequence
 
-```
+```text
 1. main() → run_daemon()
 2. Setup signal handlers (SIGTERM, SIGINT)
 3. Initialize MetricsCollector
@@ -599,7 +602,7 @@ Error handling patterns:
 
 ### Event Processing Pipeline
 
-```
+```text
 Netlink event received
   ↓ (parse)          [~1-5 μs]
 NetlinkEvent created
@@ -621,7 +624,7 @@ Memory: ~5MB base + ~300 bytes per active alert
 
 ### Latency Percentiles (from Phase 7 Week 4 testing)
 
-```
+```text
 P50:  50-75 μs
 P95:  200-300 μs
 P99:  400-600 μs
@@ -680,6 +683,7 @@ pub enum AlertAction {
 ## Testing Architecture
 
 ### Unit Tests (292 total)
+
 - Alerting engine logic (150 tests)
 - Warm restart state machine (90 tests)
 - Redis adapter abstraction (20 tests)
@@ -687,6 +691,7 @@ pub enum AlertAction {
 - Error handling (20 tests)
 
 ### Integration Tests (159 total)
+
 - Chaos testing (15 tests) - Network/state failures
 - Stress testing (22 tests) - 1K-100K ports, 10K eps
 - Security audit (17 tests) - OWASP compliance
@@ -695,7 +700,8 @@ pub enum AlertAction {
 - End-to-end scenarios (79 tests)
 
 ### Test Execution
-```
+
+```text
 cargo test --all-features          # All tests
 cargo test --lib                   # Unit tests only
 cargo test --test '*'              # Integration tests only
@@ -707,18 +713,21 @@ cargo bench --features bench       # Benchmarks
 ## Production Considerations
 
 ### Deployment
+
 - Binary: ~15MB (release build)
 - Memory: ~50MB base + alert overhead
 - CPU: Single-threaded event loop (scales to 1 core)
 - Network: Redis connection + metrics server (mTLS)
 
 ### Monitoring
+
 - Prometheus metrics endpoint: IPv6 [::1]:9090/metrics
 - Health check: MetricsCollector::is_healthy()
 - Systemd watchdog: SystemdNotifier::notify_watchdog()
 - Logging: Structured logs to systemd journal
 
 ### Resilience
+
 - Automatic Redis reconnection with exponential backoff
 - Graceful degradation during Redis outages
 - Warm restart support for zero-downtime restarts

@@ -2,20 +2,22 @@
 
 ## Executive Summary
 
-**Recommendation**: Use **Prometheus-Direct** approach for Phase 6 (now), with OpenTelemetry readiness for Phase 7+
+**Recommendation**: Use **Prometheus-Direct** approach for Phase 6 (now), with
+OpenTelemetry readiness for Phase 7+
 
 **Rationale**:
 
 - Prometheus-direct: Simpler, faster, immediate operational value
-- OpenTelemetry: Better for future complex observability, but adds unnecessary complexity now
+- OpenTelemetry: Better for future complex observability, but adds unnecessary
+  complexity now
 
 ---
 
 ## Option 1: Prometheus-Direct (Recommended for Phase 6)
 
-### Architecture
+### Architecture (Prometheus Pull)
 
-```
+```text
 portsyncd
   ├─ Event Processing
   ├─ Metrics Collection (in-process)
@@ -96,7 +98,7 @@ async fn metrics_server(metrics: Arc<MetricsCollector>) {
 }
 ```
 
-### Pros
+### Pros (Prometheus Pull)
 
 ✅ **Simple & Fast**
 
@@ -128,7 +130,7 @@ async fn metrics_server(metrics: Arc<MetricsCollector>) {
 - Dashboards in Grafana the same day
 - Alerting working immediately
 
-### Cons
+### Cons (Prometheus Pull)
 
 ❌ **No Distributed Tracing**
 
@@ -149,9 +151,9 @@ async fn metrics_server(metrics: Arc<MetricsCollector>) {
 
 ## Option 2: OpenTelemetry + Prometheus Export (For Phase 7+)
 
-### Architecture
+### Architecture (OpenTelemetry)
 
-```
+```text
 portsyncd
   ├─ Event Processing
   ├─ OpenTelemetry SDK (in-process)
@@ -214,7 +216,7 @@ let event_counter = meter.u64_counter("events_processed").init();
 event_counter.add(1, &[]);
 ```
 
-### Pros
+### Pros (OpenTelemetry)
 
 ✅ **Future-Proof Architecture**
 
@@ -240,7 +242,7 @@ event_counter.add(1, &[]);
 - Same instrumentation API for metrics, logs, traces
 - Unified observability
 
-### Cons
+### Cons (OpenTelemetry)
 
 ❌ **Higher Complexity**
 
@@ -295,9 +297,9 @@ event_counter.add(1, &[]);
 - Enable tracing without breaking metrics
 - No code changes to existing metrics
 
-### Architecture
+### Architecture (Hybrid)
 
-```
+```text
 portsyncd
   ├─ Prometheus Metrics (Phase 6)
   │  └─ /metrics endpoint
@@ -334,7 +336,7 @@ let tracer = if config.enable_tracing {
 ## Comparison Matrix
 
 | Aspect | Prometheus-Direct | OpenTelemetry | Hybrid |
-|--------|-------------------|---------------|--------|
+| -------- | ------------------- | --------------- | -------- |
 | **Implementation Time** | 4 hours | 20+ hours | 4 hrs now, 20 hrs later |
 | **Operational Complexity** | Low | High | Low → Medium |
 | **Dependencies** | 1 crate | 10+ crates | 1 → 11 crates |
@@ -385,7 +387,7 @@ let tracer = if config.enable_tracing {
 
 ## Implementation Decision Tree
 
-```
+```text
 Does portsyncd need to correlate metrics with
 traces from other services?
   ├─ NO (single daemon, no external dependencies)
@@ -406,7 +408,7 @@ traces from other services?
 
 ### Phase 6 Week 1: Prometheus-Direct Implementation
 
-```
+```text
 Monday-Wednesday:
   ├─ Create metrics.rs with PrometheusMetrics struct
   ├─ Add prometheus crate to Cargo.toml
@@ -557,5 +559,6 @@ This approach:
 - Prometheus Best Practices: <https://prometheus.io/docs/practices/>
 - Prometheus Rust Client: <https://docs.rs/prometheus/>
 - OpenTelemetry Documentation: <https://opentelemetry.io/docs/>
-- CNCF Observability Guide: <https://www.cncf.io/blog/2022/04/12/what-does-observability-mean/>
+- CNCF Observability Guide:
+  <https://www.cncf.io/blog/2022/04/12/what-does-observability-mean/>
 - SONiC Monitoring: <https://github.com/sonic-net/SONiC/wiki/Monitoring>

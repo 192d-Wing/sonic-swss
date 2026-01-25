@@ -23,10 +23,13 @@
 
 ## Overview
 
-The Rust implementation of portsyncd is a production-ready daemon for port synchronization in SONiC switches. It provides:
+The Rust implementation of portsyncd is a production-ready daemon for port
+synchronization in SONiC switches. It provides:
 
-- **Real-time Port Event Processing**: Netlink socket integration for kernel port events
-- **Comprehensive Health Monitoring**: Warm restart, state recovery, and corruption detection
+- **Real-time Port Event Processing**: Netlink socket integration for kernel
+  port events
+- **Comprehensive Health Monitoring**: Warm restart, state recovery, and
+  corruption detection
 - **Alert Management**: Rule-based alerting with state machine tracking
 - **Performance**: >10K events/second throughput with <100µs P50 latency
 - **Stability**: Validated for extended operation (200K+ continuous evaluations)
@@ -35,7 +38,7 @@ The Rust implementation of portsyncd is a production-ready daemon for port synch
 ### Key Metrics
 
 | Metric | Value | Status |
-|--------|-------|--------|
+| -------- | ------- | -------- |
 | P50 Latency | 50-75 µs | ✅ 50% better than target |
 | P95 Latency | 200-300 µs | ✅ 40-60% better than target |
 | P99 Latency | 400-600 µs | ✅ 40-60% better than target |
@@ -51,7 +54,7 @@ The Rust implementation of portsyncd is a production-ready daemon for port synch
 ### Hardware
 
 | Component | Requirement | Notes |
-|-----------|-------------|-------|
+| ----------- | ------------- | ------- |
 | CPU | Single core (2+ recommended) | Event processing is single-threaded |
 | RAM | 512MB minimum, 1GB recommended | Alerts and rule state |
 | Storage | 100MB free | Binary + state files |
@@ -59,7 +62,7 @@ The Rust implementation of portsyncd is a production-ready daemon for port synch
 ### Software
 
 | Component | Version | Required |
-|-----------|---------|----------|
+| ----------- | --------- | ---------- |
 | Linux Kernel | 4.9+ | Netlink socket support |
 | glibc | 2.17+ | Standard library |
 | Redis | 5.0+ | State database |
@@ -68,7 +71,7 @@ The Rust implementation of portsyncd is a production-ready daemon for port synch
 ### Network
 
 | Service | Port | Protocol | Notes |
-|---------|------|----------|-------|
+| --------- | ------ | ---------- | ------- |
 | Redis | 6379 | TCP | CONFIG_DB, APP_DB, STATE_DB |
 | Netlink | N/A | AF_NETLINK | Kernel communication |
 
@@ -645,7 +648,7 @@ PORTSYNCD_ENABLE_PROFILING=false portsyncd
 ### Service Level Objectives (SLO)
 
 | Objective | Target | Consequence of Miss |
-|-----------|--------|------------------|
+| ----------- | -------- | ------------------ |
 | Availability | 99.95% uptime | Page oncall |
 | Event Latency P50 | <100 µs | Performance investigation |
 | Event Latency P99 | <1000 µs | Optimization sprint |
@@ -671,7 +674,7 @@ PORTSYNCD_ENABLE_PROFILING=false portsyncd
 #### Incident Response SLA
 
 | Severity | Response Time | Resolution Time |
-|----------|---------------|-----------------|
+| ---------- | --------------- | ----------------- |
 | Critical | 15 minutes | 4 hours |
 | High | 30 minutes | 8 hours |
 | Medium | 2 hours | 24 hours |

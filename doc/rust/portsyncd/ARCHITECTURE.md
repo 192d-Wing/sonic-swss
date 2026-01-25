@@ -8,7 +8,7 @@
 
 ### High-Level Overview
 
-```
+```text
 Kernel (Linux)
     │
     ├─► Netlink Socket (RTM_NEWLINK/DELLINK)
@@ -44,39 +44,45 @@ Kernel (Linux)
 ### Components
 
 #### 1. NetlinkSocket
+
 - Receives RTM_NEWLINK/DELLINK events from kernel
 - Parses link message attributes (name, flags, MTU)
 - Non-blocking event reception
 
 #### 2. WarmRestartMetrics
+
 - Tracks warm restart statistics
 - Calculates health scores
 - Monitors recovery rates and timing
 
 #### 3. AlertingEngine
+
 - Rule-based alert generation
 - State machine: Pending → Firing → Resolved
 - Alert suppression/unsuppression
 - Multiple severity levels (Info, Warning, Critical)
 
 #### 4. RedisAdapter
+
 - Multi-database abstraction (CONFIG/APP/STATE)
 - Connection pooling with retry logic
 - Pattern matching and bulk operations
 
 #### 5. HealthMonitor
+
 - Tracks event latency and throughput
 - Monitors memory usage and queue depth
 - Generates health status reports
 
 #### 6. SystemdNotifier
+
 - Sends READY signal on startup
 - Periodic watchdog heartbeats
 - Status updates to systemd
 
 ## Module Organization
 
-```
+```text
 crates/portsyncd/src/
 ├── lib.rs (public API)
 ├── main.rs (event loop)
@@ -107,7 +113,7 @@ tests/ (451 total tests)
 
 ### Port Event Processing
 
-```
+```text
 RTM_NEWLINK from kernel
     ↓
 NetlinkSocket.receive_event()
@@ -128,7 +134,7 @@ Main Loop processes:
 
 ### Alert State Machine
 
-```
+```text
     ┌──────────────┐
     │   Pending    │
     │              │
@@ -153,7 +159,7 @@ Main Loop processes:
 
 ### Health Score Calculation
 
-```
+```text
 health_score = (
     (recovery_rate * 40) +
     (1.0 - restart_ratio) * 30 +
@@ -162,13 +168,14 @@ health_score = (
 ```
 
 Where:
+
 - recovery_rate = state_recovery / eoiu_detected
 - restart_ratio = warm_restart / (warm_restart + cold_start)
 - corruption_rate = corruption / total_events
 
 ### Rule Evaluation
 
-```
+```text
 For each rule:
   1. Get metric value: m = metrics[rule.metric_name]
   2. Check condition:
@@ -190,14 +197,16 @@ For each rule:
 
 ### Test Coverage (451 tests)
 
-**Unit Tests (292)**
+#### Unit Tests (292)
+
 - Alerting engine: 150 tests
 - Warm restart: 90 tests
 - Redis adapter: 20 tests
 - Netlink parsing: 12 tests
 - Error handling: 20 tests
 
-**Integration Tests (159)**
+#### Integration Tests (159)
+
 - Chaos testing (Week 1): 15 tests
   - Network disconnections, slow responses, failures
 - Stress testing (Week 2): 22 tests
@@ -226,7 +235,7 @@ For each rule:
 ### Latency (Percentiles)
 
 | Metric | Target | Achieved | Status |
-|--------|--------|----------|--------|
+| -------- | -------- | ---------- | -------- |
 | P50 | <100 µs | 50-75 µs | ✅ 50% better |
 | P95 | <500 µs | 200-300 µs | ✅ 40-60% better |
 | P99 | <1000 µs | 400-600 µs | ✅ 40-60% better |
@@ -261,6 +270,7 @@ For each rule:
 ## Error Handling
 
 **Error Types**:
+
 - Netlink errors (parsing, socket)
 - Database errors (connection, query)
 - Alert evaluation errors (invalid rules)
@@ -268,6 +278,7 @@ For each rule:
 - System errors (internal failures)
 
 **Strategies**:
+
 - Transient: Automatic retry with exponential backoff
 - Configuration: Validate on startup, reject invalid
 - Operational: Log with context, expose via metrics
@@ -275,7 +286,8 @@ For each rule:
 
 ## Production Readiness
 
-✅ **Verified**: 
+✅ **Verified**:
+
 - 451 tests (100% pass rate)
 - 0 unsafe code blocks
 - OWASP Top 10 compliant

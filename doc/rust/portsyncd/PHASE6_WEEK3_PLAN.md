@@ -1,7 +1,8 @@
 # Phase 6 Week 3: Warm Restart Enhancements - IMPLEMENTATION PLAN
 
 **Date**: 2026-01-24
-**Previous Phase Status**: Phase 6 Week 2 COMPLETE (166 tests passing, 41 new tests)
+**Previous Phase Status**: Phase 6 Week 2 COMPLETE (166 tests passing, 41 new
+tests)
 **Current Phase**: Week 3 - Timeout Fallback & State Cleanup
 **Target**: 50+ new tests, production-hardening, performance optimization
 
@@ -9,13 +10,18 @@
 
 ## Overview
 
-Phase 6 Week 3 builds on the solid foundation of Week 2 by adding three critical enhancements:
+Phase 6 Week 3 builds on the solid foundation of Week 2 by adding three critical
+enhancements:
 
-1. **Timeout-Based EOIU Fallback** - Prevent daemon stall if EOIU signal never arrives
-2. **State File Lifecycle Management** - Cleanup, rotation, and corruption recovery
-3. **Warm Restart Metrics & Observability** - Track timing, success rate, state transitions
+1. **Timeout-Based EOIU Fallback** - Prevent daemon stall if EOIU signal never
+   arrives
+2. **State File Lifecycle Management** - Cleanup, rotation, and corruption
+   recovery
+3. **Warm Restart Metrics & Observability** - Track timing, success rate, state
+   transitions
 
-These enhancements ensure the warm restart system is resilient, observable, and production-ready.
+These enhancements ensure the warm restart system is resilient, observable, and
+production-ready.
 
 ---
 
@@ -125,7 +131,7 @@ impl WarmRestartManager {
 
 **Solutions**:
 
-**Task 4: Auto-Cleanup of Old State Files**
+##### Task 4: Auto-Cleanup of Old State Files
 
 ```rust
 // src/warm_restart.rs new function
@@ -157,7 +163,7 @@ pub fn cleanup_stale_state_files(&self, max_age_days: u32) -> Result<()> {
 }
 ```
 
-**Task 5: State File Rotation**
+##### Task 5: State File Rotation
 
 ```rust
 // src/warm_restart.rs new function
@@ -177,7 +183,7 @@ pub fn rotate_state_file(&self) -> Result<()> {
 }
 ```
 
-**Task 6: Corruption Recovery**
+##### Task 6: Corruption Recovery
 
 ```rust
 // src/warm_restart.rs enhanced
@@ -226,7 +232,7 @@ pub fn load_state_with_recovery(&mut self) -> Result<()> {
 
 **Goal**: Track warm restart metrics for monitoring and debugging
 
-**Task 7: Create WarmRestartMetrics struct**
+##### Task 7: Create WarmRestartMetrics struct
 
 ```rust
 // src/warm_restart.rs new struct
@@ -265,7 +271,7 @@ impl WarmRestartMetrics {
 }
 ```
 
-**Task 8: Integrate metrics into WarmRestartManager**
+##### Task 8: Integrate metrics into WarmRestartManager
 
 ```rust
 impl WarmRestartManager {
@@ -302,7 +308,7 @@ impl WarmRestartManager {
 }
 ```
 
-**Task 9: Expose metrics via public API**
+##### Task 9: Expose metrics via public API
 
 ```rust
 // In LinkSync or main.rs
@@ -382,21 +388,21 @@ if let Some(metrics) = link_sync.warm_restart_metrics() {
 
 ### Timeline (Week 3)
 
-**Day 1-2: Timeout Fallback**
+#### Day 1-2: Timeout Fallback
 
 - Implement timeout detection (Task 1)
 - Add configurable timeout (Task 2)
 - Auto-complete on timeout (Task 3)
 - 8 unit tests + 2 integration tests = 10 tests
 
-**Day 3-4: State File Lifecycle**
+#### Day 3-4: State File Lifecycle
 
 - Cleanup stale files (Task 4)
 - Rotation mechanism (Task 5)
 - Corruption recovery (Task 6)
 - 12 unit tests + 3 integration tests = 15 tests
 
-**Day 5: Metrics & Observability**
+#### Day 5: Metrics & Observability
 
 - Create WarmRestartMetrics (Task 7)
 - Integrate into manager (Task 8)
@@ -411,7 +417,7 @@ if let Some(metrics) = link_sync.warm_restart_metrics() {
 
 ### Unit Tests (30 tests)
 
-```
+```text
 warm_restart.rs enhancements:
   Timeout Detection:        5 tests
   Timeout Configuration:    3 tests
@@ -437,7 +443,7 @@ Other modules:
 
 ### Integration Tests (20 tests)
 
-```
+```text
 warm_restart_week3_integration.rs:
   Timeout Fallback:         6 tests
   State File Lifecycle:     8 tests
@@ -448,7 +454,7 @@ warm_restart_week3_integration.rs:
 
 ### Target Results
 
-```
+```text
 Unit Tests:           180+ (currently 152 + 30 new)
 Integration Tests:    34+ (currently 14 + 20 new)
 Total:                214+ tests
@@ -461,7 +467,7 @@ Success Rate:         100% ✅
 
 ### Timeout Fallback Flow
 
-```
+```text
 WarmStartState:InitialSyncInProgress
   │
   ├─ [Timer started when state entered]
@@ -485,7 +491,7 @@ WarmStartState:InitialSyncInProgress
 
 ### State File Lifecycle
 
-```
+```text
 [On daemon startup]
   │
   ├─ Check state file age
@@ -508,7 +514,7 @@ WarmStartState:InitialSyncInProgress
 
 ### Metrics Tracking
 
-```
+```text
 WarmRestartManager
   │
   ├─ on initialize:
@@ -611,10 +617,10 @@ loop {
 ## Risk Mitigation
 
 | Risk | Mitigation |
-|------|-----------|
+| ------ | ----------- |
 | EOIU never arrives | Timeout fallback (10s default) |
 | Timeout too short | Configurable via env var |
-| Timeout too long | Daemon stalls on timeout | Make configurable |
+| Timeout too long | Daemon stalls on timeout; make configurable |
 | Stale state file used | Auto-cleanup (7 day max age) |
 | Backup corrupted too | Fallback to cold start (safe) |
 | Metrics overhead | Atomic operations only (<0.1%) |
@@ -677,12 +683,14 @@ loop {
 Phase 6 Week 3 adds production-hardening features to the warm restart system:
 
 ✅ **Timeout Fallback** - Prevent daemon stall if EOIU never arrives
-✅ **State Lifecycle** - Cleanup old files, rotate with backup, recover from corruption
+✅ **State Lifecycle** - Cleanup old files, rotate with backup, recover from
+corruption
 ✅ **Metrics** - Track success rate, timing, failure modes
 ✅ **50+ Tests** - Exceeds quality target, 100% pass rate
 ✅ **Production Ready** - Resilient, observable, maintainable
 
-The warm restart system moves from "functional" to "production-hardened" with these enhancements.
+The warm restart system moves from "functional" to "production-hardened" with
+these enhancements.
 
 ---
 

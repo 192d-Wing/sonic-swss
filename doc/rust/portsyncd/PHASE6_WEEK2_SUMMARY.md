@@ -4,9 +4,12 @@
 
 ## Overview
 
-Phase 6 Week 2 delivers complete warm restart support with EOIU (End of Init sequence User indication) signal detection, enabling zero-downtime daemon restarts while preserving port state.
+Phase 6 Week 2 delivers complete warm restart support with EOIU (End of Init
+sequence User indication) signal detection, enabling zero-downtime daemon
+restarts while preserving port state.
 
 **Implementation Summary**:
+
 - ✅ **10 unit tests** in warm_restart.rs (core structures)
 - ✅ **8 unit tests** in eoiu_detector.rs (EOIU detection)
 - ✅ **14 integration tests** in warm_restart_integration.rs (complete workflows)
@@ -69,6 +72,7 @@ impl WarmRestartManager {
 ```
 
 **Tests** (10 unit tests):
+
 - Port state creation and validation
 - Persisted state serialization/deserialization
 - Cold start vs warm start detection
@@ -112,11 +116,13 @@ impl EoiuDetector {
 ```
 
 **EOIU Detection Logic**:
+
 - Signal: netlink RTM_NEWLINK with `ifi_change == 0`
 - Indicates kernel finished initial port state dump
 - Coordinates warm restart state machine
 
 **Tests** (8 unit tests):
+
 - Detector creation and initialization
 - EOIU signal detection (ifi_change == 0)
 - Interface dump sequence tracking
@@ -152,11 +158,14 @@ impl LinkSync {
 ```
 
 **Behavioral Changes**:
-- `handle_new_link()` skips STATE_DB writes if `should_skip_app_db_updates()` is true
+
+- `handle_new_link()` skips STATE_DB writes if `should_skip_app_db_updates()` is
+  true
 - Records port state in WarmRestartManager for persistence
 - Supports both warm restart and non-warm-restart modes
 
 **Tests** (5 new tests added to 27 existing):
+
 - LinkSync without warm restart (baseline)
 - LinkSync with warm restart initialization
 - Warm restart state machine transitions
@@ -186,6 +195,7 @@ impl NetlinkSocket {
 ```
 
 **Behavioral Changes**:
+
 - `parse_netlink_message()` now returns `(NetlinkEvent, u32)` with ifi_change
 - `receive_event()` automatically checks for EOIU signals
 - EOIU detection integrated into event receive loop
@@ -202,6 +212,7 @@ fn extract_netlink_event(link, event_type) -> Result<(NetlinkEvent, u32)>
 ```
 
 **Tests** (4 new tests added to 8 existing):
+
 - EOIU detector creation and access
 - Immutable and mutable detector references
 - Detector initialization with socket
@@ -211,7 +222,8 @@ fn extract_netlink_event(link, event_type) -> Result<(NetlinkEvent, u32)>
 **14 Comprehensive Tests**:
 
 1. `test_warm_restart_cold_start_detection` - Cold start detection
-2. `test_warm_restart_warm_start_detection_and_state_load` - Warm start with state recovery
+2. `test_warm_restart_warm_start_detection_and_state_load` - Warm start with
+   state recovery
 3. `test_warm_restart_state_transitions_with_eoiu` - Complete state machine
 4. `test_warm_restart_app_db_write_gating` - APP_DB update suppression
 5. `test_eoiu_detector_basic_sequence` - EOIU detection workflow
@@ -231,7 +243,7 @@ fn extract_netlink_event(link, event_type) -> Result<(NetlinkEvent, u32)>
 
 ### Unit Tests (Library)
 
-```
+```text
 warm_restart.rs:
   ✅ test_port_state_creation
   ✅ test_port_state_down
@@ -279,7 +291,7 @@ TOTAL UNIT TESTS: 152 passing ✅
 
 ### Integration Tests
 
-```
+```text
 warm_restart_integration.rs:
   ✅ test_warm_restart_cold_start_detection
   ✅ test_warm_restart_warm_start_detection_and_state_load
@@ -303,6 +315,7 @@ TOTAL INTEGRATION TESTS: 14 passing ✅
 ### Complete Summary
 
 **Phase 6 Week 2 Test Totals**:
+
 - Unit tests: 152 passing (10 + 8 + 5 + 4 + 123 from other modules)
 - Integration tests: 14 passing
 - **Combined: 166 tests passing**
@@ -317,7 +330,7 @@ TOTAL INTEGRATION TESTS: 14 passing ✅
 ### Source Code (1147 lines)
 
 | File | Lines | Purpose |
-|------|-------|---------|
+| ------ | ------- | --------- |
 | `src/warm_restart.rs` | 463 | Core warm restart state machine and port state persistence |
 | `src/eoiu_detector.rs` | 190 | EOIU signal detection for warm restart coordination |
 | `tests/warm_restart_integration.rs` | 414 | 14 comprehensive integration tests |
@@ -325,7 +338,7 @@ TOTAL INTEGRATION TESTS: 14 passing ✅
 ### Module Updates
 
 | File | Changes | Purpose |
-|------|---------|---------|
+| ------ | --------- | --------- |
 | `src/lib.rs` | +4 lines | Added warm_restart and eoiu_detector module exports |
 | `src/port_sync.rs` | +80 lines | Added warm restart awareness to port sync |
 | `src/netlink_socket.rs` | +20 lines | Added EOIU detection integration |
@@ -337,7 +350,7 @@ TOTAL INTEGRATION TESTS: 14 passing ✅
 
 ### Warm Restart State Machine
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                   Daemon Startup                             │
 └────────────────────────────┬────────────────────────────────┘
@@ -386,7 +399,7 @@ TOTAL INTEGRATION TESTS: 14 passing ✅
 
 ### Port State Persistence
 
-```
+```text
 Netlink Events
     ↓
 LinkSync::handle_new_link()
@@ -400,7 +413,7 @@ WarmRestartManager::record_port_for_warm_restart()
 
 ### EOIU Detection Flow
 
-```
+```text
 Netlink Message (RTM_NEWLINK)
     ↓
 parse_netlink_message() → (NetlinkEvent, ifi_change)
@@ -482,6 +495,7 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 ## Warm Restart Workflow
 
 ### Cold Start
+
 1. Daemon starts
 2. WarmRestartManager initializes (no saved state)
 3. State = WarmRestartState::ColdStart
@@ -490,6 +504,7 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 6. Record ports in WarmRestartManager for next restart
 
 ### Warm Restart
+
 1. Daemon starts
 2. WarmRestartManager loads saved port_state.json
 3. State = WarmRestartState::WarmStart
@@ -510,7 +525,7 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 ### Fail-Secure Design
 
 | Scenario | Behavior |
-|----------|----------|
+| ---------- | ---------- |
 | No saved state file | Cold start (safe default) |
 | Corrupted state file | Fall back to cold start (no error) |
 | Permission denied on save | Error logged, continue (graceful degradation) |
@@ -537,7 +552,7 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 ### Default Paths
 
 | Path | Purpose |
-|------|---------|
+| ------ | --------- |
 | `/var/lib/sonic/portsyncd/port_state.json` | Persistent port state file |
 
 ### Environment Variables
@@ -554,14 +569,15 @@ Restart=on-failure
 RestartSec=5
 ```
 
-On restart, WarmRestartManager automatically detects warm restart from saved state file.
+On restart, WarmRestartManager automatically detects warm restart from saved
+state file.
 
 ---
 
 ## Performance Impact
 
 | Metric | Overhead | Notes |
-|--------|----------|-------|
+| -------- | ---------- | ------- |
 | **Startup Time** | +10-50ms | JSON load + state validation |
 | **Port Recording** | <1μs per port | Atomic map insertion |
 | **State Save** | <5ms | JSON serialization + fsync |
@@ -572,7 +588,8 @@ On restart, WarmRestartManager automatically detects warm restart from saved sta
 
 ## Known Limitations
 
-1. **State File Location**: Currently fixed at `/var/lib/sonic/portsyncd/port_state.json`
+1. **State File Location**: Currently fixed at
+   `/var/lib/sonic/portsyncd/port_state.json`
    - Can be overridden via LinkSync::with_state_file() API
    - Directory must exist with write permissions
 
@@ -596,7 +613,7 @@ On restart, WarmRestartManager automatically detects warm restart from saved sta
 
 ### Unit Tests (41 tests)
 
-```
+```text
 Group 1: Core Data Structures (18 tests)
   - warm_restart.rs: 10 tests
     • Port state creation/validation
@@ -697,7 +714,8 @@ Phase 6 Week 2 successfully implements the core warm restart infrastructure:
 ✅ **41 New Tests** - Comprehensive coverage (exceeds target)
 ✅ **Zero Warnings** - Production-ready code quality
 
-The portsyncd daemon can now restart without losing port state or causing port flaps, enabling zero-downtime updates in production.
+The portsyncd daemon can now restart without losing port state or causing port
+flaps, enabling zero-downtime updates in production.
 
 ---
 
@@ -706,4 +724,3 @@ The portsyncd daemon can now restart without losing port state or causing port f
 **Test Pass Rate**: 152 unit + 14 integration = 166 total
 **Quality**: Zero warnings, zero unsafe code
 **Next Phase**: Week 3 - Timeout-based fallback & state cleanup
-

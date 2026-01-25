@@ -6,9 +6,12 @@
 
 Phase 6 Week 1 has been enhanced with security-first design:
 
-- **mTLS is now MANDATORY** (not optional) - all metrics access requires mutual TLS authentication
-- **IPv6-only design** - modern dual-stack support, eliminates IPv4 attack surface
-- **NIST 800-53 compliance** - SC-7 (Boundary Protection) and IA-2 (Authentication)
+- **mTLS is now MANDATORY** (not optional) - all metrics access requires mutual
+  TLS authentication
+- **IPv6-only design** - modern dual-stack support, eliminates IPv4 attack
+  surface
+- **NIST 800-53 compliance** - SC-7 (Boundary Protection) and IA-2
+  (Authentication)
 
 **Test Results**:
 
@@ -23,7 +26,7 @@ Phase 6 Week 1 has been enhanced with security-first design:
 ### Threat Model
 
 | Threat | Mitigation | NIST 800-53 |
-|--------|-----------|-----------|
+| -------- | ----------- | ----------- |
 | Unauthenticated metrics access | Mandatory mTLS | IA-2 (Authentication) |
 | Unencrypted metrics transmission | HTTPS/TLS 1.3 | SC-7 (Encryption) |
 | IPv4-based network attacks | IPv6-only | SC-7 (Boundary Protection) |
@@ -100,13 +103,13 @@ let config = MetricsServerConfig::with_ipv6(addr, ...);
 
 **Default Address**:
 
-```
+```text
 [::1]:9090  (IPv6 loopback - localhost only)
 ```
 
 **For Multi-Host Access**:
 
-```
+```text
 [::]:9090   (IPv6 all interfaces - dual-stack)
 ```
 
@@ -234,7 +237,7 @@ export PORTSYNCD_METRICS_CA="/etc/portsyncd/metrics/ca.crt"
 
 **Defaults** (if not set):
 
-```
+```text
 PORTSYNCD_METRICS_CERT → /etc/portsyncd/metrics/server.crt
 PORTSYNCD_METRICS_KEY  → /etc/portsyncd/metrics/server.key
 PORTSYNCD_METRICS_CA   → /etc/portsyncd/metrics/ca.crt
@@ -321,7 +324,7 @@ WantedBy=multi-user.target
 
 When metrics server starts with mandatory mTLS:
 
-```
+```text
 portsyncd: Metrics server configured with mandatory mTLS
 portsyncd: Listening on IPv6 [::1]:9090 (client certificate required)
 portsyncd: Using certificates:
@@ -397,7 +400,7 @@ portsyncd: NOTE: For full mTLS enforcement, deploy with reverse proxy (nginx/env
 
 ### Test Results
 
-```
+```text
 running 154 tests  (all suites)
 ✅ 154 passed
 ❌ 0 failed
@@ -418,7 +421,7 @@ Categories:
 ### NIST 800-53 Rev5
 
 | Control | Implementation |
-|---------|----------------|
+| --------- | ---------------- |
 | **SC-7** Boundary Protection | mTLS + IPv6 encryption + certificate validation |
 | **IA-2** Authentication | Mandatory mutual TLS with client certificate |
 | **SC-13** Cryptographic Protection | TLS 1.3 for all metrics transmission |
@@ -427,7 +430,7 @@ Categories:
 ### CIS Benchmarks
 
 | Benchmark | Compliance |
-|-----------|-----------|
+| ----------- | ----------- |
 | 5.3.1 Ensure that default username and password are not used | ✅ No defaults, explicit certs required |
 | 5.3.2 Disable obsolete authentication systems | ✅ mTLS only, no basic auth |
 | 6.2.1 Encrypt data in transit | ✅ HTTPS/TLS 1.3 mandatory |
@@ -442,7 +445,8 @@ The following APIs have changed:
 
 1. **MetricsServerConfig::new()** signature changed
    - Old: `new(listen_addr: SocketAddr) -> Self`
-   - New: `new(cert_path: String, key_path: String, ca_cert_path: String) -> Self`
+   - New: `new(cert_path: String, key_path: String, ca_cert_path: String) ->
+     Self`
 
 2. **spawn_metrics_server()** signature changed
    - Old: `spawn_metrics_server(metrics, listen_addr)`
@@ -533,16 +537,20 @@ Implementation security assessment:
 
 ## Summary
 
-Phase 6 Week 1 security hardening transforms metrics endpoint from optional-TLS to mandatory-mTLS with IPv6-only design:
+Phase 6 Week 1 security hardening transforms metrics endpoint from optional-TLS
+to mandatory-mTLS with IPv6-only design:
 
 ✅ **Security-First**: mTLS no longer optional - all metrics access authenticated
-✅ **Modern Stack**: IPv6-only reduces attack surface and supports future networks
+✅ **Modern Stack**: IPv6-only reduces attack surface and supports future
+networks
 ✅ **Compliance**: NIST 800-53 SC-7 & IA-2 compliant
-✅ **Fail-Secure**: Missing certificates cause startup failure, not silent fallback
+✅ **Fail-Secure**: Missing certificates cause startup failure, not silent
+fallback
 ✅ **Type-Safe**: Rust's type system prevents misconfiguration
 ✅ **Production-Ready**: 154/154 tests passing, zero warnings
 
-The portsyncd metrics endpoint is now enterprise-grade secure by default, with no way to accidentally expose metrics without authentication.
+The portsyncd metrics endpoint is now enterprise-grade secure by default, with
+no way to accidentally expose metrics without authentication.
 
 ---
 

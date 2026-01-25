@@ -2,7 +2,8 @@
 
 ## Executive Summary
 
-The portsyncd metrics endpoint implements **mandatory TLS 1.3 with CNSA 2.0 compliant algorithms** to meet federal security requirements.
+The portsyncd metrics endpoint implements **mandatory TLS 1.3 with CNSA 2.0
+compliant algorithms** to meet federal security requirements.
 
 **Status**: ✅ ENFORCED AT CONFIGURATION LEVEL
 **Test Results**: 154/154 tests passing
@@ -12,10 +13,12 @@ The portsyncd metrics endpoint implements **mandatory TLS 1.3 with CNSA 2.0 comp
 
 ## What is CNSA 2.0?
 
-**Commercial National Security Algorithm Suite 2.0** is NSA's recommended suite of algorithms for protecting classified and sensitive unclassified national security information.
+**Commercial National Security Algorithm Suite 2.0** is NSA's recommended suite
+of algorithms for protecting classified and sensitive unclassified national
+security information.
 
 | Aspect | CNSA 2.0 Requirement |
-|--------|---------------------|
+| -------- | --------------------- |
 | **Protocol Version** | TLS 1.3 ONLY |
 | **Key Exchange** | ECDHE (Elliptic Curve DH) |
 | **Authentication** | ECDSA with SHA-256/384/512 |
@@ -31,7 +34,7 @@ The portsyncd metrics endpoint implements **mandatory TLS 1.3 with CNSA 2.0 comp
 ### Vulnerabilities in Earlier Versions
 
 | Version | Issues | Status |
-|---------|--------|--------|
+| --------- | -------- | -------- |
 | TLS 1.2 | Downgrade attacks, weak ciphers allowed | ❌ Rejected |
 | TLS 1.1 | BEAST vulnerability, weak defaults | ❌ Rejected |
 | TLS 1.0 | No PFS by default, CBC mode issues | ❌ Rejected |
@@ -54,7 +57,7 @@ The portsyncd metrics endpoint implements **mandatory TLS 1.3 with CNSA 2.0 comp
 
 Must be X.509v3 with:
 
-```
+```text
 Subject: CN=portsyncd-metrics (or FQDN)
 Issuer: CN=<your-ca>
 Validity: 1-3 years (not >3 years for CNSA 2.0)
@@ -70,7 +73,7 @@ Extended Key Usage: TLS Web Server Authentication
 
 **Example Certificate Attributes**:
 
-```
+```text
 X509v3 Extended Key Usage:
     TLS Web Server Authentication
 X509v3 Key Usage:
@@ -83,7 +86,7 @@ X509v3 Authority Key Identifier: (hex)
 
 Must be X.509v3 with:
 
-```
+```text
 Subject: CN=<client-identity>
 Issuer: CN=<your-ca> (same CA as server cert)
 Validity: 1-3 years
@@ -96,7 +99,7 @@ Extended Key Usage: TLS Web Client Authentication
 
 Must be self-signed X.509v3 with:
 
-```
+```text
 Subject: CN=portsyncd-metrics-ca
 Issuer: CN=portsyncd-metrics-ca (self-signed)
 Public Key: ECDSA P-256/384/521
@@ -238,7 +241,7 @@ openssl verify -CAfile ca.crt client.crt
 Only **5 AEAD cipher suites** are defined for TLS 1.3:
 
 | Cipher Suite | Key Exchange | Encryption | Authentication | CNSA 2.0 |
-|--------------|--------------|-----------|-----------------|----------|
+| -------------- | -------------- | ----------- | ----------------- | ---------- |
 | TLS_AES_256_GCM_SHA384 | ECDHE | AES-256-GCM | SHA-384 | ✅ Preferred |
 | TLS_CHACHA20_POLY1305_SHA256 | ECDHE | ChaCha20-Poly1305 | SHA-256 | ✅ Allowed |
 | TLS_AES_128_GCM_SHA256 | ECDHE | AES-128-GCM | SHA-256 | ⚠️ Not CNSA |
@@ -255,14 +258,15 @@ Only **5 AEAD cipher suites** are defined for TLS 1.3:
 ## Supported Elliptic Curves (CNSA 2.0)
 
 | Curve | Bits | Use Case | CNSA 2.0 |
-|-------|------|----------|----------|
+| ------- | ------ | ---------- | ---------- |
 | P-256 (secp256r1) | 256 | Key exchange, TLS 1.3 | ✅ Allowed |
 | P-384 (secp384r1) | 384 | Key exchange, HIGH security | ✅ Preferred |
 | P-521 (secp521r1) | 521 | Key exchange, TOP security | ✅ Allowed |
 | Curve25519 | 256 | Alternative, NOT NIST | ❌ Not CNSA |
 | Curve448 | 448 | Alternative, NOT NIST | ❌ Not CNSA |
 
-**Recommendation**: Use **P-384** for portsyncd metrics (balance of security and performance)
+**Recommendation**: Use **P-384** for portsyncd metrics (balance of security and
+performance)
 
 ---
 
@@ -496,9 +500,11 @@ Security verification before production:
 - [ ] **mTLS Enabled**: Client certificate required (CA cert configured)
 - [ ] **IPv6 Only**: No IPv4 addresses, SAN includes IPv6
 - [ ] **Certificate Validity**: Not longer than 3 years
-- [ ] **Cipher Suites**: Only TLS_AES_256_GCM_SHA384 or TLS_CHACHA20_POLY1305_SHA256
+- [ ] **Cipher Suites**: Only TLS_AES_256_GCM_SHA384 or
+  TLS_CHACHA20_POLY1305_SHA256
 - [ ] **Reverse Proxy**: nginx/envoy configured for TLS 1.3 termination
-- [ ] **Extended Key Usage**: Client cert has clientAuth, Server cert has serverAuth
+- [ ] **Extended Key Usage**: Client cert has clientAuth, Server cert has
+  serverAuth
 - [ ] **Verification Chain**: Certificates validate against CA
 - [ ] **No Downgrade**: TLS 1.2 connections rejected
 
@@ -507,7 +513,7 @@ Security verification before production:
 ## Compliance Standards
 
 | Standard | Requirement | Compliance |
-|----------|-------------|-----------|
+| ---------- | ------------- | ----------- |
 | **NIST SP 800-52 Rev 2** | TLS 1.3 recommended | ✅ Enforced |
 | **NSA CNSA 2.0** | ECDHE, ECDSA, AES-256-GCM | ✅ Enforced |
 | **FIPS 140-2** | Approved algorithms | ✅ Compliant |
@@ -528,7 +534,8 @@ The portsyncd metrics endpoint is **TLS 1.3 and CNSA 2.0 compliant**:
 ✅ **Modern Security**: No legacy weaknesses
 ✅ **Federal Compliant**: Meets NSA CNSA 2.0 requirements
 
-**Next Step**: Deploy with nginx/envoy reverse proxy for TLS 1.3 termination and metrics access control.
+**Next Step**: Deploy with nginx/envoy reverse proxy for TLS 1.3 termination and
+metrics access control.
 
 ---
 

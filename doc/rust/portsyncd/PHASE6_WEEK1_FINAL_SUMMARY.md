@@ -4,7 +4,8 @@
 
 ## Overview
 
-Phase 6 Week 1 delivers a **production-grade Prometheus metrics endpoint** with security-first design:
+Phase 6 Week 1 delivers a **production-grade Prometheus metrics endpoint** with
+security-first design:
 
 - ✅ **14 Comprehensive Metrics** (counters, gauges, histograms)
 - ✅ **Mandatory mTLS Authentication** (not optional)
@@ -19,21 +20,27 @@ Phase 6 Week 1 delivers a **production-grade Prometheus metrics endpoint** with 
 ## What Was Delivered
 
 ### 1. Metrics Collection Module (`src/metrics.rs`)
-```
+
+```text
 159 lines | 14 unit tests | 100% passing
 ```
 
 **14 Prometheus Metrics**:
+
 - 3 Counters: events_processed, events_failed, port_flaps
-- 5 Gauges: queue_depth, memory_bytes, health_status, redis_connected, netlink_connected
-- 2 Histograms: event_latency_seconds (7 buckets), redis_latency_seconds (5 buckets)
+- 5 Gauges: queue_depth, memory_bytes, health_status, redis_connected,
+  netlink_connected
+- 2 Histograms: event_latency_seconds (7 buckets), redis_latency_seconds (5
+  buckets)
 
 ### 2. Secure HTTP Server (`src/metrics_server.rs`)
-```
+
+```text
 298 lines | 8 unit tests | 100% passing
 ```
 
 **Security Features**:
+
 - Mandatory mTLS (not optional)
 - IPv6-only addresses ([::1]:9090 default)
 - TLS 1.3 + CNSA 2.0 enforcement
@@ -42,21 +49,28 @@ Phase 6 Week 1 delivers a **production-grade Prometheus metrics endpoint** with 
 - Fail-secure design (missing certs → startup failure)
 
 ### 3. Integration with Main Daemon (`src/main.rs`)
-```
+
+```text
 +25 lines | Environment variable configuration
 ```
 
 **Environment Variables**:
-- `PORTSYNCD_METRICS_CERT` - Server certificate (default: /etc/portsyncd/metrics/server.crt)
-- `PORTSYNCD_METRICS_KEY` - Server private key (default: /etc/portsyncd/metrics/server.key)
-- `PORTSYNCD_METRICS_CA` - CA certificate (default: /etc/portsyncd/metrics/ca.crt)
+
+- `PORTSYNCD_METRICS_CERT` - Server certificate (default:
+  /etc/portsyncd/metrics/server.crt)
+- `PORTSYNCD_METRICS_KEY` - Server private key (default:
+  /etc/portsyncd/metrics/server.key)
+- `PORTSYNCD_METRICS_CA` - CA certificate (default:
+  /etc/portsyncd/metrics/ca.crt)
 
 ### 4. Comprehensive Testing (`tests/metrics_integration.rs`)
-```
+
+```text
 170 lines | 8 integration tests | 100% passing
 ```
 
 **Test Coverage**:
+
 - Metrics collection workflows
 - IPv6 address validation
 - IPv4 address rejection
@@ -64,6 +78,7 @@ Phase 6 Week 1 delivers a **production-grade Prometheus metrics endpoint** with 
 - mTLS configuration options
 
 ### 5. Documentation
+
 - `PHASE6_WEEK1_COMPLETION.md` - Implementation details (600+ lines)
 - `PHASE6_SECURITY_HARDENING.md` - Security enhancements (400+ lines)
 - `TLS13_CNSA2_COMPLIANCE.md` - Compliance guide (600+ lines)
@@ -74,7 +89,7 @@ Phase 6 Week 1 delivers a **production-grade Prometheus metrics endpoint** with 
 
 ### Complete Test Suite: 154/154 Passing ✅
 
-```
+```text
 Unit Tests (metrics.rs)
   ✅ test_metrics_collector_creation
   ✅ test_record_event_success
@@ -128,7 +143,7 @@ TOTAL: 154/154 PASSING (100%)
 ### Threat Mitigation
 
 | Threat | Mitigation |
-|--------|-----------|
+| -------- | ----------- |
 | Unauthenticated metrics access | Mandatory mTLS - all clients need valid cert |
 | Unencrypted metrics transmission | TLS 1.3 with AEAD encryption (AES-256-GCM, ChaCha20-Poly1305) |
 | IPv4 network attacks | IPv6-only - eliminates entire IPv4 attack surface |
@@ -208,7 +223,7 @@ curl --tlsv1.3 \
 
 ### Response (Example)
 
-```
+```text
 # HELP portsyncd_events_processed_total Total events processed successfully
 # TYPE portsyncd_events_processed_total counter
 portsyncd_events_processed_total 1234
@@ -314,7 +329,7 @@ curl --tlsv1.3 \
 ### Counters (Always Increasing)
 
 | Metric | Type | Description | Labels |
-|--------|------|-------------|--------|
+| -------- | ------ | ------------- | -------- |
 | `portsyncd_events_processed_total` | Counter | Successful event completions | None |
 | `portsyncd_events_failed_total` | Counter | Failed event processing | None |
 | `portsyncd_port_flaps_total` | CounterVec | Port flap count | port |
@@ -322,7 +337,7 @@ curl --tlsv1.3 \
 ### Gauges (Can Go Up/Down)
 
 | Metric | Type | Description | Range |
-|--------|------|-------------|-------|
+| -------- | ------ | ------------- | ------- |
 | `portsyncd_queue_depth` | Gauge | Event queue depth | 0+ |
 | `portsyncd_memory_bytes` | Gauge | Process memory | 0+ |
 | `portsyncd_health_status` | Gauge | Health status | 0.0-1.0 |
@@ -332,7 +347,7 @@ curl --tlsv1.3 \
 ### Histograms (Bucketed Distributions)
 
 | Metric | Buckets | Description |
-|--------|---------|-------------|
+| -------- | --------- | ------------- |
 | `portsyncd_event_latency_seconds` | 1ms, 5ms, 10ms, 50ms, 100ms, 500ms, 1s | Event processing latency |
 | `portsyncd_redis_latency_seconds` | 1ms, 5ms, 10ms, 50ms, 100ms | Redis operation latency |
 
@@ -343,7 +358,7 @@ curl --tlsv1.3 \
 ### New Files (3)
 
 | File | Lines | Purpose |
-|------|-------|---------|
+| ------ | ------- | --------- |
 | `src/metrics.rs` | 159 | Prometheus metrics collection |
 | `src/metrics_server.rs` | 298 | Secure HTTP server with mTLS |
 | `tests/metrics_integration.rs` | 170 | Integration tests |
@@ -351,7 +366,7 @@ curl --tlsv1.3 \
 ### Documentation (3)
 
 | File | Lines | Purpose |
-|------|-------|---------|
+| ------ | ------- | --------- |
 | `PHASE6_WEEK1_COMPLETION.md` | 600+ | Implementation details |
 | `PHASE6_SECURITY_HARDENING.md` | 400+ | Security features |
 | `TLS13_CNSA2_COMPLIANCE.md` | 600+ | TLS 1.3 & CNSA 2.0 compliance |
@@ -359,7 +374,7 @@ curl --tlsv1.3 \
 ### Modified Files (2)
 
 | File | Changes | Purpose |
-|------|---------|---------|
+| ------ | --------- | --------- |
 | `src/lib.rs` | +2 lines | Module declarations and re-exports |
 | `src/main.rs` | +25 lines | Metrics integration with env var config |
 
@@ -368,7 +383,7 @@ curl --tlsv1.3 \
 ## Performance Impact
 
 | Metric | Overhead | Notes |
-|--------|----------|-------|
+| -------- | ---------- | ------- |
 | **Memory** | ~5MB per collector | Negligible |
 | **CPU** | <1% during normal operation | Thread-safe atomics |
 | **Event Recording** | <1μs per operation | No locks |
@@ -382,18 +397,21 @@ curl --tlsv1.3 \
 ### API Changes (Security First)
 
 **Old**: Optional mTLS, mixed IPv4/IPv6
+
 ```rust
 pub fn new(listen_addr: SocketAddr) -> Self
 pub fn with_mtls(addr, cert?, key?, ca?) -> Self
 ```
 
 **New**: Mandatory mTLS, IPv6-only
+
 ```rust
 pub fn new(cert_path, key_path, ca_cert_path) -> Self
 pub fn with_ipv6(addr, cert_path, key_path, ca_cert_path) -> Self
 ```
 
 ### Why: Security Defaults
+
 - No way to accidentally expose unencrypted metrics
 - IPv4 explicitly rejected (fail-fast on misconfiguration)
 - Type system prevents optional TLS parameter
@@ -431,7 +449,7 @@ pub fn with_ipv6(addr, cert_path, key_path, ca_cert_path) -> Self
 
 ## Next Phase (Week 2)
 
-**Phase 6 Week 2: Warm Restart (EOIU Detection)**
+### Phase 6 Week 2: Warm Restart (EOIU Detection)
 
 - Implement EOIU (End of Init sequence Uset indication) signal handling
 - Skip APP_DB updates on warm restart
@@ -448,7 +466,8 @@ pub fn with_ipv6(addr, cert_path, key_path, ca_cert_path) -> Self
 - [ ] Configure environment variables in systemd unit
 - [ ] Deploy reverse proxy (nginx/envoy) with TLS 1.3
 - [ ] Test mTLS connection: `openssl s_client`
-- [ ] Verify cipher suite: `TLS_AES_256_GCM_SHA384` or `TLS_CHACHA20_POLY1305_SHA256`
+- [ ] Verify cipher suite: `TLS_AES_256_GCM_SHA384` or
+  `TLS_CHACHA20_POLY1305_SHA256`
 - [ ] Add Prometheus scrape config
 - [ ] Create Grafana dashboards
 - [ ] Set up alert rules
@@ -459,7 +478,8 @@ pub fn with_ipv6(addr, cert_path, key_path, ca_cert_path) -> Self
 
 ## Summary
 
-Phase 6 Week 1 delivers **production-grade Prometheus metrics with enterprise security**:
+Phase 6 Week 1 delivers **production-grade Prometheus metrics with enterprise
+security**:
 
 ✅ **Comprehensive Metrics** - 14 metrics covering events, health, performance
 ✅ **Mandatory mTLS** - No way to access metrics without authentication
@@ -470,7 +490,8 @@ Phase 6 Week 1 delivers **production-grade Prometheus metrics with enterprise se
 ✅ **Fully Documented** - 1500+ lines of implementation docs
 ✅ **Secure by Default** - Fail-secure configuration, type-safe API
 
-The portsyncd metrics endpoint is now **secure by default**, **tested thoroughly**, and **production-ready** for enterprise deployments.
+The portsyncd metrics endpoint is now **secure by default**, **tested
+thoroughly**, and **production-ready** for enterprise deployments.
 
 ---
 

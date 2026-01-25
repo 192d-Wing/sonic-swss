@@ -42,7 +42,7 @@
 **Implementation**: `src/warm_restart.rs:362-436`
 
 - Method: `cleanup_stale_state_files()` - Remove files older than 7 days
-- Method: `state_file_age_secs()` -> Option<u64> - Get file age
+- Method: `state_file_age_secs()` -> `Option<u64>` - Get file age
 - Traverses state directory, identifies 7+ day old files, removes safely
 - Non-destructive: logs warnings but doesn't fail on access errors
 - **Tests**: 4 tests covering empty dirs, fresh files, and age calculation
@@ -93,7 +93,8 @@ pub struct WarmRestartMetrics {
 }
 ```
 
-- **Recording Methods**: record_warm_restart(), record_cold_start(), record_eoiu_detected(), etc.
+- **Recording Methods**: record_warm_restart(), record_cold_start(),
+  record_eoiu_detected(), etc.
 - **Aggregation Methods**: total_events(), warm_restart_percentage()
 - **Tests**: 11 tests covering all metrics operations
 
@@ -165,7 +166,7 @@ pub fn metrics_mut(&mut self) -> Option<&mut WarmRestartMetrics>
 
 ### Architecture Overview
 
-```
+```text
 Phase 6 Week 3 Components:
 
 WarmRestartManager
@@ -308,7 +309,7 @@ LinkSync
 
 **All 184 Tests Pass**:
 
-```
+```text
 test result: ok. 184 passed; 0 failed; 0 ignored
 Compilation: 0 warnings, 0 errors
 Test Coverage: ~95% of warm_restart.rs code paths
@@ -362,7 +363,7 @@ Test Coverage: ~95% of warm_restart.rs code paths
 ## Code Quality Metrics
 
 | Metric | Value | Status |
-|--------|-------|--------|
+| -------- | ------- | -------- |
 | Test Coverage | 95% | ✅ Excellent |
 | Code Warnings | 0 | ✅ Clean |
 | Unsafe Code | 0 | ✅ Safe |
@@ -374,7 +375,8 @@ Test Coverage: ~95% of warm_restart.rs code paths
 
 ## Summary
 
-Phase 6 Week 3 has successfully implemented the complete state lifecycle management and metrics tracking infrastructure for warm restart support:
+Phase 6 Week 3 has successfully implemented the complete state lifecycle
+management and metrics tracking infrastructure for warm restart support:
 
 ✅ **Completed**: 9/14 tasks, 184/214 tests passing (86%)
 

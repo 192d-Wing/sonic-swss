@@ -10,7 +10,10 @@
 
 ## Executive Summary
 
-Phase 6 Week 2 successfully delivers a production-ready warm restart system for portsyncd that enables zero-downtime daemon restarts while preserving port state through intelligent EOIU (End of Init sequence User indication) signal detection and state persistence.
+Phase 6 Week 2 successfully delivers a production-ready warm restart system for
+portsyncd that enables zero-downtime daemon restarts while preserving port state
+through intelligent EOIU (End of Init sequence User indication) signal detection
+and state persistence.
 
 ### Deliverables Checklist
 
@@ -30,7 +33,7 @@ Phase 6 Week 2 successfully delivers a production-ready warm restart system for 
 ### Code Created
 
 | Component | Lines | File | Purpose |
-|-----------|-------|------|---------|
+| ----------- | ------- | ------ | --------- |
 | Core Module | 463 | `src/warm_restart.rs` | State machine + port persistence |
 | EOIU Detector | 190 | `src/eoiu_detector.rs` | Signal detection logic |
 | Integration Tests | 414 | `tests/warm_restart_integration.rs` | 14 comprehensive tests |
@@ -39,7 +42,7 @@ Phase 6 Week 2 successfully delivers a production-ready warm restart system for 
 ### Module Enhancements
 
 | Module | Changes | New Tests |
-|--------|---------|-----------|
+| -------- | --------- | ----------- |
 | `src/port_sync.rs` | +80 lines | +5 tests |
 | `src/netlink_socket.rs` | +20 lines | +4 tests |
 | `src/lib.rs` | +4 lines | 0 tests |
@@ -47,7 +50,7 @@ Phase 6 Week 2 successfully delivers a production-ready warm restart system for 
 
 ### Test Summary
 
-```
+```text
 Unit Tests (Library):
   warm_restart.rs:        10 tests ✅
   eoiu_detector.rs:        8 tests ✅
@@ -71,7 +74,7 @@ GRAND TOTAL:            166 tests ✅
 
 ### Warm Restart State Machine
 
-```
+```text
                           ┌──────────────────┐
                           │  Daemon Startup  │
                           └────────┬─────────┘
@@ -113,7 +116,7 @@ GRAND TOTAL:            166 tests ✅
 
 ### Port State Persistence Flow
 
-```
+```text
   Netlink Events
          │
          ├─ RTM_NEWLINK (Ethernet0)
@@ -163,7 +166,7 @@ GRAND TOTAL:            166 tests ✅
 
 ### EOIU Detection Mechanism
 
-```
+```text
 Kernel sends RTM_NEWLINK messages:
 
   ┌─────────────────────────────────┐
@@ -375,7 +378,7 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 
 ### Cold Start Scenario
 
-```
+```text
 1. Daemon starts
 2. No /var/lib/sonic/portsyncd/port_state.json found
 3. WarmRestartState = ColdStart
@@ -389,7 +392,7 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 
 ### Warm Restart Scenario
 
-```
+```text
 1. Daemon starts after restart
 2. /var/lib/sonic/portsyncd/port_state.json found and loaded
 3. WarmRestartState = WarmStart
@@ -410,7 +413,7 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 
 ### Corrupted State File Scenario
 
-```
+```text
 1. Daemon starts
 2. /var/lib/sonic/portsyncd/port_state.json exists but corrupted
 3. WarmRestartManager::load_state() fails
@@ -425,7 +428,7 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 ## Performance Characteristics
 
 | Operation | Latency | Notes |
-|-----------|---------|-------|
+| ----------- | --------- | ------- |
 | Cold start detection | <1ms | File check + initialization |
 | Warm start loading | 5-10ms | JSON parse + validation |
 | Port recording | <1μs per port | HashMap insertion |
@@ -450,7 +453,7 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 ### NIST 800-53 Controls
 
 | Control | Implementation |
-|---------|----------------|
+| --------- | ---------------- |
 | SC-24 | Fail-secure warm restart (invalid state → cold start) |
 | SI-4 | EOIU signal validates kernel state |
 | CP-4 | Zero-downtime capability |
@@ -458,7 +461,7 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 ### Fail-Secure Design
 
 | Failure | Behavior |
-|---------|----------|
+| --------- | ---------- |
 | Missing state file | Cold start (safe default) |
 | Corrupted JSON | Cold start (no error) |
 | Permission denied | Log error, continue (graceful) |
@@ -578,7 +581,10 @@ pub fn eoiu_detector_mut(&mut self) -> &mut EoiuDetector
 
 ## Conclusion
 
-Phase 6 Week 2 successfully delivers a production-ready warm restart system that enables zero-downtime daemon restarts while preserving port state. The implementation is thoroughly tested (166 tests), well-documented, and compliant with enterprise security standards.
+Phase 6 Week 2 successfully delivers a production-ready warm restart system that
+enables zero-downtime daemon restarts while preserving port state. The
+implementation is thoroughly tested (166 tests), well-documented, and compliant
+with enterprise security standards.
 
 The portsyncd daemon can now:
 

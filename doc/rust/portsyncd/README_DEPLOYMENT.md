@@ -1,8 +1,9 @@
 # SONiC Port Synchronization Daemon - Deployment Guide
 
-**Phase 6 Week 4 Deployment Documentation**
+## Phase 6 Week 4 Deployment Documentation
 
-This guide covers the deployment of the Rust implementation of portsyncd with advanced metrics persistence, monitoring, and health checking capabilities.
+This guide covers the deployment of the Rust implementation of portsyncd with
+advanced metrics persistence, monitoring, and health checking capabilities.
 
 ## Table of Contents
 
@@ -25,17 +26,21 @@ This guide covers the deployment of the Rust implementation of portsyncd with ad
 
 The Rust portsyncd daemon provides:
 
-- **Real-time port synchronization** - Synchronizes kernel port status with SONiC databases
-- **Metrics persistence** - Stores warm restart and health metrics across daemon restarts
-- **Prometheus export** - Exports metrics in Prometheus format for monitoring/alerting
-- **Health monitoring** - Continuous health assessment with systemd watchdog integration
+- **Real-time port synchronization** - Synchronizes kernel port status with
+  SONiC databases
+- **Metrics persistence** - Stores warm restart and health metrics across daemon
+  restarts
+- **Prometheus export** - Exports metrics in Prometheus format for
+  monitoring/alerting
+- **Health monitoring** - Continuous health assessment with systemd watchdog
+  integration
 - **Advanced configuration** - TOML-based configuration with validation
 - **Production-ready** - TLS support, security hardening, graceful shutdown
 
-### Key Files
+### Key Files (Appendix)
 
 | File | Purpose |
-|------|---------|
+| ------ | --------- |
 | `portsyncd` | Binary executable |
 | `portsyncd.service` | Systemd unit file |
 | `portsyncd.conf.example` | Configuration template |
@@ -314,7 +319,8 @@ sudo systemctl disable portsyncd
 
 ### Watchdog Monitoring
 
-The daemon sends watchdog notifications to systemd every 15 seconds (configurable).
+The daemon sends watchdog notifications to systemd every 15 seconds
+(configurable).
 
 ```bash
 # Check watchdog interval in service file
@@ -333,7 +339,7 @@ grep WatchdogSec /etc/systemd/system/portsyncd.service
 
 Metrics are stored in JSON format at:
 
-```
+```text
 /var/lib/sonic/portsyncd/metrics/
 ├── metrics.json                    # Current metrics
 ├── backups/
@@ -345,8 +351,10 @@ Metrics are stored in JSON format at:
 ### Metrics Lifecycle
 
 1. **Recording**: Metrics are recorded in-memory as events occur
-2. **Auto-save**: Metrics are persisted to JSON every `save_interval_secs` (default: 300)
-3. **Rotation**: When metrics file exceeds `max_file_size_mb`, old backups are created
+2. **Auto-save**: Metrics are persisted to JSON every `save_interval_secs`
+   (default: 300)
+3. **Rotation**: When metrics file exceeds `max_file_size_mb`, old backups are
+   created
 4. **Cleanup**: Metrics older than `retention_days` (default: 30) are removed
 5. **Recovery**: On daemon restart, metrics are loaded from persistent storage
 
@@ -407,7 +415,7 @@ curl -s http://127.0.0.1:9090/metrics
 
 **Output**:
 
-```
+```text
 # HELP portsyncd_warm_restarts Total warm restart events
 # TYPE portsyncd_warm_restarts counter
 portsyncd_warm_restarts 5
@@ -441,7 +449,7 @@ scrape_configs:
 
 Sample dashboard JSON queries:
 
-```
+```text
 # Warm restart percentage
 rate(portsyncd_warm_restarts[5m]) / (rate(portsyncd_warm_restarts[5m]) + rate(portsyncd_cold_starts[5m]))
 
@@ -616,7 +624,8 @@ du -sh /var/lib/sonic/portsyncd/metrics/
 
 ### Metrics Not Being Saved
 
-**Symptom**: `/var/lib/sonic/portsyncd/metrics/metrics.json` not being created/updated
+**Symptom**: `/var/lib/sonic/portsyncd/metrics/metrics.json` not being
+created/updated
 
 **Diagnosis**:
 
@@ -851,7 +860,7 @@ Include the following in bug reports:
 ### Key Directories
 
 | Directory | Purpose | Owner |
-|-----------|---------|-------|
+| ----------- | --------- | ------- |
 | `/etc/sonic/` | Configuration | root |
 | `/var/lib/sonic/portsyncd/` | Runtime state | portsyncd |
 | `/var/lib/sonic/portsyncd/metrics/` | Metrics storage | portsyncd |
@@ -861,7 +870,7 @@ Include the following in bug reports:
 ### Key Files
 
 | File | Purpose | Permissions |
-|------|---------|-------------|
+| ------ | --------- | ------------- |
 | `portsyncd.conf` | Configuration | 644 (rw-r--r--) |
 | `metrics.json` | Current metrics | 640 (rw-r-----) |
 | `port_state_*.json` | State backups | 640 (rw-r-----) |
