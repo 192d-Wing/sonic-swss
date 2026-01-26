@@ -48,6 +48,7 @@
 //! ```
 
 pub mod advanced_health;
+pub mod alerting;
 pub mod auto_tuner;
 pub mod distributed_lock;
 pub mod error;
@@ -68,6 +69,7 @@ pub mod vrf;
 pub use advanced_health::{
     AdvancedHealthMonitor, DependencyHealth, HealthStatus, HealthThresholds, PerformanceMetrics,
 };
+pub use alerting::{Alert, AlertEvent, AlertSeverity, AlertState, AlertThreshold, AlertingEngine};
 pub use auto_tuner::{AutoTuner, AutoTuningConfig, TuningMetrics, TuningRecommendation};
 pub use distributed_lock::{DistributedLock, LeaseConfig, LockHolder, LockManager};
 pub use error::{NeighsyncError, Result};
