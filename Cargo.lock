@@ -3573,6 +3573,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "sonic-buffermgrd"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "sonic-cfgmgr-common",
+ "sonic-cfgmgr-test",
+ "sonic-orch-common",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "sonic-cfgmgr-common"
 version = "0.1.0"
 dependencies = [
