@@ -4,11 +4,109 @@
 //! It initializes all necessary components and starts the main event loop.
 
 use clap::Parser;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
+use sonic_orch_common::Orch;
 use sonic_orchagent::daemon::{OrchDaemon, OrchDaemonConfig};
+use sonic_orchagent::{
+    IntfsOrch, IntfsOrchConfig, PortsOrch, PortsOrchConfig, RouteOrch, RouteOrchConfig,
+};
 use std::process::ExitCode;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+/// Wrapper to implement Orch trait for PortsOrch.
+struct PortsOrchWrapper {
+    inner: PortsOrch,
+}
+
+/// Wrapper to implement Orch trait for IntfsOrch.
+struct IntfsOrchWrapper {
+    inner: IntfsOrch,
+}
+
+impl PortsOrchWrapper {
+    fn new(config: PortsOrchConfig) -> Self {
+        Self {
+            inner: PortsOrch::new(config),
+        }
+    }
+}
+
+impl IntfsOrchWrapper {
+    fn new(config: IntfsOrchConfig) -> Self {
+        Self {
+            inner: IntfsOrch::new(config),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Orch for PortsOrchWrapper {
+    fn name(&self) -> &str {
+        "PortsOrch"
+    }
+
+    async fn do_task(&mut self) {
+        debug!("PortsOrch::do_task() - processing port table updates");
+        // TODO: Integrate with Redis consumer for PORT_TABLE
+    }
+
+    fn priority(&self) -> i32 {
+        0 // Critical infrastructure - highest priority
+    }
+
+    fn has_pending_tasks(&self) -> bool {
+        // TODO: Check for pending port configuration updates
+        false
+    }
+
+    fn dump_pending_tasks(&self) -> Vec<String> {
+        vec!["PortsOrch: no pending tasks".to_string()]
+    }
+
+    fn bake(&mut self) -> bool {
+        info!("PortsOrch: baking port state for warm boot");
+        true
+    }
+
+    fn on_warm_boot_end(&mut self) {
+        info!("PortsOrch: warm boot recovery complete");
+    }
+}
+
+#[async_trait::async_trait]
+impl Orch for IntfsOrchWrapper {
+    fn name(&self) -> &str {
+        "IntfsOrch"
+    }
+
+    async fn do_task(&mut self) {
+        debug!("IntfsOrch::do_task() - processing interface table updates");
+        // TODO: Integrate with Redis consumer for INTF_TABLE
+    }
+
+    fn priority(&self) -> i32 {
+        5 // Depends on PortsOrch (priority 0)
+    }
+
+    fn has_pending_tasks(&self) -> bool {
+        // TODO: Check for pending interface configuration updates
+        false
+    }
+
+    fn dump_pending_tasks(&self) -> Vec<String> {
+        vec!["IntfsOrch: no pending tasks".to_string()]
+    }
+
+    fn bake(&mut self) -> bool {
+        info!("IntfsOrch: baking interface state for warm boot");
+        true
+    }
+
+    fn on_warm_boot_end(&mut self) {
+        info!("IntfsOrch: warm boot recovery complete");
+    }
+}
 
 /// SONiC Switch Orchestration Agent
 #[derive(Parser, Debug)]
@@ -106,9 +204,13 @@ async fn main() -> ExitCode {
     // Priority 0: Critical infrastructure modules (must initialize first)
     // PortsOrch handles physical port configuration - required before any interface operations
     info!("  Registering module: PortsOrch (priority 0)");
+    let ports_orch = PortsOrchWrapper::new(PortsOrchConfig::default());
+    daemon.register_orch(Box::new(ports_orch));
 
     // Priority 5: Interface management (depends on ports)
     info!("  Registering module: IntfsOrch (priority 5)");
+    let intfs_orch = IntfsOrchWrapper::new(IntfsOrchConfig::default());
+    daemon.register_orch(Box::new(intfs_orch));
 
     // Priority 10: Core network infrastructure
     info!("  Registering module: VRFOrch (priority 10)");
@@ -120,9 +222,15 @@ async fn main() -> ExitCode {
 
     // Priority 20: Routing (depends on neighbors and interfaces)
     info!("  Registering module: RouteOrch (priority 20)");
+    let route_orch = RouteOrch::new(RouteOrchConfig::default());
+    daemon.register_orch(Box::new(route_orch));
+
     info!("  Registering module: MplsRouteOrch (priority 20)");
+    // TODO: Implement MplsRouteOrch instantiation
     info!("  Registering module: NhgOrch (priority 20)");
+    // TODO: Implement NhgOrch instantiation
     info!("  Registering module: FgNhgOrch (priority 20)");
+    // TODO: Implement FgNhgOrch instantiation
 
     // Priority 25: Tunneling and virtual networking
     info!("  Registering module: VxlanOrch (priority 25)");
