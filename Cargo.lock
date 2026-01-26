@@ -3624,6 +3624,7 @@ dependencies = [
  "serde_json",
  "sonic-types",
  "tempfile",
+ "testcontainers",
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",

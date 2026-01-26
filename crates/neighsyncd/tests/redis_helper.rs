@@ -1,288 +1,161 @@
-//! Redis test utilities for integration tests
+//! Redis Test Utilities
 //!
-//! Provides helper functions to start and manage Redis containers for testing using testcontainers.
+//! Provides utilities for integration testing with real Redis instances
+//! using testcontainers for containerized Redis.
 
-use redis::{AsyncCommands, Client};
+use redis::{Client, Commands, Connection, RedisResult};
 use std::time::Duration;
-use testcontainers::{
-    GenericImage,
-    core::{ContainerPort, WaitFor},
-    runners::AsyncRunner,
-};
+use testcontainers::core::{IntoContainerPort, WaitFor};
+use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage};
 
 /// Redis test environment with containerized Redis instance
 pub struct RedisTestEnv {
-    _container: testcontainers::ContainerAsync<GenericImage>,
-    pub client: Client,
-    pub host: String,
-    pub port: u16,
+    container: ContainerAsync<GenericImage>,
+    client: Client,
+    port: u16,
 }
 
 impl RedisTestEnv {
-    /// Start a new Redis container for testing
-    ///
-    /// # Returns
-    /// A `RedisTestEnv` with a running Redis container and connected client
-    ///
-    /// # Errors
-    /// Returns error if container fails to start or client connection fails
-    pub async fn start() -> Result<Self, Box<dyn std::error::Error>> {
-        // Create Redis container with explicit configuration
-        let container = GenericImage::new("redis", "7-alpine")
-            .with_exposed_port(ContainerPort::Tcp(6379))
-            .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"))
-            .with_wait_for(WaitFor::seconds(2))
+    /// Start a new Redis container and connect to it
+    pub async fn new() -> RedisResult<Self> {
+        // Create Redis container
+        let image = GenericImage::new("redis", "7-alpine")
+            .with_exposed_port(6379.tcp())
+            .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"));
+
+        let container = image
             .start()
-            .await?;
+            .await
+            .map_err(|e| redis::RedisError::from((redis::ErrorKind::IoError, "Container start failed", e.to_string())))?;
 
-        // Get host and port
-        let host = container.get_host().await?.to_string();
-        let port = container.get_host_port_ipv4(6379).await?;
+        // Get the mapped port
+        let port = container
+            .get_host_port_ipv4(6379)
+            .await
+            .map_err(|e| redis::RedisError::from((redis::ErrorKind::IoError, "Port mapping failed", e.to_string())))?;
 
-        // Create Redis client
-        let redis_url = format!("redis://{}:{}", host, port);
-        let client = Client::open(redis_url.as_str())?;
+        // Connect to Redis
+        let url = format!("redis://127.0.0.1:{}", port);
+        let client = Client::open(url.as_str())?;
 
-        // Verify connection with retry
-        for _ in 0..5 {
-            match client.get_connection_with_timeout(Duration::from_secs(1)) {
+        // Wait for Redis to be ready
+        let mut retries = 0;
+        let max_retries = 10;
+        loop {
+            match client.get_connection() {
                 Ok(_) => break,
-                Err(_) => tokio::time::sleep(Duration::from_millis(200)).await,
+                Err(e) if retries < max_retries => {
+                    retries += 1;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Err(e) => return Err(e),
             }
         }
 
         Ok(Self {
-            _container: container,
+            container,
             client,
-            host,
             port,
         })
     }
 
-    /// Get an async Redis connection
-    ///
-    /// # Returns
-    /// An async connection to the Redis instance
-    ///
-    /// # Errors
-    /// Returns error if connection fails
-    pub async fn get_async_connection(
-        &self,
-    ) -> Result<redis::aio::MultiplexedConnection, redis::RedisError> {
-        self.client.get_multiplexed_tokio_connection().await
+    /// Get a connection to Redis
+    pub fn get_connection(&self) -> RedisResult<Connection> {
+        self.client.get_connection()
     }
 
-    /// Flush all keys from all databases
-    ///
-    /// # Errors
-    /// Returns error if FLUSHALL command fails
-    pub async fn flush_all(&self) -> Result<(), redis::RedisError> {
-        let mut conn = self.get_async_connection().await?;
-        redis::cmd("FLUSHALL").query_async::<()>(&mut conn).await?;
+    /// Get Redis connection URL
+    pub fn url(&self) -> String {
+        format!("redis://127.0.0.1:{}", self.port)
+    }
+
+    /// Flush all data from all databases
+    pub fn flush_all(&self) -> RedisResult<()> {
+        let mut conn = self.get_connection()?;
+        redis::cmd("FLUSHALL").execute(&mut conn);
         Ok(())
     }
 
-    /// Get a specific key value
-    ///
-    /// # Errors
-    /// Returns error if GET command fails
-    pub async fn get(&self, key: &str) -> Result<Option<String>, redis::RedisError> {
-        let mut conn = self.get_async_connection().await?;
-        conn.get(key).await
+    /// Get all keys matching pattern
+    pub fn keys(&self, pattern: &str) -> RedisResult<Vec<String>> {
+        let mut conn = self.get_connection()?;
+        conn.keys(pattern)
     }
 
-    /// Set a key value
-    ///
-    /// # Errors
-    /// Returns error if SET command fails
-    pub async fn set(&self, key: &str, value: &str) -> Result<(), redis::RedisError> {
-        let mut conn = self.get_async_connection().await?;
-        conn.set(key, value).await
-    }
-
-    /// Delete a key
-    ///
-    /// # Errors
-    /// Returns error if DEL command fails
-    pub async fn del(&self, key: &str) -> Result<(), redis::RedisError> {
-        let mut conn = self.get_async_connection().await?;
-        conn.del(key).await
-    }
-
-    /// Check if a key exists
-    ///
-    /// # Errors
-    /// Returns error if EXISTS command fails
-    pub async fn exists(&self, key: &str) -> Result<bool, redis::RedisError> {
-        let mut conn = self.get_async_connection().await?;
-        conn.exists(key).await
-    }
-
-    /// Get all keys matching a pattern
-    ///
-    /// # Errors
-    /// Returns error if KEYS command fails
-    pub async fn keys(&self, pattern: &str) -> Result<Vec<String>, redis::RedisError> {
-        let mut conn = self.get_async_connection().await?;
-        conn.keys(pattern).await
-    }
-
-    /// Get the number of keys in the database
-    ///
-    /// # Errors
-    /// Returns error if DBSIZE command fails
-    pub async fn dbsize(&self) -> Result<usize, redis::RedisError> {
-        let mut conn = self.get_async_connection().await?;
-        redis::cmd("DBSIZE").query_async::<usize>(&mut conn).await
-    }
-
-    /// Set a hash field
-    ///
-    /// # Errors
-    /// Returns error if HSET command fails
-    pub async fn hset(&self, key: &str, field: &str, value: &str) -> Result<(), redis::RedisError> {
-        let mut conn = self.get_async_connection().await?;
-        conn.hset(key, field, value).await
-    }
-
-    /// Get a hash field
-    ///
-    /// # Errors
-    /// Returns error if HGET command fails
-    pub async fn hget(&self, key: &str, field: &str) -> Result<Option<String>, redis::RedisError> {
-        let mut conn = self.get_async_connection().await?;
-        conn.hget(key, field).await
+    /// Get value for a hash field
+    pub fn hget<T: redis::FromRedisValue>(&self, key: &str, field: &str) -> RedisResult<T> {
+        let mut conn = self.get_connection()?;
+        conn.hget(key, field)
     }
 
     /// Get all hash fields and values
-    ///
-    /// # Errors
-    /// Returns error if HGETALL command fails
-    pub async fn hgetall(&self, key: &str) -> Result<Vec<(String, String)>, redis::RedisError> {
-        let mut conn = self.get_async_connection().await?;
-        conn.hgetall(key).await
+    pub fn hgetall(&self, key: &str) -> RedisResult<std::collections::HashMap<String, String>> {
+        let mut conn = self.get_connection()?;
+        conn.hgetall(key)
     }
 
-    /// Delete a hash field
-    ///
-    /// # Errors
-    /// Returns error if HDEL command fails
-    pub async fn hdel(&self, key: &str, field: &str) -> Result<(), redis::RedisError> {
-        let mut conn = self.get_async_connection().await?;
-        conn.hdel(key, field).await
+    /// Set a hash field
+    pub fn hset(&self, key: &str, field: &str, value: &str) -> RedisResult<()> {
+        let mut conn = self.get_connection()?;
+        let _: () = conn.hset(key, field, value)?;
+        Ok(())
+    }
+
+    /// Delete a key
+    pub fn del(&self, key: &str) -> RedisResult<()> {
+        let mut conn = self.get_connection()?;
+        let _: () = conn.del(key)?;
+        Ok(())
+    }
+
+    /// Check if key exists
+    pub fn exists(&self, key: &str) -> RedisResult<bool> {
+        let mut conn = self.get_connection()?;
+        conn.exists(key)
+    }
+
+    /// Get number of keys in database
+    pub fn dbsize(&self) -> RedisResult<usize> {
+        let mut conn = self.get_connection()?;
+        redis::cmd("DBSIZE").query(&mut conn)
     }
 }
-
-// Container is automatically stopped and removed when RedisTestEnv is dropped
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore = "Requires Docker"]
-    async fn test_redis_test_env_start() {
-        let env = RedisTestEnv::start().await.expect("Failed to start Redis");
-        assert!(env.port > 0);
-        assert!(!env.host.is_empty());
+    #[ignore] // Requires Docker
+    async fn test_redis_env_creation() {
+        let env = RedisTestEnv::new().await.expect("Failed to create Redis env");
+
+        // Verify connection
+        let mut conn = env.get_connection().expect("Failed to get connection");
+        let pong: String = redis::cmd("PING").query(&mut conn).expect("PING failed");
+        assert_eq!(pong, "PONG");
     }
 
     #[tokio::test]
-    #[ignore = "Requires Docker"]
-    async fn test_redis_basic_operations() {
-        let env = RedisTestEnv::start().await.expect("Failed to start Redis");
+    #[ignore] // Requires Docker
+    async fn test_redis_operations() {
+        let env = RedisTestEnv::new().await.expect("Failed to create Redis env");
+        env.flush_all().expect("Failed to flush");
 
-        // Test SET and GET
-        env.set("test_key", "test_value")
-            .await
-            .expect("Failed to set key");
-        let value = env.get("test_key").await.expect("Failed to get key");
-        assert_eq!(value, Some("test_value".to_string()));
+        // Test HSET/HGET
+        env.hset("test:key", "field1", "value1").expect("HSET failed");
+        let value: String = env.hget("test:key", "field1").expect("HGET failed");
+        assert_eq!(value, "value1");
 
         // Test EXISTS
-        let exists = env
-            .exists("test_key")
-            .await
-            .expect("Failed to check exists");
-        assert!(exists);
+        assert!(env.exists("test:key").expect("EXISTS failed"));
 
         // Test DEL
-        env.del("test_key").await.expect("Failed to delete key");
-        let exists = env
-            .exists("test_key")
-            .await
-            .expect("Failed to check exists");
-        assert!(!exists);
-    }
+        env.del("test:key").expect("DEL failed");
+        assert!(!env.exists("test:key").expect("EXISTS failed"));
 
-    #[tokio::test]
-    #[ignore = "Requires Docker"]
-    async fn test_redis_hash_operations() {
-        let env = RedisTestEnv::start().await.expect("Failed to start Redis");
-
-        // Test HSET and HGET
-        env.hset("test_hash", "field1", "value1")
-            .await
-            .expect("Failed to hset");
-        let value = env
-            .hget("test_hash", "field1")
-            .await
-            .expect("Failed to hget");
-        assert_eq!(value, Some("value1".to_string()));
-
-        // Test HGETALL
-        env.hset("test_hash", "field2", "value2")
-            .await
-            .expect("Failed to hset");
-        let all = env.hgetall("test_hash").await.expect("Failed to hgetall");
-        assert_eq!(all.len(), 2);
-
-        // Test HDEL
-        env.hdel("test_hash", "field1")
-            .await
-            .expect("Failed to hdel");
-        let value = env
-            .hget("test_hash", "field1")
-            .await
-            .expect("Failed to hget");
-        assert_eq!(value, None);
-    }
-
-    #[tokio::test]
-    #[ignore = "Requires Docker"]
-    async fn test_redis_flush_all() {
-        let env = RedisTestEnv::start().await.expect("Failed to start Redis");
-
-        // Add some keys
-        env.set("key1", "value1").await.expect("Failed to set");
-        env.set("key2", "value2").await.expect("Failed to set");
-
-        // Flush all
-        env.flush_all().await.expect("Failed to flush");
-
-        // Verify empty
-        let size = env.dbsize().await.expect("Failed to get dbsize");
+        // Test DBSIZE
+        let size = env.dbsize().expect("DBSIZE failed");
         assert_eq!(size, 0);
-    }
-
-    #[tokio::test]
-    #[ignore = "Requires Docker"]
-    async fn test_redis_keys_pattern() {
-        let env = RedisTestEnv::start().await.expect("Failed to start Redis");
-
-        // Add keys with pattern
-        env.set("NEIGH_TABLE:eth0:2001:db8::1", "value1")
-            .await
-            .expect("Failed to set");
-        env.set("NEIGH_TABLE:eth0:2001:db8::2", "value2")
-            .await
-            .expect("Failed to set");
-        env.set("OTHER_TABLE:key", "value3")
-            .await
-            .expect("Failed to set");
-
-        // Get keys matching pattern
-        let keys = env.keys("NEIGH_TABLE:*").await.expect("Failed to get keys");
-        assert_eq!(keys.len(), 2);
     }
 }
