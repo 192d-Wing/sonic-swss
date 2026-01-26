@@ -3787,6 +3787,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "sonic-vlanmgrd"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "sonic-cfgmgr-common",
+ "sonic-cfgmgr-test",
+ "sonic-orch-common",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

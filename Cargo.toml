@@ -15,6 +15,7 @@ members = [
     "crates/portmgrd",
     "crates/sflowmgrd",
     "crates/fabricmgrd",
+    "crates/vlanmgrd",
 ]
 exclude = []
 
