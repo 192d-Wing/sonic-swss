@@ -11,6 +11,7 @@ members = [
     "crates/orchagent",
     # cfgmgr crates (Rust rewrite)
     "crates/sonic-cfgmgr-common",
+    "crates/sonic-cfgmgr-test",
     "crates/portmgrd",
     "crates/sflowmgrd",
     "crates/fabricmgrd",

@@ -2108,6 +2108,18 @@ dependencies = [
 
 [[package]]
 name = "nix"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
+dependencies = [
+ "bitflags",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
+name = "nix"
 version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "225e7cfe711e0ba79a68baeddb2982723e4235247aefce1482f2f16c27865b66"
@@ -3083,6 +3095,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "rtnetlink"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b960d5d873a75b5be9761b1e73b146f52dddcd27bac75263f40fba686d4d7b5"
+dependencies = [
+ "futures-channel",
+ "futures-util",
+ "log",
+ "netlink-packet-core 0.8.1",
+ "netlink-packet-route",
+ "netlink-proto",
+ "netlink-sys",
+ "nix 0.30.1",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3396,6 +3426,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap 2.13.0",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
+]
+
+[[package]]
 name = "serial_test"
 version = "3.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3500,6 +3543,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "sonic-cfgmgr-test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "redis 0.27.6",
+ "serde",
+ "serde_json",
+ "testcontainers",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tracing",
+]
+
+[[package]]
+name = "sonic-config"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sonic-types",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "sonic-fabricmgrd"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "sonic-cfgmgr-common",
+ "sonic-orch-common",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "sonic-ffi-bridge"
 version = "0.1.0"
 dependencies = [
@@ -3526,7 +3613,8 @@ dependencies = [
  "netlink-packet-core 0.8.1",
  "netlink-packet-route",
  "netlink-sys",
- "nix",
+ "nix 0.31.1",
+ "parking_lot",
  "prometheus",
  "redis 0.28.2",
  "rustc-hash 2.1.1",
@@ -3536,13 +3624,24 @@ dependencies = [
  "serde_json",
  "sonic-types",
  "tempfile",
- "testcontainers",
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
  "tokio-test",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "sonic-netlink"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "netlink-packet-core 0.8.1",
+ "rtnetlink",
+ "sonic-types",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -3618,13 +3717,17 @@ dependencies = [
  "netlink-packet-core 0.8.1",
  "netlink-packet-route",
  "netlink-sys",
- "nix",
+ "nix 0.31.1",
  "parking_lot",
  "prometheus",
  "redis 1.0.2",
  "sd-notify",
  "serde",
  "serde_json",
+ "sonic-config",
+ "sonic-netlink",
+ "sonic-redis",
+ "sonic-types",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -3632,6 +3735,19 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "sonic-redis"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "redis 1.0.2",
+ "serde",
+ "serde_json",
+ "sonic-types",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -3665,9 +3781,9 @@ dependencies = [
 name = "sonic-types"
 version = "0.1.0"
 dependencies = [
- "pretty_assertions",
  "serde",
- "thiserror 1.0.69",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -4333,6 +4449,12 @@ name = "unicode-width"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
+
+[[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"

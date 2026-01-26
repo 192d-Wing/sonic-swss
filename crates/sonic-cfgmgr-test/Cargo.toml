@@ -1,0 +1,34 @@
+[package]
+name = "sonic-cfgmgr-test"
+version = "0.1.0"
+edition = "2021"
+description = "Integration test infrastructure for SONiC configuration managers"
+license = "Apache-2.0"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Redis client
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+
+# Test containers for Redis (match neighsyncd version)
+testcontainers = "0.26"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[lib]
+name = "sonic_cfgmgr_test"
+path = "src/lib.rs"
