@@ -1,0 +1,29 @@
+[package]
+name = "sonic-coppmgrd"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "coppmgrd"
+path = "src/main.rs"
+
+[lib]
+name = "sonic_coppmgrd"
+path = "src/lib.rs"
+
+[dependencies]
+sonic-cfgmgr-common = { path = "../sonic-cfgmgr-common" }
+sonic-orch-common = { path = "../sonic-orch-common" }
+swss-common = { path = "../../../sonic-buildimage/src/sonic-swss-common/crates/swss-common" }
+
+async-trait = "0.1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# JSON parsing
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+tempfile = "3"
