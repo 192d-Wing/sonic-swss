@@ -24,6 +24,14 @@ use tokio::signal;
 use tracing::{Level, error, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
+// NIST SP 800-53 Rev5 compliant audit logging
+use sonic_audit::{
+    init_global_auditor, AuditorConfig, Facility,
+    backends::{SyslogBackend, MultiBackend, WriteStrategy},
+};
+#[cfg(feature = "redis")]
+use sonic_audit::backends::RedisBackend;
+
 /// Default Redis connection settings
 /// NIST: CM-6 - Configuration settings
 const REDIS_HOST: &str = "127.0.0.1";
@@ -42,6 +50,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
     // NIST: AU-3, AU-12 - Audit logging setup
     init_logging()?;
+
+    // Initialize NIST-compliant audit framework
+    // NIST: AU-2, AU-3, AU-4, AU-9, AU-12 - Comprehensive audit logging
+    init_audit_framework().await?;
 
     info!("neighsyncd: Starting neighbor synchronization daemon");
 
@@ -75,6 +87,91 @@ fn init_logging() -> Result<()> {
 
     tracing::subscriber::set_global_default(subscriber)
         .map_err(|e| NeighsyncError::Config(format!("Failed to set logger: {}", e)))?;
+
+    Ok(())
+}
+
+/// Initialize NIST SP 800-53 Rev5 compliant audit framework
+///
+/// # NIST Controls
+/// - AU-2: Event Logging - Configurable audit event types
+/// - AU-3: Content of Audit Records - Comprehensive structured records
+/// - AU-4: Audit Storage Capacity - Multi-backend with Redis persistence
+/// - AU-6: Audit Review and Analysis - Optional SIEM integration
+/// - AU-9: Protection of Audit Information - Backend security
+/// - AU-11: Audit Record Retention - Redis persistence
+/// - AU-12: Audit Generation - Automated audit record generation
+///
+/// # Backend Configuration
+/// - **Syslog**: Local Unix socket to /dev/log (Facility::Local0)
+/// - **Redis**: Persistent storage in StateDB (database 6) with 10k entry limit
+/// - **SIEM**: Optional remote aggregation (configure via environment)
+///
+/// Uses `WriteStrategy::BestEffort` to ensure audit failures don't block operations.
+async fn init_audit_framework() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    // Create multi-backend for redundancy (AU-4, AU-9)
+    let mut multi = MultiBackend::new(WriteStrategy::BestEffort);
+
+    // 1. Syslog backend - local system integration (AU-12)
+    let syslog_backend = SyslogBackend::new(Facility::Local0, "neighsyncd")
+        .map_err(|e| NeighsyncError::Config(format!("Failed to init syslog backend: {}", e)))?;
+    multi.add_backend(Arc::new(syslog_backend));
+    info!("neighsyncd: Initialized syslog audit backend (Facility::Local0)");
+
+    // 2. Redis backend - persistent storage (AU-4, AU-11)
+    #[cfg(feature = "redis")]
+    {
+        let mut redis_backend = RedisBackend::new(6, "AUDIT_LOG", 10000);
+        match redis_backend.connect(REDIS_HOST, REDIS_PORT).await {
+            Ok(()) => {
+                multi.add_backend(Arc::new(redis_backend));
+                info!("neighsyncd: Initialized Redis audit backend (StateDB, max 10k entries)");
+            }
+            Err(e) => {
+                warn!(error = %e, "neighsyncd: Failed to connect Redis audit backend, continuing without persistence");
+            }
+        }
+    }
+
+    // 3. SIEM backend - optional remote aggregation (AU-6)
+    // TODO: Configure via environment variable SIEM_SERVER
+    // Example: export SIEM_SERVER=siem.example.com:514
+    if let Ok(siem_addr) = std::env::var("SIEM_SERVER") {
+        match siem_addr.parse() {
+            Ok(addr) => {
+                match sonic_audit::backends::SiemBackend::new_udp(addr, Facility::Local0) {
+                    Ok(siem_backend) => {
+                        multi.add_backend(Arc::new(siem_backend));
+                        info!(siem_server = %siem_addr, "neighsyncd: Initialized SIEM audit backend (UDP)");
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "neighsyncd: Failed to init SIEM backend");
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, siem_addr, "neighsyncd: Invalid SIEM_SERVER address");
+            }
+        }
+    }
+
+    // Initialize global auditor (AU-2, AU-3)
+    let config = AuditorConfig::new("neighsyncd")
+        .with_facility(Facility::Local0)
+        .with_min_severity(sonic_audit::Severity::Informational);
+
+    init_global_auditor(config, Arc::new(multi))
+        .map_err(|e| NeighsyncError::Config(format!("Failed to init global auditor: {}", e)))?;
+
+    info!("neighsyncd: NIST SP 800-53 Rev5 audit framework initialized");
+
+    // Log framework initialization as audit event
+    sonic_audit::info_audit!(
+        "neighsyncd",
+        event = "audit_init",
+        backends = "syslog,redis",
+        "Audit framework initialized with multi-backend configuration"
+    );
 
     Ok(())
 }

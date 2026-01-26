@@ -13,6 +13,12 @@ use crate::types::{MacAddress, NeighborEntry, NeighborMessageType, NeighborState
 use std::collections::HashMap;
 use tracing::{debug, info, instrument, warn};
 
+// NIST SP 800-53 Rev5 compliant audit logging
+use sonic_audit::{
+    audit_log, info_audit, warn_audit, error_audit,
+    AuditRecord, AuditCategory, AuditOutcome,
+};
+
 /// Default warm restart reconciliation timer (seconds)
 /// NIST: CM-6 - Configuration settings
 pub const DEFAULT_WARMSTART_TIMER_SECS: u64 = 5;
@@ -330,20 +336,86 @@ impl NeighSync {
 
         // Apply to Redis
         if is_delete {
-            self.redis.delete_neighbor(&entry).await?;
-            info!(
-                interface = %entry.interface,
-                ip = %entry.ip,
-                "Deleted neighbor"
-            );
+            // NIST: AU-12 - Audit neighbor deletion
+            match self.redis.delete_neighbor(&entry).await {
+                Ok(()) => {
+                    info!(
+                        interface = %entry.interface,
+                        ip = %entry.ip,
+                        "Deleted neighbor"
+                    );
+                    // Audit successful deletion - NetworkRouting category
+                    audit_log!(
+                        AuditRecord::new(
+                            AuditCategory::NetworkRouting,
+                            "neighsyncd",
+                            "neighbor_delete"
+                        )
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_id(format!("{}:{}", entry.interface, entry.ip))
+                        .with_object_type("neighbor_entry")
+                        .with_details(serde_json::json!({
+                            "interface": entry.interface,
+                            "ip_address": entry.ip.to_string(),
+                            "mac_address": entry.mac.to_string(),
+                            "state": format!("{:?}", entry.state),
+                        }))
+                    );
+                }
+                Err(e) => {
+                    // NIST: AU-12, SI-11 - Audit deletion failure
+                    error_audit!(
+                        "neighsyncd",
+                        interface = %entry.interface,
+                        ip = %entry.ip,
+                        error = %e,
+                        "Failed to delete neighbor"
+                    );
+                    return Err(e);
+                }
+            }
         } else {
-            self.redis.set_neighbor(&entry).await?;
-            info!(
-                interface = %entry.interface,
-                ip = %entry.ip,
-                mac = %entry.mac,
-                "Set neighbor"
-            );
+            // NIST: AU-12 - Audit neighbor addition/update
+            match self.redis.set_neighbor(&entry).await {
+                Ok(()) => {
+                    info!(
+                        interface = %entry.interface,
+                        ip = %entry.ip,
+                        mac = %entry.mac,
+                        "Set neighbor"
+                    );
+                    // Audit successful add/update - NetworkRouting category
+                    audit_log!(
+                        AuditRecord::new(
+                            AuditCategory::NetworkRouting,
+                            "neighsyncd",
+                            "neighbor_add"
+                        )
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_id(format!("{}:{}", entry.interface, entry.ip))
+                        .with_object_type("neighbor_entry")
+                        .with_details(serde_json::json!({
+                            "interface": entry.interface,
+                            "ip_address": entry.ip.to_string(),
+                            "mac_address": entry.mac.to_string(),
+                            "state": format!("{:?}", entry.state),
+                            "externally_learned": entry.externally_learned,
+                        }))
+                    );
+                }
+                Err(e) => {
+                    // NIST: AU-12, SI-11 - Audit add/update failure
+                    error_audit!(
+                        "neighsyncd",
+                        interface = %entry.interface,
+                        ip = %entry.ip,
+                        mac = %entry.mac,
+                        error = %e,
+                        "Failed to set neighbor"
+                    );
+                    return Err(e);
+                }
+            }
         }
 
         Ok(())

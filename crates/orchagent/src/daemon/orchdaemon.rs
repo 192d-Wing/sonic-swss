@@ -10,7 +10,10 @@
 use crate::audit::{AuditCategory, AuditOutcome, AuditRecord};
 use crate::audit_log;
 use log::{debug, error, info};
-use sonic_orch_common::{Orch, OrchContext, RedisConfig};
+use sonic_orch_common::{
+    ConsumerConfig, Orch, OrchContext, RedisBoundConsumer, RedisConfig, RedisDatabase,
+};
+use sonic_sai::{SaiError, SaiResult, SwitchKind, SwitchOid};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -54,6 +57,16 @@ pub struct OrchDaemon {
     context: Arc<RwLock<OrchContext>>,
     /// Running flag
     running: bool,
+    /// APPL_DB connection for table polling
+    appl_db: Option<Arc<RwLock<RedisDatabase>>>,
+    /// STATE_DB connection for state writes
+    state_db: Option<Arc<RwLock<RedisDatabase>>>,
+    /// Redis consumers for key tables
+    port_table_consumer: Option<RedisBoundConsumer>,
+    intf_table_consumer: Option<RedisBoundConsumer>,
+    route_table_consumer: Option<RedisBoundConsumer>,
+    /// SAI switch object (OID for the switch abstraction)
+    switch_oid: Option<SwitchOid>,
 }
 
 impl OrchDaemon {
@@ -64,6 +77,12 @@ impl OrchDaemon {
             orchs: BTreeMap::new(),
             context: Arc::new(RwLock::new(OrchContext::default())),
             running: false,
+            appl_db: None,
+            state_db: None,
+            port_table_consumer: None,
+            intf_table_consumer: None,
+            route_table_consumer: None,
+            switch_oid: None,
         }
     }
 
@@ -94,6 +113,26 @@ impl OrchDaemon {
     /// Returns the shared context.
     pub fn context(&self) -> Arc<RwLock<OrchContext>> {
         Arc::clone(&self.context)
+    }
+
+    /// Returns a reference to the PORT_TABLE consumer.
+    pub fn port_table_consumer(&mut self) -> Option<&mut RedisBoundConsumer> {
+        self.port_table_consumer.as_mut()
+    }
+
+    /// Returns a reference to the INTF_TABLE consumer.
+    pub fn intf_table_consumer(&mut self) -> Option<&mut RedisBoundConsumer> {
+        self.intf_table_consumer.as_mut()
+    }
+
+    /// Returns a reference to the ROUTE_TABLE consumer.
+    pub fn route_table_consumer(&mut self) -> Option<&mut RedisBoundConsumer> {
+        self.route_table_consumer.as_mut()
+    }
+
+    /// Returns the SAI switch OID (object identifier).
+    pub fn switch_oid(&self) -> Option<SwitchOid> {
+        self.switch_oid
     }
 
     /// Initializes all registered Orchs.
@@ -198,29 +237,74 @@ impl OrchDaemon {
 
     /// Initializes the SAI (Switch Abstraction Interface) layer.
     ///
+    /// This step prepares SAI for use by:
+    /// - Loading the SAI library implementation
+    /// - Initializing the SAI profile with hardware-specific settings
+    /// - Creating SAI service methods for API access
+    ///
     /// # NIST Controls
-    /// - SC-3: Access Enforcement
-    /// - SC-7: Boundary Protection
+    /// - SC-3: Access Enforcement (SAI access control)
+    /// - SC-7: Boundary Protection (switch abstraction layer)
     async fn init_sai(&self) -> Result<(), String> {
-        // TODO: Implement SAI initialization
-        // This will include:
-        // - Loading SAI library
-        // - Initializing SAI profile
-        // - Creating SAI service methods
+        info!("Initializing SAI library and profile");
+
+        // TODO: In production implementation, this would:
+        // 1. Load SAI library based on switch type (libsai.so)
+        // 2. Call sai_api_initialize() to create service methods
+        // 3. Set up SAI profile with hardware-specific tuning (packet buffer, QoS, etc.)
+        // 4. Enable SAI logging for debug output
+        //
+        // For now, return success - actual SAI library linking will be in sonic-ffi-bridge
+        // with cpp-interop feature enabled.
+
+        debug!("SAI initialization deferred to FFI layer (sonic-ffi-bridge/cpp-link)");
         Ok(())
     }
 
     /// Creates the switch object and initializes hardware access.
     ///
+    /// This is a critical initialization step that:
+    /// - Creates the SAI switch object representing the hardware
+    /// - Queries hardware capabilities (port count, LAG members, etc.)
+    /// - Initializes port lists and default configurations
+    /// - Sets up switch attributes for forwarding, LAG, mirroring, etc.
+    ///
     /// # NIST Controls
-    /// - CM-6: Configuration Settings
-    /// - AC-3: Access Control
-    async fn create_switch(&self) -> Result<(), String> {
-        // TODO: Implement switch creation
-        // This will include:
-        // - Getting hardware capabilities
-        // - Creating switch attributes
-        // - Initializing port lists
+    /// - CM-6: Configuration Settings (switch configuration)
+    /// - AC-3: Access Control (switch access control)
+    async fn create_switch(&mut self) -> Result<(), String> {
+        info!("Creating SAI switch object");
+
+        // TODO: In production implementation, this would:
+        // 1. Call sai_switch_api->create_switch() with switch attributes
+        // 2. Retrieve switch OID for future operations
+        // 3. Query hardware capabilities:
+        //    - Port list and capabilities
+        //    - CPU port OID
+        //    - Available LAG members
+        //    - QoS queue capabilities
+        //    - ACL table sizes
+        // 4. Initialize default switch configuration
+        // 5. Store switch OID in OrchContext for access by all modules
+        //
+        // For now, create a dummy switch OID (zero value in simulation)
+
+        // Create a switch OID (in real implementation, this comes from SAI API)
+        // Using a hardcoded value for now - this would be the return from sai_switch_api->create_switch()
+        // Raw value 1u64 represents a valid switch in simulation mode
+        let dummy_switch_oid = SwitchOid::from_raw_unchecked(1u64);
+
+        debug!("Created switch OID: {:?}", dummy_switch_oid);
+
+        // Store the switch OID for access by other modules
+        self.switch_oid = Some(dummy_switch_oid);
+
+        // TODO: Query capabilities and store in context
+        // let capabilities = sai_switch_api->get_switch_capabilities(switch_oid)?;
+        // Update shared context
+        let mut ctx = self.context.write().await;
+        ctx.all_ports_ready = false; // Will be set to true after port sync
+
         Ok(())
     }
 
@@ -229,16 +313,14 @@ impl OrchDaemon {
     /// # NIST Controls
     /// - SC-7: Boundary Protection
     /// - SC-8: Transmission Confidentiality
-    async fn init_databases(&self) -> Result<(), String> {
-        use sonic_orch_common::RedisDatabase;
-
+    async fn init_databases(&mut self) -> Result<(), String> {
         let config = &self.config;
         info!(
             "Connecting to Redis databases at {}:{}",
             config.redis_host, config.redis_port
         );
 
-        // Connect to CONFIG_DB (database 4)
+        // Connect to CONFIG_DB (database 4) - for initial configuration loads
         let config_db_config = RedisConfig::config_db(config.redis_host.clone(), config.redis_port);
         match RedisDatabase::new(config_db_config).await {
             Ok(_db) => {
@@ -249,22 +331,24 @@ impl OrchDaemon {
             }
         }
 
-        // Connect to APPL_DB (database 0)
+        // Connect to APPL_DB (database 0) - for table polling and event updates
         let appl_db_config = RedisConfig::appl_db(config.redis_host.clone(), config.redis_port);
         match RedisDatabase::new(appl_db_config).await {
-            Ok(_db) => {
+            Ok(db) => {
                 info!("Connected to APPL_DB");
+                self.appl_db = Some(Arc::new(RwLock::new(db)));
             }
             Err(e) => {
                 return Err(format!("Failed to connect to APPL_DB: {}", e));
             }
         }
 
-        // Connect to STATE_DB (database 6)
+        // Connect to STATE_DB (database 6) - for state writes
         let state_db_config = RedisConfig::state_db(config.redis_host.clone(), config.redis_port);
         match RedisDatabase::new(state_db_config).await {
-            Ok(_db) => {
+            Ok(db) => {
                 info!("Connected to STATE_DB");
+                self.state_db = Some(Arc::new(RwLock::new(db)));
             }
             Err(e) => {
                 return Err(format!("Failed to connect to STATE_DB: {}", e));
@@ -283,8 +367,49 @@ impl OrchDaemon {
             }
         }
 
+        // Initialize Redis consumers for critical tables
+        // These are bound to APPL_DB for event polling
+        self.init_redis_consumers()?;
+
         info!("All database connections initialized successfully");
         Ok(())
+    }
+
+    /// Initializes Redis consumers for key tables.
+    ///
+    /// Creates RedisBoundConsumer instances that integrate with the event loop.
+    fn init_redis_consumers(&mut self) -> Result<(), String> {
+        if let Some(appl_db) = &self.appl_db {
+            info!("Initializing Redis consumers for table polling");
+
+            // PORT_TABLE consumer (priority 0 - highest)
+            let port_config = ConsumerConfig::new("PORT_TABLE")
+                .with_priority(0)
+                .with_batch_size(self.config.batch_size);
+            self.port_table_consumer =
+                Some(RedisBoundConsumer::new(port_config, Arc::clone(appl_db)));
+            info!("  Created PORT_TABLE consumer");
+
+            // INTF_TABLE consumer (priority 5)
+            let intf_config = ConsumerConfig::new("INTF_TABLE")
+                .with_priority(5)
+                .with_batch_size(self.config.batch_size);
+            self.intf_table_consumer =
+                Some(RedisBoundConsumer::new(intf_config, Arc::clone(appl_db)));
+            info!("  Created INTF_TABLE consumer");
+
+            // ROUTE_TABLE consumer (priority 20)
+            let route_config = ConsumerConfig::new("ROUTE_TABLE")
+                .with_priority(20)
+                .with_batch_size(self.config.batch_size);
+            self.route_table_consumer =
+                Some(RedisBoundConsumer::new(route_config, Arc::clone(appl_db)));
+            info!("  Created ROUTE_TABLE consumer");
+
+            Ok(())
+        } else {
+            Err("APPL_DB not initialized".to_string())
+        }
     }
 
     /// Runs the main event loop.
@@ -307,6 +432,11 @@ impl OrchDaemon {
         audit_log!(record);
 
         while self.running {
+            // Poll Redis consumers for new entries
+            // NIST: SI-4 - System Monitoring (event polling)
+            debug!("Polling Redis consumers for new entries");
+            self.poll_redis_consumers().await;
+
             // Process tasks from all Orchs in priority order
             for (_priority, orchs) in self.orchs.iter_mut() {
                 for orch in orchs.iter_mut() {
@@ -405,6 +535,70 @@ impl OrchDaemon {
         // Update context
         let mut ctx = self.context.write().await;
         ctx.warm_boot_in_progress = false;
+    }
+
+    /// Polls Redis consumers for new entries and makes them available to Orchs.
+    ///
+    /// This is called in the event loop before Orch task processing.
+    /// It populates consumers with entries from Redis, which Orchs then process
+    /// during their do_task() calls.
+    ///
+    /// # NIST Controls
+    /// - SI-4: System Monitoring (event polling and detection)
+    async fn poll_redis_consumers(&mut self) {
+        let batch_size = self.config.batch_size;
+        let timeout_secs = 0.1; // 100ms timeout for non-blocking poll
+
+        // Poll PORT_TABLE consumer
+        if let Some(consumer) = &mut self.port_table_consumer {
+            match consumer.populate_from_redis(batch_size, timeout_secs).await {
+                Ok(()) => {
+                    if consumer.has_pending() {
+                        debug!(
+                            "PORT_TABLE consumer has {} pending entries",
+                            consumer.consumer().pending_count()
+                        );
+                    }
+                }
+                Err(e) => {
+                    debug!("Error polling PORT_TABLE: {}", e);
+                }
+            }
+        }
+
+        // Poll INTF_TABLE consumer
+        if let Some(consumer) = &mut self.intf_table_consumer {
+            match consumer.populate_from_redis(batch_size, timeout_secs).await {
+                Ok(()) => {
+                    if consumer.has_pending() {
+                        debug!(
+                            "INTF_TABLE consumer has {} pending entries",
+                            consumer.consumer().pending_count()
+                        );
+                    }
+                }
+                Err(e) => {
+                    debug!("Error polling INTF_TABLE: {}", e);
+                }
+            }
+        }
+
+        // Poll ROUTE_TABLE consumer
+        if let Some(consumer) = &mut self.route_table_consumer {
+            match consumer.populate_from_redis(batch_size, timeout_secs).await {
+                Ok(()) => {
+                    if consumer.has_pending() {
+                        debug!(
+                            "ROUTE_TABLE consumer has {} pending entries",
+                            consumer.consumer().pending_count()
+                        );
+                    }
+                }
+                Err(e) => {
+                    debug!("Error polling ROUTE_TABLE: {}", e);
+                }
+            }
+        }
     }
 
     /// Dumps state for debugging.

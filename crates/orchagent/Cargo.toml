@@ -40,9 +40,177 @@ pretty_assertions.workspace = true
 tempfile.workspace = true
 
 [features]
-default = []
+# Default includes all features for backward compatibility
+default = ["full"]
+
+# ============================================================================
+# Deployment Profiles
+# ============================================================================
+
+# Full feature set - includes everything
+full = [
+    "core",
+    "telemetry",
+    "advanced-encapsulation",
+    "security",
+    "high-availability",
+    "port-specialization",
+]
+
+# Production standard - core + HA + telemetry (recommended for most deployments)
+production = ["core", "high-availability", "telemetry"]
+
+# Production minimal - just core + essential HA
+production-minimal = ["core", "high-availability"]
+
+# Minimal build - only core forwarding functionality
+minimal = ["core"]
+
+# ============================================================================
+# Core Features (Required for basic operation)
+# ============================================================================
+
+# Core forwarding path - essential for switch operation
+core = [
+    "mod-daemon",
+    "mod-orch",
+    "mod-ports",
+    "mod-intfs",
+    "mod-route",
+    "mod-vrf",
+    "mod-nhg",
+    "mod-fg-nhg",
+    "mod-neigh",
+    "mod-acl",
+    "mod-qos",
+    "mod-buffer",
+    "mod-fdb",
+    "mod-switch",
+    "mod-audit",
+    "mod-policer",
+    "mod-icmp",
+    "mod-zmq",
+]
+
+# ============================================================================
+# Feature Groups
+# ============================================================================
+
+# Telemetry and monitoring features
+telemetry = [
+    "mod-flex-counter",
+    "mod-watermark",
+    "mod-sflow",
+    "mod-dtel",
+    "mod-twamp",
+    "mod-debug-counter",
+    "mod-countercheck",
+    "mod-crm",
+]
+
+# Advanced encapsulation and tunneling
+advanced-encapsulation = [
+    "mod-vxlan",
+    "mod-nvgre",
+    "mod-tunnel-decap",
+    "mod-srv6",
+    "mod-vnet",
+    "mod-mplsroute",
+]
+
+# Security features
+security = [
+    "mod-macsec",
+    "mod-nat",
+    "mod-pbh",
+]
+
+# High-availability and resilience features
+high-availability = [
+    "mod-mlag",
+    "mod-mux",
+    "mod-stp",
+    "mod-pfcwd",
+    "mod-bfd",
+    "mod-chassis",
+]
+
+# Port specialization features
+port-specialization = [
+    "mod-fabric-ports",
+    "mod-isolation-group",
+    "mod-copp",
+    "mod-mirror",
+]
+
+# ============================================================================
+# Individual Module Features
+# ============================================================================
+
+# Core modules (typically always enabled)
+mod-daemon = []
+mod-orch = []
+mod-ports = []
+mod-intfs = []
+mod-route = []
+mod-vrf = []
+mod-nhg = []
+mod-fg-nhg = []
+mod-neigh = []
+mod-acl = []
+mod-qos = []
+mod-buffer = []
+mod-fdb = []
+mod-switch = []
+mod-audit = []
+mod-policer = []
+mod-icmp = []
+mod-zmq = []
+
+# Telemetry modules
+mod-flex-counter = []
+mod-watermark = []
+mod-sflow = []
+mod-dtel = []
+mod-twamp = []
+mod-debug-counter = []
+mod-countercheck = []
+mod-crm = []
+
+# Encapsulation modules
+mod-vxlan = []
+mod-nvgre = []
+mod-tunnel-decap = []
+mod-srv6 = []
+mod-vnet = []
+mod-mplsroute = []
+
+# Security modules
+mod-macsec = []
+mod-nat = []
+mod-pbh = []
+
+# HA modules
+mod-mlag = []
+mod-mux = []
+mod-stp = []
+mod-pfcwd = []
+mod-bfd = []
+mod-chassis = []
+
+# Port specialization modules
+mod-fabric-ports = []
+mod-isolation-group = []
+mod-copp = []
+mod-mirror = []
+
+# ============================================================================
+# Integration Features
+# ============================================================================
+
 # Enable when C++ orchagent code is linked
 cpp-interop = ["sonic-ffi-bridge/cpp-link"]
+
 # Enable when swss-common native library is available
 swss = ["swss-common", "sonic-orch-common/swss"]
 

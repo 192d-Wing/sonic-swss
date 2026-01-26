@@ -53,6 +53,9 @@ redis = { version = "0.28", features = ["tokio-comp", "connection-manager"] }
 # SONiC shared types (MacAddress, IpAddress, etc.)
 sonic-types = { workspace = true }
 
+# NIST SP 800-53 Rev5 compliant audit logging
+sonic-audit = { path = "../../../sonic-common/sonic-audit", features = ["full"] }
+
 # Performance: FxHashMap for faster small-key lookups
 rustc-hash = { version = "2.1", optional = true }
 
