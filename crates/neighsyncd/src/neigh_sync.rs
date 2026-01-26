@@ -775,6 +775,7 @@ mod tests {
     use crate::types::NeighborState;
 
     fn make_test_entry(ip: &str, state: NeighborState) -> NeighborEntry {
+        use crate::vrf::VrfId;
         NeighborEntry {
             ifindex: 1,
             interface: "Ethernet0".to_string(),
@@ -782,6 +783,7 @@ mod tests {
             mac: MacAddress::new([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]),
             state,
             externally_learned: false,
+            vrf_id: VrfId::default_vrf(),
         }
     }
 

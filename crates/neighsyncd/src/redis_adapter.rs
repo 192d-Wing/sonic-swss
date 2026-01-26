@@ -285,6 +285,244 @@ impl RedisAdapter {
         );
         Ok(neighbors)
     }
+
+    /// Set a key with NX (only if not exists) option and TTL
+    ///
+    /// # NIST Controls
+    /// - AC-3: Access Enforcement - Lock-based access control
+    #[instrument(skip(self))]
+    pub async fn set_nx(&mut self, key: &str, value: &str, ttl_secs: u64) -> Result<bool> {
+        let result: bool = redis::Cmd::new()
+            .arg("SET")
+            .arg(key)
+            .arg(value)
+            .arg("NX")
+            .arg("EX")
+            .arg(ttl_secs)
+            .query_async(&mut self.appl_db)
+            .await?;
+
+        debug!(key, ttl = ttl_secs, acquired = result, "SET NX with TTL");
+        Ok(result)
+    }
+
+    /// Delete a key only if the value matches (atomic compare-and-delete)
+    ///
+    /// # NIST Controls
+    /// - AC-3: Access Enforcement - Token-based lock release
+    #[instrument(skip(self))]
+    pub async fn del_if_eq(&mut self, key: &str, expected_value: &str) -> Result<bool> {
+        let script = redis::Script::new(
+            r#"
+            if redis.call('get', KEYS[1]) == ARGV[1] then
+                return redis.call('del', KEYS[1])
+            else
+                return 0
+            end
+            "#,
+        );
+
+        let result: i64 = script
+            .key(key)
+            .arg(expected_value)
+            .invoke_async(&mut self.appl_db)
+            .await?;
+
+        let deleted = result > 0;
+        debug!(key, deleted, "DELETE IF EQUAL");
+        Ok(deleted)
+    }
+
+    /// Set key expiration time (refresh TTL)
+    ///
+    /// # NIST Controls
+    /// - SC-5: DoS Protection - Automatic cleanup of stale locks
+    #[instrument(skip(self))]
+    pub async fn expire(&mut self, key: &str, ttl_secs: u64) -> Result<bool> {
+        let result: bool = self.appl_db.expire(key, ttl_secs as i64).await?;
+        debug!(key, ttl = ttl_secs, set = result, "EXPIRE");
+        Ok(result)
+    }
+
+    /// Set a neighbor entry with VRF awareness
+    ///
+    /// # NIST Controls
+    /// - AU-12: Audit Record Generation - Log neighbor additions per VRF
+    /// - AC-4: Information Flow Enforcement - VRF isolation
+    #[instrument(skip(self), fields(vrf_id = %entry.vrf_id()))]
+    pub async fn set_neighbor_vrf(&mut self, entry: &NeighborEntry, vrf_name: &str) -> Result<()> {
+        let key = if entry.vrf_id().as_u32() == 0 {
+            format!("{}:{}", APP_NEIGH_TABLE_NAME, entry.redis_key())
+        } else {
+            format!(
+                "{}|{}:{}",
+                vrf_name,
+                APP_NEIGH_TABLE_NAME,
+                entry.redis_key()
+            )
+        };
+
+        let fields: Vec<(&str, String)> = vec![
+            ("neigh", entry.mac.to_string()),
+            ("family", entry.family_str().to_string()),
+        ];
+
+        debug!(
+            key,
+            vrf_id = %entry.vrf_id(),
+            mac = %entry.mac,
+            family = entry.family_str(),
+            "Setting neighbor with VRF"
+        );
+
+        let _: () = self.appl_db.hset_multiple(&key, &fields).await?;
+        Ok(())
+    }
+
+    /// Delete a neighbor entry with VRF awareness
+    ///
+    /// # NIST Controls
+    /// - AU-12: Audit Record Generation - Log neighbor deletions per VRF
+    /// - AC-4: Information Flow Enforcement - VRF isolation
+    #[instrument(skip(self), fields(vrf_id = %entry.vrf_id()))]
+    pub async fn delete_neighbor_vrf(
+        &mut self,
+        entry: &NeighborEntry,
+        vrf_name: &str,
+    ) -> Result<()> {
+        let key = if entry.vrf_id().as_u32() == 0 {
+            format!("{}:{}", APP_NEIGH_TABLE_NAME, entry.redis_key())
+        } else {
+            format!(
+                "{}|{}:{}",
+                vrf_name,
+                APP_NEIGH_TABLE_NAME,
+                entry.redis_key()
+            )
+        };
+
+        debug!(key, vrf_id = %entry.vrf_id(), "Deleting neighbor with VRF");
+
+        let _: () = self.appl_db.del(&key).await?;
+        Ok(())
+    }
+
+    /// Batch set neighbors with VRF awareness
+    ///
+    /// # NIST Controls
+    /// - SC-5: DoS Protection - Batch operations reduce round-trips
+    /// - AC-4: Information Flow Enforcement - VRF-isolated batch operations
+    #[instrument(skip(self, entries))]
+    pub async fn batch_set_neighbors_vrf(
+        &mut self,
+        entries: Vec<(&NeighborEntry, &str)>,
+    ) -> Result<()> {
+        use redis::pipe;
+
+        let mut pipe = pipe();
+
+        for (entry, vrf_name) in entries {
+            let key = if entry.vrf_id().as_u32() == 0 {
+                format!("{}:{}", APP_NEIGH_TABLE_NAME, entry.redis_key())
+            } else {
+                format!(
+                    "{}|{}:{}",
+                    vrf_name,
+                    APP_NEIGH_TABLE_NAME,
+                    entry.redis_key()
+                )
+            };
+
+            let fields: Vec<(&str, String)> = vec![
+                ("neigh", entry.mac.to_string()),
+                ("family", entry.family_str().to_string()),
+            ];
+
+            for (field, value) in fields {
+                pipe.hset(&key, field, value);
+            }
+        }
+
+        let _: () = pipe.query_async(&mut self.appl_db).await?;
+        debug!("Batch set neighbors with VRF awareness");
+        Ok(())
+    }
+
+    /// Batch delete neighbors with VRF awareness
+    ///
+    /// # NIST Controls
+    /// - SC-5: DoS Protection - Batch operations reduce round-trips
+    /// - AC-4: Information Flow Enforcement - VRF-isolated batch operations
+    #[instrument(skip(self, entries))]
+    pub async fn batch_delete_neighbors_vrf(
+        &mut self,
+        entries: Vec<(&NeighborEntry, &str)>,
+    ) -> Result<()> {
+        use redis::pipe;
+
+        let mut pipe = pipe();
+
+        for (entry, vrf_name) in entries {
+            let key = if entry.vrf_id().as_u32() == 0 {
+                format!("{}:{}", APP_NEIGH_TABLE_NAME, entry.redis_key())
+            } else {
+                format!(
+                    "{}|{}:{}",
+                    vrf_name,
+                    APP_NEIGH_TABLE_NAME,
+                    entry.redis_key()
+                )
+            };
+            pipe.del::<_>(&key);
+        }
+
+        let _: () = pipe.query_async(&mut self.appl_db).await?;
+        debug!("Batch delete neighbors with VRF awareness");
+        Ok(())
+    }
+
+    /// Get all neighbors from a specific VRF
+    ///
+    /// # NIST Controls
+    /// - AC-4: Information Flow Enforcement - VRF-isolated queries
+    #[instrument(skip(self))]
+    pub async fn get_neighbors_by_vrf(
+        &mut self,
+        vrf_id: u32,
+        vrf_name: &str,
+    ) -> Result<HashMap<String, HashMap<String, String>>> {
+        let pattern = if vrf_id == 0 {
+            format!("{}:*", APP_NEIGH_TABLE_NAME)
+        } else {
+            format!("{}|{}:*", vrf_name, APP_NEIGH_TABLE_NAME)
+        };
+
+        let keys: Vec<String> = self.appl_db.keys(&pattern).await?;
+
+        let mut neighbors = HashMap::new();
+        for key in keys {
+            let values: HashMap<String, String> = self.appl_db.hgetall(&key).await?;
+            if !values.is_empty() {
+                // Strip VRF prefix and table name
+                let short_key = if vrf_id == 0 {
+                    key.strip_prefix(&format!("{}:", APP_NEIGH_TABLE_NAME))
+                        .unwrap_or(&key)
+                } else {
+                    key.strip_prefix(&format!("{}|{}:", vrf_name, APP_NEIGH_TABLE_NAME))
+                        .unwrap_or(&key)
+                };
+                neighbors.insert(short_key.to_string(), values);
+            }
+        }
+
+        debug!(
+            vrf_id,
+            vrf_name,
+            count = neighbors.len(),
+            "Retrieved neighbors for VRF"
+        );
+        Ok(neighbors)
+    }
 }
 
 #[cfg(test)]

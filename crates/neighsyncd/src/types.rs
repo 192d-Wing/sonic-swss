@@ -12,6 +12,8 @@ use std::net::{IpAddr, Ipv6Addr};
 // NIST: IA-3 - Device Identification - MAC addresses for device identification
 pub use sonic_types::MacAddress;
 
+use crate::vrf::VrfId;
+
 /// Kernel neighbor state (NUD_* values from linux/neighbour.h)
 ///
 /// # NIST Controls
@@ -72,6 +74,7 @@ impl NeighborState {
 /// - CM-8: System Component Inventory - Track network neighbors
 /// - AU-3: Content of Audit Records - Full neighbor information for logging
 /// - IA-3: Device Identification - Neighbor identification via IP/MAC
+/// - AC-4: Information Flow Enforcement - VRF isolation per entry
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NeighborEntry {
     /// Interface index
@@ -87,13 +90,34 @@ pub struct NeighborEntry {
     /// Whether this is an externally learned neighbor (e.g., VXLAN EVPN)
     /// NIST: SC-7 - Track externally learned entries for boundary protection
     pub externally_learned: bool,
+    /// VRF ID for this neighbor (default VRF = 0)
+    /// NIST: AC-4 - Information flow enforcement via VRF isolation
+    #[serde(default)]
+    pub vrf_id: VrfId,
 }
 
 impl NeighborEntry {
-    /// Create Redis key for NEIGH_TABLE
+    /// Create Redis key for NEIGH_TABLE (without VRF prefix)
     /// Format: "NEIGH_TABLE:{interface}:{ip}"
     pub fn redis_key(&self) -> String {
         format!("{}:{}", self.interface, self.ip)
+    }
+
+    /// Create Redis key with VRF awareness
+    /// Format (default VRF): "NEIGH_TABLE:{interface}:{ip}"
+    /// Format (named VRF): "VRF_NAME|NEIGH_TABLE:{interface}:{ip}"
+    pub fn redis_key_with_vrf(&self, vrf_name: &str) -> String {
+        let base_key = self.redis_key();
+        if self.vrf_id.as_u32() == 0 {
+            format!("NEIGH_TABLE:{}", base_key)
+        } else {
+            format!("{}|NEIGH_TABLE:{}", vrf_name, base_key)
+        }
+    }
+
+    /// Get VRF identifier
+    pub fn vrf_id(&self) -> VrfId {
+        self.vrf_id
     }
 
     /// Get address family string for Redis
@@ -224,5 +248,59 @@ mod tests {
         let mcast_global: Ipv6Addr = "ff0e::1".parse().unwrap();
         assert!(is_ipv6_multicast_link_local(&mcast_ll));
         assert!(!is_ipv6_multicast_link_local(&mcast_global));
+    }
+
+    #[test]
+    fn test_neighbor_entry_with_vrf() {
+        let ip: IpAddr = "fe80::1".parse().unwrap();
+        let entry = NeighborEntry {
+            ifindex: 1,
+            interface: "eth0".to_string(),
+            ip,
+            mac: MacAddress::new([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]),
+            state: NeighborState::Reachable,
+            externally_learned: false,
+            vrf_id: VrfId::new(1),
+        };
+
+        assert_eq!(entry.vrf_id(), VrfId::new(1));
+        assert_eq!(entry.redis_key(), "eth0:fe80::1");
+    }
+
+    #[test]
+    fn test_neighbor_entry_redis_key_with_vrf() {
+        let ip: IpAddr = "fe80::1".parse().unwrap();
+
+        // Default VRF
+        let entry_default = NeighborEntry {
+            ifindex: 1,
+            interface: "eth0".to_string(),
+            ip,
+            mac: MacAddress::new([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]),
+            state: NeighborState::Reachable,
+            externally_learned: false,
+            vrf_id: VrfId::default_vrf(),
+        };
+
+        assert_eq!(
+            entry_default.redis_key_with_vrf("default"),
+            "NEIGH_TABLE:eth0:fe80::1"
+        );
+
+        // Named VRF
+        let entry_vrf = NeighborEntry {
+            ifindex: 1,
+            interface: "eth0".to_string(),
+            ip,
+            mac: MacAddress::new([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]),
+            state: NeighborState::Reachable,
+            externally_learned: false,
+            vrf_id: VrfId::new(1),
+        };
+
+        assert_eq!(
+            entry_vrf.redis_key_with_vrf("Vrf1"),
+            "Vrf1|NEIGH_TABLE:eth0:fe80::1"
+        );
     }
 }

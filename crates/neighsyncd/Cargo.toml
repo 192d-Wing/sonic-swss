@@ -62,6 +62,9 @@ libc = "0.2"
 # CLI argument parsing for benchmark tool
 clap = { version = "4.4", features = ["derive"] }
 
+# Parking lot for faster synchronization primitives
+parking_lot = "0.12"
+
 # Monitoring/Observability
 prometheus = "0.14"
 axum = "0.8"
@@ -81,5 +84,4 @@ nix = { version = "0.31", features = ["net", "socket"] }
 tokio-test = "0.4"
 mockall = "0.14"
 tempfile = "3.15"
-testcontainers = "0.26"
 criterion = { version = "0.8", features = ["html_reports"] }

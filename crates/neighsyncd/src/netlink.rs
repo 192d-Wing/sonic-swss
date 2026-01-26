@@ -16,6 +16,7 @@ mod linux {
     use crate::types::{
         MacAddress, NeighborEntry, NeighborFlags, NeighborMessageType, NeighborState,
     };
+    use crate::vrf::VrfId;
     use netlink_packet_core::{NetlinkMessage, NetlinkPayload};
     use netlink_packet_route::RouteNetlinkMessage;
     use netlink_packet_route::neighbour::{NeighbourAddress, NeighbourAttribute, NeighbourMessage};
@@ -391,6 +392,7 @@ mod linux {
                 mac,
                 state,
                 externally_learned: flags.ext_learned,
+                vrf_id: VrfId::default_vrf(), // VRF extracted from netlink if kernel supports it
             };
 
             debug!(

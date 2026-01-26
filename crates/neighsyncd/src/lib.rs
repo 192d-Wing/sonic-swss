@@ -48,20 +48,33 @@
 //! ```
 
 pub mod advanced_health;
+pub mod auto_tuner;
+pub mod distributed_lock;
 pub mod error;
+pub mod grpc_api;
 pub mod health_monitor;
 pub mod metrics;
 pub mod metrics_server;
 pub mod neigh_sync;
 pub mod netlink;
+pub mod profiling;
 pub mod redis_adapter;
+pub mod rest_api;
+pub mod state_replication;
 pub mod tracing_integration;
 pub mod types;
+pub mod vrf;
 
 pub use advanced_health::{
     AdvancedHealthMonitor, DependencyHealth, HealthStatus, HealthThresholds, PerformanceMetrics,
 };
+pub use auto_tuner::{AutoTuner, AutoTuningConfig, TuningMetrics, TuningRecommendation};
+pub use distributed_lock::{DistributedLock, LeaseConfig, LockHolder, LockManager};
 pub use error::{NeighsyncError, Result};
+pub use grpc_api::{
+    ApiError, ConfigInfo, HealthInfo, NeighborInfo, NeighsyncService, QueryParams,
+    RestServerConfig, StatsInfo,
+};
 pub use health_monitor::HealthMonitor;
 pub use metrics::{HealthStatus as MetricsHealthStatus, MetricsCollector};
 pub use metrics_server::{
@@ -69,6 +82,12 @@ pub use metrics_server::{
 };
 pub use neigh_sync::{AsyncNeighSync, NeighSync};
 pub use netlink::{AsyncNetlinkSocket, NetlinkSocket};
+pub use profiling::{AdaptivePerformanceTuner, LatencyStats, PerformanceProfile, Profiler};
 pub use redis_adapter::RedisAdapter;
+pub use rest_api::{ApiErrorResponse, ApiResponse, ListNeighborsQuery, RestApiService};
+pub use state_replication::{
+    ReplicationEventType, ReplicationManager, ReplicationMessage, ReplicationState,
+};
 pub use tracing_integration::{Span, SpanKind, SpanStatus, TracingIntegration};
 pub use types::{MacAddress, NeighborEntry, NeighborMessageType, NeighborState};
+pub use vrf::{VrfConfig, VrfId, VrfInterfaceBinding, VrfManager, VrfRedisKeyGenerator};
