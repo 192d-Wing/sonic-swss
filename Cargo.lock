@@ -3759,6 +3759,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum 0.8.3",
+ "chrono",
  "futures",
  "mockall 0.14.0",
  "netlink-packet-core 0.8.1",
@@ -3817,6 +3818,23 @@ dependencies = [
  "serde",
  "serde_json",
  "sonic-cfgmgr-common",
+ "sonic-orch-common",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "sonic-tunnelmgrd"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "sonic-cfgmgr-common",
+ "sonic-cfgmgr-test",
  "sonic-orch-common",
  "thiserror 2.0.18",
  "tokio",

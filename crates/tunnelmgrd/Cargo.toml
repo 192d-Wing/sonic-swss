@@ -1,0 +1,38 @@
+[package]
+name = "sonic-tunnelmgrd"
+version = "0.1.0"
+edition = "2021"
+description = "Tunnel configuration manager daemon for SONiC"
+license = "Apache-2.0"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+
+# Common cfgmgr infrastructure
+sonic-cfgmgr-common = { path = "../sonic-cfgmgr-common" }
+sonic-orch-common = { path = "../sonic-orch-common" }
+
+[dev-dependencies]
+tokio-test = "0.4"
+sonic-cfgmgr-test = { path = "../sonic-cfgmgr-test" }
+
+[lib]
+name = "sonic_tunnelmgrd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tunnelmgrd"
+path = "src/main.rs"
