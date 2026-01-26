@@ -20,6 +20,7 @@ members = [
     "crates/tunnelmgrd",
     "crates/buffermgrd",
     "crates/coppmgrd",
+    "crates/intfmgrd",
 ]
 exclude = []
 

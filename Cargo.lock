@@ -797,7 +797,7 @@ dependencies = [
  "reqwest-middleware 0.3.3",
  "reqwest-tracing",
  "serial_test",
- "swss-common",
+ "swss-common 0.1.0 (git+https://github.com/sonic-net/sonic-swss-common.git?branch=master)",
  "tempfile",
  "tokio",
  "tokio-stream",
@@ -3633,6 +3633,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sonic-coppmgrd"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "sonic-cfgmgr-common",
+ "sonic-orch-common",
+ "swss-common 0.1.0",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "sonic-fabricmgrd"
 version = "0.1.0"
 dependencies = [
@@ -3658,6 +3674,20 @@ dependencies = [
  "sonic-sai",
  "sonic-types",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "sonic-intfmgrd"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "sonic-cfgmgr-common",
+ "sonic-orch-common",
+ "sonic-types",
+ "swss-common 0.1.0",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -3720,7 +3750,7 @@ dependencies = [
  "serde",
  "sonic-sai",
  "sonic-types",
- "swss-common",
+ "swss-common 0.1.0 (git+https://github.com/sonic-net/sonic-swss-common.git?branch=master)",
  "thiserror 1.0.69",
  "tokio",
 ]
@@ -3741,7 +3771,7 @@ dependencies = [
  "sonic-orch-common",
  "sonic-sai",
  "sonic-types",
- "swss-common",
+ "swss-common 0.1.0 (git+https://github.com/sonic-net/sonic-swss-common.git?branch=master)",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -3943,6 +3973,18 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "swss-common"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "getset",
+ "lazy_static",
+ "libc",
+ "serde",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "swss-common"

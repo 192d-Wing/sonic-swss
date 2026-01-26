@@ -1,0 +1,25 @@
+[package]
+name = "sonic-intfmgrd"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "intfmgrd"
+path = "src/main.rs"
+
+[lib]
+name = "sonic_intfmgrd"
+path = "src/lib.rs"
+
+[dependencies]
+sonic-cfgmgr-common = { path = "../sonic-cfgmgr-common" }
+sonic-orch-common = { path = "../sonic-orch-common" }
+sonic-types = { path = "../../../sonic-common/sonic-types" }
+swss-common = { path = "../../../sonic-buildimage/src/sonic-swss-common/crates/swss-common" }
+
+async-trait = "0.1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[dev-dependencies]
