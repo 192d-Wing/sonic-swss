@@ -18,7 +18,7 @@ name = "sonic_orchagent"
 path = "src/lib.rs"
 
 [dependencies]
-sonic-types = { path = "../sonic-types" }
+sonic-types = { workspace = true }
 sonic-sai = { path = "../sonic-sai" }
 sonic-orch-common = { path = "../sonic-orch-common" }
 sonic-ffi-bridge = { path = "../sonic-ffi-bridge" }

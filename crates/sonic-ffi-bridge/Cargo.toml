@@ -10,7 +10,7 @@ edition.workspace = true
 description = "FFI bridge for C++/Rust interop during SONiC orchagent migration"
 
 [dependencies]
-sonic-types = { path = "../sonic-types" }
+sonic-types = { workspace = true }
 sonic-sai = { path = "../sonic-sai" }
 log.workspace = true
 thiserror.workspace = true

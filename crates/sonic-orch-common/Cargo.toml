@@ -10,7 +10,7 @@ edition.workspace = true
 description = "Common orchestration abstractions for SONiC (Orch trait, Consumer, SyncMap)"
 
 [dependencies]
-sonic-types = { path = "../sonic-types" }
+sonic-types = { workspace = true }
 sonic-sai = { path = "../sonic-sai" }
 swss-common = { workspace = true, optional = true }
 redis = { version = "0.28", features = ["tokio-comp", "connection-manager"], optional = true }

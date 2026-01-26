@@ -33,7 +33,12 @@ parking_lot = "0.12"
 futures = "0.3"
 async-trait = "0.1"
 
-# Redis client for SWSS database (Phase 5 Week 1)
+# SONiC common libraries
+sonic-types = { workspace = true }
+sonic-redis = { workspace = true }
+sonic-config = { workspace = true }
+
+# Redis client for SWSS database (used by sonic-redis)
 redis = { version = "1", features = ["tokio-comp", "connection-manager"] }
 
 # Systemd integration (Phase 5 Week 3)
@@ -45,6 +50,7 @@ axum = "0.8"
 
 # Netlink for kernel socket integration (Phase 5 Week 2) - Linux only
 [target.'cfg(target_os = "linux")'.dependencies]
+sonic-netlink = { workspace = true }
 netlink-packet-route = "0.28"
 netlink-packet-core = "0.8"
 netlink-sys = { workspace = true }

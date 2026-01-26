@@ -11,7 +11,7 @@ description = "Safe Rust bindings for SAI (Switch Abstraction Interface)"
 build = "build.rs"
 
 [dependencies]
-sonic-types = { path = "../sonic-types" }
+sonic-types = { workspace = true }
 thiserror.workspace = true
 log.workspace = true
 
