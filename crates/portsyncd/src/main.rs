@@ -5,6 +5,7 @@
 
 use sonic_portsyncd::{
     LinkSync, MetricsCollector, MetricsServer, MetricsServerConfig, PortsyncError, RedisAdapter,
+    audit_error, audit_port_init, audit_port_init_done, audit_shutdown, init_portsyncd_auditing,
     load_port_config, send_port_config_done, send_port_init_done,
 };
 use std::sync::Arc;
@@ -60,6 +61,12 @@ fn init_logging() -> Result<(), PortsyncError> {
 
 /// Main daemon loop with full orchestration
 async fn run_daemon() -> Result<(), PortsyncError> {
+    // Initialize NIST SP 800-53 Rev5 audit logging
+    // NIST: AU-12 - Audit Generation, AU-3 - Content of Audit Records
+    init_portsyncd_auditing()
+        .map_err(|e| PortsyncError::Other(format!("Failed to initialize audit logging: {}", e)))?;
+    eprintln!("portsyncd: NIST audit logging initialized");
+
     // Setup signal handlers for graceful shutdown
     let shutdown = setup_signal_handlers();
 
@@ -123,11 +130,14 @@ async fn run_daemon() -> Result<(), PortsyncError> {
     // Create LinkSync daemon and initialize with port names
     let mut link_sync = LinkSync::new()?;
     let port_names: Vec<String> = port_configs.iter().map(|p| p.name.clone()).collect();
-    link_sync.initialize_ports(port_names);
+    link_sync.initialize_ports(port_names.clone());
     eprintln!(
         "portsyncd: Initialized LinkSync with {} ports",
         link_sync.uninitialized_count()
     );
+
+    // Log port initialization start (NIST: AU-12, SI-4)
+    audit_port_init(port_names.len());
 
     // Main event loop - simulate receiving netlink events
     // In production, this would connect to kernel netlink socket
@@ -153,11 +163,15 @@ async fn run_daemon() -> Result<(), PortsyncError> {
                     drop(timer);
                     link_sync.set_port_init_done();
                     eprintln!("portsyncd: Sent PortInitDone signal");
+                    // Log port initialization completion (NIST: AU-12, SI-4)
+                    audit_port_init_done();
                 }
                 Err(e) => {
                     metrics.record_event_failure();
                     drop(timer);
                     eprintln!("portsyncd: Failed to send PortInitDone: {}", e);
+                    // Log port initialization failure (NIST: SI-11 - Error Handling)
+                    audit_error(&e.to_string(), "port_init_done_failed");
                 }
             }
         }
@@ -165,6 +179,9 @@ async fn run_daemon() -> Result<(), PortsyncError> {
 
     // Graceful shutdown
     eprintln!("portsyncd: Performing graceful shutdown");
+
+    // Log graceful shutdown (NIST: CP-10 - System Recovery, AU-12 - Audit Generation)
+    audit_shutdown("daemon_shutdown_signal_received");
 
     // Attempt graceful shutdown of metrics server
     drop(metrics_server_handle);

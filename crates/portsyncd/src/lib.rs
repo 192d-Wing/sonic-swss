@@ -7,6 +7,7 @@
 //! NIST 800-53 Rev5 [SI-4]: System Monitoring - Real-time port state monitoring
 
 pub mod alerting;
+pub mod audit_integration;
 pub mod config;
 pub mod config_file;
 pub mod eoiu_detector;
@@ -27,6 +28,10 @@ pub mod warm_restart;
 pub use alerting::{
     Alert, AlertAction, AlertCondition, AlertRule, AlertSeverity, AlertState, AlertingEngine,
     create_default_alert_rules,
+};
+pub use audit_integration::{
+    audit_database_operation, audit_error, audit_port_config_change, audit_port_init,
+    audit_port_init_done, audit_port_state_change, audit_shutdown, init_portsyncd_auditing,
 };
 pub use config::*;
 pub use config_file::{HealthConfig, PerformanceConfig, PortsyncConfig};

@@ -37,6 +37,10 @@ async-trait = "0.1"
 sonic-types = { workspace = true }
 sonic-redis = { workspace = true }
 sonic-config = { workspace = true }
+sonic-audit = { workspace = true }
+
+# Time utilities
+chrono = { workspace = true }
 
 # Redis client for SWSS database (used by sonic-redis)
 redis = { version = "1", features = ["tokio-comp", "connection-manager"] }
