@@ -6,10 +6,10 @@ use swss_common::{CxxString, DbConnector};
 use tokio::{select, sync::mpsc::Receiver, time::interval};
 
 use crate::message::saistats::SAIStatsMessage;
-use crate::utilities::{record_comm_stats, ChannelLabel};
 use crate::sai::{
     SaiBufferPoolStat, SaiIngressPriorityGroupStat, SaiObjectType, SaiPortStat, SaiQueueStat,
 };
+use crate::utilities::{record_comm_stats, ChannelLabel};
 
 /// Unix socket path for Redis connection
 #[allow(dead_code)] // Used in new() method but Rust may not detect it in all build configurations

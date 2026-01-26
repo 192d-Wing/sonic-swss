@@ -1,5 +1,4 @@
 /// Utility helpers shared across countersyncd modules.
-
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -108,9 +107,7 @@ static COMM_STATS: Lazy<Mutex<HashMap<ChannelLabel, CommStats>>> =
 
 /// Records a communication channel length sample and logs periodically.
 pub fn record_comm_stats(label: ChannelLabel, channel_len: usize) {
-    let mut stats_map = COMM_STATS
-        .lock()
-        .expect("COMM_STATS mutex poisoned");
+    let mut stats_map = COMM_STATS.lock().expect("COMM_STATS mutex poisoned");
 
     let stats = stats_map.entry(label).or_insert_with(CommStats::default);
 
@@ -176,9 +173,7 @@ pub fn record_comm_stats(label: ChannelLabel, channel_len: usize) {
 /// Sets channel capacity for utilization analysis (optional).
 /// Call this once during initialization if capacity is known.
 pub fn set_comm_capacity(label: ChannelLabel, capacity: usize) {
-    let mut stats_map = COMM_STATS
-        .lock()
-        .expect("COMM_STATS mutex poisoned");
+    let mut stats_map = COMM_STATS.lock().expect("COMM_STATS mutex poisoned");
     let stats = stats_map.entry(label).or_insert_with(CommStats::default);
     stats.capacity = capacity;
 }
