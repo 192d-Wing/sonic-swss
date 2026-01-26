@@ -48,6 +48,16 @@ pub enum NeighsyncError {
     /// NIST: SI-11 (Error Handling) - System-level errors
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    /// State replication error
+    /// NIST: SC-8 (Transmission Confidentiality) - Distributed state coordination
+    #[error("State replication error: {0}")]
+    Replication(String),
+
+    /// Distributed lock acquisition failed
+    /// NIST: AC-3 (Access Enforcement) - Lock-based access control
+    #[error("Failed to acquire distributed lock: {0}")]
+    LockAcquisitionFailed(String),
 }
 
 /// Result type alias for neighsyncd operations

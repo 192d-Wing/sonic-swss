@@ -360,7 +360,8 @@ mod tests {
     fn test_health_monitor_creation() {
         let monitor = AdvancedHealthMonitor::new(HealthThresholds::default());
         assert_eq!(monitor.get_current_status(), HealthStatus::Healthy);
-        assert!(monitor.time_since_last_event() >= 0);
+        // time_since_last_event is always >= 0 for u64
+        let _ = monitor.time_since_last_event();
     }
 
     #[test]
