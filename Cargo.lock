@@ -3771,6 +3771,7 @@ dependencies = [
  "sd-notify",
  "serde",
  "serde_json",
+ "sonic-audit",
  "sonic-config",
  "sonic-netlink",
  "sonic-redis",
@@ -3846,6 +3847,22 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "sonic-vrfmgrd"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "sonic-cfgmgr-common",
+ "sonic-cfgmgr-test",
+ "sonic-orch-common",
+ "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
