@@ -15,7 +15,7 @@ use tracing::{debug, info, instrument, warn};
 
 // NIST SP 800-53 Rev5 compliant audit logging
 use sonic_audit::{
-    audit_log, info_audit, warn_audit, error_audit,
+    audit_log, info_audit, error_audit,
     AuditRecord, AuditCategory, AuditOutcome,
 };
 
@@ -78,6 +78,21 @@ impl NeighSync {
         sync.is_dual_tor = sync.redis.is_dual_tor().await?;
         info!(is_dual_tor = sync.is_dual_tor, "Detected deployment type");
 
+        // NIST: CM-6, CM-8 - Audit configuration detection
+        audit_log!(
+            AuditRecord::new(
+                AuditCategory::ConfigurationManagement,
+                "neighsyncd",
+                "config_detection"
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_type("system_configuration")
+            .with_details(serde_json::json!({
+                "deployment_type": if sync.is_dual_tor { "dual-tor" } else { "standard" },
+                "is_dual_tor": sync.is_dual_tor,
+            }))
+        );
+
         Ok(sync)
     }
 
@@ -98,6 +113,20 @@ impl NeighSync {
             info!(
                 cached_count = self.warm_restart.cached_neighbors.len(),
                 "Warm restart initiated, cached existing neighbors"
+            );
+            // NIST: CP-10 - Audit warm restart initiation
+            audit_log!(
+                AuditRecord::new(
+                    AuditCategory::HighAvailability,
+                    "neighsyncd",
+                    "warm_restart_start"
+                )
+                .with_outcome(AuditOutcome::InProgress)
+                .with_object_type("warm_restart")
+                .with_details(serde_json::json!({
+                    "cached_neighbors_count": self.warm_restart.cached_neighbors.len(),
+                    "operation": "warm_restart_initiated",
+                }))
             );
         }
 
@@ -122,11 +151,32 @@ impl NeighSync {
                     elapsed_secs = start.elapsed().as_secs(),
                     "Neighbor restore completed"
                 );
+                // NIST: CP-10 - Audit successful restore completion
+                audit_log!(
+                    AuditRecord::new(
+                        AuditCategory::HighAvailability,
+                        "neighsyncd",
+                        "warm_restart_restore_complete"
+                    )
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_type("warm_restart")
+                    .with_details(serde_json::json!({
+                        "elapsed_seconds": start.elapsed().as_secs(),
+                        "operation": "neighbor_restore_completed",
+                    }))
+                );
                 return Ok(());
             }
 
             let elapsed = start.elapsed().as_secs();
             if elapsed > RESTORE_NEIGH_WAIT_TIMEOUT_SECS {
+                // NIST: CP-10 - Audit restore timeout failure
+                error_audit!(
+                    "neighsyncd",
+                    elapsed_secs = elapsed,
+                    timeout = RESTORE_NEIGH_WAIT_TIMEOUT_SECS,
+                    "Warm restart neighbor restore timeout"
+                );
                 return Err(NeighsyncError::WarmRestartTimeout(elapsed));
             }
 
@@ -225,12 +275,95 @@ impl NeighSync {
         // Execute batched Redis operations
         if !batch_sets.is_empty() {
             info!(count = batch_sets.len(), "Batch setting neighbors");
-            self.redis.set_neighbors_batch(&batch_sets).await?;
+            match self.redis.set_neighbors_batch(&batch_sets).await {
+                Ok(()) => {
+                    // NIST: AU-12 - Audit successful batch operation
+                    info_audit!(
+                        "neighsyncd",
+                        operation = "batch_set",
+                        count = batch_sets.len(),
+                        "Batch neighbor set operation completed"
+                    );
+                    // Log detailed audit record for batch
+                    audit_log!(
+                        AuditRecord::new(
+                            AuditCategory::NetworkRouting,
+                            "neighsyncd",
+                            "neighbor_batch_add"
+                        )
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_type("neighbor_batch")
+                        .with_details(serde_json::json!({
+                            "operation": "batch_set",
+                            "count": batch_sets.len(),
+                            "entries": batch_sets.iter().take(10).map(|e| {
+                                serde_json::json!({
+                                    "interface": e.interface,
+                                    "ip": e.ip.to_string(),
+                                    "mac": e.mac.to_string(),
+                                })
+                            }).collect::<Vec<_>>(),
+                            "truncated": batch_sets.len() > 10,
+                        }))
+                    );
+                }
+                Err(e) => {
+                    error_audit!(
+                        "neighsyncd",
+                        operation = "batch_set",
+                        count = batch_sets.len(),
+                        error = %e,
+                        "Batch neighbor set operation failed"
+                    );
+                    return Err(e);
+                }
+            }
         }
 
         if !batch_deletes.is_empty() {
             info!(count = batch_deletes.len(), "Batch deleting neighbors");
-            self.redis.delete_neighbors_batch(&batch_deletes).await?;
+            match self.redis.delete_neighbors_batch(&batch_deletes).await {
+                Ok(()) => {
+                    // NIST: AU-12 - Audit successful batch deletion
+                    info_audit!(
+                        "neighsyncd",
+                        operation = "batch_delete",
+                        count = batch_deletes.len(),
+                        "Batch neighbor delete operation completed"
+                    );
+                    // Log detailed audit record for batch
+                    audit_log!(
+                        AuditRecord::new(
+                            AuditCategory::NetworkRouting,
+                            "neighsyncd",
+                            "neighbor_batch_delete"
+                        )
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_type("neighbor_batch")
+                        .with_details(serde_json::json!({
+                            "operation": "batch_delete",
+                            "count": batch_deletes.len(),
+                            "entries": batch_deletes.iter().take(10).map(|e| {
+                                serde_json::json!({
+                                    "interface": e.interface,
+                                    "ip": e.ip.to_string(),
+                                })
+                            }).collect::<Vec<_>>(),
+                            "truncated": batch_deletes.len() > 10,
+                        }))
+                    );
+                }
+                Err(e) => {
+                    error_audit!(
+                        "neighsyncd",
+                        operation = "batch_delete",
+                        count = batch_deletes.len(),
+                        error = %e,
+                        "Batch neighbor delete operation failed"
+                    );
+                    return Err(e);
+                }
+            }
         }
 
         Ok(total)
@@ -490,6 +623,24 @@ impl NeighSync {
         self.warm_restart.cached_neighbors.clear();
 
         info!("Warm restart reconciliation complete");
+
+        // NIST: CP-10 - Audit successful reconciliation completion
+        audit_log!(
+            AuditRecord::new(
+                AuditCategory::HighAvailability,
+                "neighsyncd",
+                "warm_restart_reconcile_complete"
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_type("warm_restart")
+            .with_details(serde_json::json!({
+                "set_count": batch_sets.len(),
+                "delete_count": batch_deletes.len(),
+                "total_reconciled": batch_sets.len() + batch_deletes.len(),
+                "operation": "reconciliation_completed",
+            }))
+        );
+
         Ok(())
     }
 
@@ -544,6 +695,21 @@ impl AsyncNeighSync {
         sync.is_dual_tor = sync.redis.is_dual_tor().await?;
         info!(is_dual_tor = sync.is_dual_tor, "Detected deployment type");
 
+        // NIST: CM-6, CM-8 - Audit configuration detection
+        audit_log!(
+            AuditRecord::new(
+                AuditCategory::ConfigurationManagement,
+                "neighsyncd",
+                "config_detection"
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_type("system_configuration")
+            .with_details(serde_json::json!({
+                "deployment_type": if sync.is_dual_tor { "dual-tor" } else { "standard" },
+                "is_dual_tor": sync.is_dual_tor,
+            }))
+        );
+
         Ok(sync)
     }
 
@@ -557,6 +723,20 @@ impl AsyncNeighSync {
             info!(
                 cached_count = self.warm_restart.cached_neighbors.len(),
                 "Warm restart initiated, cached existing neighbors"
+            );
+            // NIST: CP-10 - Audit warm restart initiation
+            audit_log!(
+                AuditRecord::new(
+                    AuditCategory::HighAvailability,
+                    "neighsyncd",
+                    "warm_restart_start"
+                )
+                .with_outcome(AuditOutcome::InProgress)
+                .with_object_type("warm_restart")
+                .with_details(serde_json::json!({
+                    "cached_neighbors_count": self.warm_restart.cached_neighbors.len(),
+                    "operation": "warm_restart_initiated",
+                }))
             );
         }
 
@@ -578,11 +758,32 @@ impl AsyncNeighSync {
                     elapsed_secs = start.elapsed().as_secs(),
                     "Neighbor restore completed"
                 );
+                // NIST: CP-10 - Audit successful restore completion
+                audit_log!(
+                    AuditRecord::new(
+                        AuditCategory::HighAvailability,
+                        "neighsyncd",
+                        "warm_restart_restore_complete"
+                    )
+                    .with_outcome(AuditOutcome::Success)
+                    .with_object_type("warm_restart")
+                    .with_details(serde_json::json!({
+                        "elapsed_seconds": start.elapsed().as_secs(),
+                        "operation": "neighbor_restore_completed",
+                    }))
+                );
                 return Ok(());
             }
 
             let elapsed = start.elapsed().as_secs();
             if elapsed > RESTORE_NEIGH_WAIT_TIMEOUT_SECS {
+                // NIST: CP-10 - Audit restore timeout failure
+                error_audit!(
+                    "neighsyncd",
+                    elapsed_secs = elapsed,
+                    timeout = RESTORE_NEIGH_WAIT_TIMEOUT_SECS,
+                    "Warm restart neighbor restore timeout"
+                );
                 return Err(NeighsyncError::WarmRestartTimeout(elapsed));
             }
 
@@ -670,12 +871,95 @@ impl AsyncNeighSync {
 
         if !batch_sets.is_empty() {
             info!(count = batch_sets.len(), "Batch setting neighbors");
-            self.redis.set_neighbors_batch(&batch_sets).await?;
+            match self.redis.set_neighbors_batch(&batch_sets).await {
+                Ok(()) => {
+                    // NIST: AU-12 - Audit successful batch operation
+                    info_audit!(
+                        "neighsyncd",
+                        operation = "batch_set",
+                        count = batch_sets.len(),
+                        "Batch neighbor set operation completed"
+                    );
+                    // Log detailed audit record for batch
+                    audit_log!(
+                        AuditRecord::new(
+                            AuditCategory::NetworkRouting,
+                            "neighsyncd",
+                            "neighbor_batch_add"
+                        )
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_type("neighbor_batch")
+                        .with_details(serde_json::json!({
+                            "operation": "batch_set",
+                            "count": batch_sets.len(),
+                            "entries": batch_sets.iter().take(10).map(|e| {
+                                serde_json::json!({
+                                    "interface": e.interface,
+                                    "ip": e.ip.to_string(),
+                                    "mac": e.mac.to_string(),
+                                })
+                            }).collect::<Vec<_>>(),
+                            "truncated": batch_sets.len() > 10,
+                        }))
+                    );
+                }
+                Err(e) => {
+                    error_audit!(
+                        "neighsyncd",
+                        operation = "batch_set",
+                        count = batch_sets.len(),
+                        error = %e,
+                        "Batch neighbor set operation failed"
+                    );
+                    return Err(e);
+                }
+            }
         }
 
         if !batch_deletes.is_empty() {
             info!(count = batch_deletes.len(), "Batch deleting neighbors");
-            self.redis.delete_neighbors_batch(&batch_deletes).await?;
+            match self.redis.delete_neighbors_batch(&batch_deletes).await {
+                Ok(()) => {
+                    // NIST: AU-12 - Audit successful batch deletion
+                    info_audit!(
+                        "neighsyncd",
+                        operation = "batch_delete",
+                        count = batch_deletes.len(),
+                        "Batch neighbor delete operation completed"
+                    );
+                    // Log detailed audit record for batch
+                    audit_log!(
+                        AuditRecord::new(
+                            AuditCategory::NetworkRouting,
+                            "neighsyncd",
+                            "neighbor_batch_delete"
+                        )
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_type("neighbor_batch")
+                        .with_details(serde_json::json!({
+                            "operation": "batch_delete",
+                            "count": batch_deletes.len(),
+                            "entries": batch_deletes.iter().take(10).map(|e| {
+                                serde_json::json!({
+                                    "interface": e.interface,
+                                    "ip": e.ip.to_string(),
+                                })
+                            }).collect::<Vec<_>>(),
+                            "truncated": batch_deletes.len() > 10,
+                        }))
+                    );
+                }
+                Err(e) => {
+                    error_audit!(
+                        "neighsyncd",
+                        operation = "batch_delete",
+                        count = batch_deletes.len(),
+                        error = %e,
+                        "Batch neighbor delete operation failed"
+                    );
+                    return Err(e);
+                }
+            }
         }
 
         Ok(total)
@@ -754,20 +1038,86 @@ impl AsyncNeighSync {
         }
 
         if is_delete {
-            self.redis.delete_neighbor(&entry).await?;
-            info!(
-                interface = %entry.interface,
-                ip = %entry.ip,
-                "Deleted neighbor"
-            );
+            // NIST: AU-12 - Audit neighbor deletion
+            match self.redis.delete_neighbor(&entry).await {
+                Ok(()) => {
+                    info!(
+                        interface = %entry.interface,
+                        ip = %entry.ip,
+                        "Deleted neighbor"
+                    );
+                    // Audit successful deletion - NetworkRouting category
+                    audit_log!(
+                        AuditRecord::new(
+                            AuditCategory::NetworkRouting,
+                            "neighsyncd",
+                            "neighbor_delete"
+                        )
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_id(format!("{}:{}", entry.interface, entry.ip))
+                        .with_object_type("neighbor_entry")
+                        .with_details(serde_json::json!({
+                            "interface": entry.interface,
+                            "ip_address": entry.ip.to_string(),
+                            "mac_address": entry.mac.to_string(),
+                            "state": format!("{:?}", entry.state),
+                        }))
+                    );
+                }
+                Err(e) => {
+                    // NIST: AU-12, SI-11 - Audit deletion failure
+                    error_audit!(
+                        "neighsyncd",
+                        interface = %entry.interface,
+                        ip = %entry.ip,
+                        error = %e,
+                        "Failed to delete neighbor"
+                    );
+                    return Err(e);
+                }
+            }
         } else {
-            self.redis.set_neighbor(&entry).await?;
-            info!(
-                interface = %entry.interface,
-                ip = %entry.ip,
-                mac = %entry.mac,
-                "Set neighbor"
-            );
+            // NIST: AU-12 - Audit neighbor addition/update
+            match self.redis.set_neighbor(&entry).await {
+                Ok(()) => {
+                    info!(
+                        interface = %entry.interface,
+                        ip = %entry.ip,
+                        mac = %entry.mac,
+                        "Set neighbor"
+                    );
+                    // Audit successful add/update - NetworkRouting category
+                    audit_log!(
+                        AuditRecord::new(
+                            AuditCategory::NetworkRouting,
+                            "neighsyncd",
+                            "neighbor_add"
+                        )
+                        .with_outcome(AuditOutcome::Success)
+                        .with_object_id(format!("{}:{}", entry.interface, entry.ip))
+                        .with_object_type("neighbor_entry")
+                        .with_details(serde_json::json!({
+                            "interface": entry.interface,
+                            "ip_address": entry.ip.to_string(),
+                            "mac_address": entry.mac.to_string(),
+                            "state": format!("{:?}", entry.state),
+                            "externally_learned": entry.externally_learned,
+                        }))
+                    );
+                }
+                Err(e) => {
+                    // NIST: AU-12, SI-11 - Audit add/update failure
+                    error_audit!(
+                        "neighsyncd",
+                        interface = %entry.interface,
+                        ip = %entry.ip,
+                        mac = %entry.mac,
+                        error = %e,
+                        "Failed to set neighbor"
+                    );
+                    return Err(e);
+                }
+            }
         }
 
         Ok(())
@@ -832,6 +1182,24 @@ impl AsyncNeighSync {
         self.warm_restart.cached_neighbors.clear();
 
         info!("Warm restart reconciliation complete");
+
+        // NIST: CP-10 - Audit successful reconciliation completion
+        audit_log!(
+            AuditRecord::new(
+                AuditCategory::HighAvailability,
+                "neighsyncd",
+                "warm_restart_reconcile_complete"
+            )
+            .with_outcome(AuditOutcome::Success)
+            .with_object_type("warm_restart")
+            .with_details(serde_json::json!({
+                "set_count": batch_sets.len(),
+                "delete_count": batch_deletes.len(),
+                "total_reconciled": batch_sets.len() + batch_deletes.len(),
+                "operation": "reconciliation_completed",
+            }))
+        );
+
         Ok(())
     }
 

@@ -27,10 +27,8 @@ use tracing_subscriber::FmtSubscriber;
 // NIST SP 800-53 Rev5 compliant audit logging
 use sonic_audit::{
     init_global_auditor, AuditorConfig, Facility,
-    backends::{SyslogBackend, MultiBackend, WriteStrategy},
+    backends::{SyslogBackend, MultiBackend, WriteStrategy, RedisBackend},
 };
-#[cfg(feature = "redis")]
-use sonic_audit::backends::RedisBackend;
 
 /// Default Redis connection settings
 /// NIST: CM-6 - Configuration settings
@@ -57,14 +55,48 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     info!("neighsyncd: Starting neighbor synchronization daemon");
 
+    // Audit daemon startup
+    sonic_audit::audit_log!(
+        sonic_audit::AuditRecord::new(
+            sonic_audit::AuditCategory::AuditAccountability,
+            "neighsyncd",
+            "daemon_start"
+        )
+        .with_outcome(sonic_audit::AuditOutcome::Success)
+        .with_object_type("daemon_lifecycle")
+        .with_details(serde_json::json!({
+            "pid": std::process::id(),
+            "version": env!("CARGO_PKG_VERSION"),
+        }))
+    );
+
     // Run daemon with signal handling
     match run_daemon().await {
         Ok(()) => {
             info!("neighsyncd: Daemon exiting normally");
+            // Audit graceful shutdown
+            sonic_audit::audit_log!(
+                sonic_audit::AuditRecord::new(
+                    sonic_audit::AuditCategory::AuditAccountability,
+                    "neighsyncd",
+                    "daemon_stop"
+                )
+                .with_outcome(sonic_audit::AuditOutcome::Success)
+                .with_object_type("daemon_lifecycle")
+                .with_details(serde_json::json!({
+                    "shutdown_reason": "graceful",
+                }))
+            );
             Ok(())
         }
         Err(e) => {
             error!(error = %e, "neighsyncd: Daemon exiting with error");
+            // Audit error shutdown
+            sonic_audit::error_audit!(
+                "neighsyncd",
+                error = %e,
+                "Daemon exiting with error"
+            );
             Err(Box::new(e) as Box<dyn std::error::Error>)
         }
     }
@@ -119,17 +151,15 @@ async fn init_audit_framework() -> std::result::Result<(), Box<dyn std::error::E
     info!("neighsyncd: Initialized syslog audit backend (Facility::Local0)");
 
     // 2. Redis backend - persistent storage (AU-4, AU-11)
-    #[cfg(feature = "redis")]
-    {
-        let mut redis_backend = RedisBackend::new(6, "AUDIT_LOG", 10000);
-        match redis_backend.connect(REDIS_HOST, REDIS_PORT).await {
-            Ok(()) => {
-                multi.add_backend(Arc::new(redis_backend));
-                info!("neighsyncd: Initialized Redis audit backend (StateDB, max 10k entries)");
-            }
-            Err(e) => {
-                warn!(error = %e, "neighsyncd: Failed to connect Redis audit backend, continuing without persistence");
-            }
+    // Note: sonic-audit includes RedisBackend when compiled with the "full" feature
+    let mut redis_backend = RedisBackend::new(6, "AUDIT_LOG", 10000);
+    match redis_backend.connect(REDIS_HOST, REDIS_PORT).await {
+        Ok(()) => {
+            multi.add_backend(Arc::new(redis_backend));
+            info!("neighsyncd: Initialized Redis audit backend (StateDB, max 10k entries)");
+        }
+        Err(e) => {
+            warn!(error = %e, "neighsyncd: Failed to connect Redis audit backend, continuing without persistence");
         }
     }
 
@@ -285,6 +315,13 @@ async fn run_daemon() -> Result<()> {
     // NIST: CM-8 - Initial inventory
     neigh_sync.request_dump()?;
     info!("neighsyncd: Listening to neighbor events (async epoll mode)...");
+
+    // Audit initial neighbor dump request
+    sonic_audit::info_audit!(
+        "neighsyncd",
+        operation = "neighbor_dump_request",
+        "Initial neighbor table dump requested"
+    );
 
     // Main event loop - true async, no polling!
     // NIST: SI-4 - Continuous monitoring
